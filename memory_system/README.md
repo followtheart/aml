@@ -34,11 +34,21 @@ pip install -r requirements.txt
 # 离线契约自测（无需任何 API key）
 AML_FAKE=1 AML_API_KEY=testkey python scripts/selftest_contract.py
 
-# 启动服务（生产：配置真实模型）
+# 启动服务（生产：配置真实模型，详见 .env.example）
 export AML_API_KEY=<memory-system-key>        # 平台调用时的鉴权
+
+# 方案 A：OpenAI（第一期默认）
 export AML_LLM_MODEL=gpt-4o-mini              # litellm 模型串，可换
 export AML_EMBED_MODEL=text-embedding-3-small
-export OPENAI_API_KEY=<...>                   # litellm 读取的供应商密钥
+export OPENAI_API_KEY=<...>
+
+# 方案 B：SiliconFlow
+# export AML_LLM_MODEL=siliconflow/Qwen/Qwen2.5-7B-Instruct
+# export SILICONFLOW_API_KEY=<...>
+# export AML_EMBED_MODEL=openai/BAAI/bge-m3
+# export AML_EMBED_API_BASE=https://api.siliconflow.cn/v1
+# export AML_EMBED_API_KEY=<...>
+
 uvicorn app.main:app --host 0.0.0.0 --port 8000
 
 # 本地代理评测（真实打分需要 OPENAI_API_KEY）

@@ -11,7 +11,13 @@ async def embed(texts: List[str]) -> np.ndarray:
     if config.FAKE:
         return np.stack([_hash_embed(t) for t in texts])
     import litellm
-    resp = await litellm.aembedding(model=config.EMBED_MODEL, input=texts)
+    kwargs = {}
+    if config.EMBED_API_BASE:
+        kwargs["api_base"] = config.EMBED_API_BASE
+    if config.EMBED_API_KEY:
+        kwargs["api_key"] = config.EMBED_API_KEY
+    resp = await litellm.aembedding(model=config.EMBED_MODEL, input=texts,
+                                    **kwargs)
     vecs = np.array([d["embedding"] for d in resp["data"]], dtype=np.float32)
     return _fit_dim(vecs)
 

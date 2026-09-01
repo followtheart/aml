@@ -30,10 +30,16 @@ async def complete(prompt: str, system: Optional[str] = None) -> str:
         if system:
             messages.append({"role": "system", "content": system})
         messages.append({"role": "user", "content": prompt})
+        kwargs = {}
+        if config.LLM_API_BASE:
+            kwargs["api_base"] = config.LLM_API_BASE
+        if config.LLM_API_KEY:
+            kwargs["api_key"] = config.LLM_API_KEY
         resp = await litellm.acompletion(
             model=config.LLM_MODEL,
             messages=messages,
             temperature=config.LLM_TEMPERATURE,
+            **kwargs,
         )
         return resp["choices"][0]["message"]["content"]
     except Exception as e:  # pragma: no cover - depends on provider

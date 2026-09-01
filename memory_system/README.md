@@ -28,11 +28,14 @@ data/
 
 ## 快速开始
 
+启动时会自动读取 `memory_system/.env`（也支持当前目录下的
+`.env`），已存在的系统环境变量优先，不会被文件覆盖。
+
 ```bash
 pip install -r requirements.txt
 
-# 离线契约自测（无需任何 API key）
-AML_FAKE=1 AML_API_KEY=testkey python scripts/selftest_contract.py
+# 离线契约自测（自给自足：自动启用 Fake 模式 + 独立临时库，无需任何 env/key）
+python scripts/selftest_contract.py
 
 # 启动服务（生产：配置真实模型，详见 .env.example）
 export AML_API_KEY=<memory-system-key>        # 平台调用时的鉴权
@@ -45,9 +48,9 @@ export OPENAI_API_KEY=<...>
 # 方案 B：SiliconFlow
 # export AML_LLM_MODEL=siliconflow/Qwen/Qwen2.5-7B-Instruct
 # export SILICONFLOW_API_KEY=<...>
-# export AML_EMBED_MODEL=openai/BAAI/bge-m3
-# export AML_EMBED_API_BASE=https://api.siliconflow.cn/v1
-# export AML_EMBED_API_KEY=<...>
+# export AML_EMBED_MODEL=siliconflow/BAAI/bge-m3
+# siliconflow/<model> 会自动使用 https://api.siliconflow.cn/v1
+# 和 SILICONFLOW_API_KEY；无需重复设置 API_BASE/API_KEY。
 
 uvicorn app.main:app --host 0.0.0.0 --port 8000
 

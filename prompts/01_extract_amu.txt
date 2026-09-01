@@ -32,21 +32,7 @@ Extract atomic memory units from the NEW messages only. Rules:
 5. Extract knowledge-graph triples (subject, relation, object) for entities
    mentioned in the facts. Normalize relation labels to lowercase snake_case.
 
-Return ONLY a JSON object:
-{{
-  "facts": [
-    {{
-      "content": "atomic fact sentence",
-      "retrieval_key": "question-form rewrite",
-      "type": "fact|preference|rule|workflow|event|profile",
-      "entities": ["entity1", "entity2"],
-      "keywords": ["keyword1", "keyword2", "keyword3"],
-      "event_time": "ISO-8601 datetime or null",
-      "sensitivity": "normal|sensitive"
-    }}
-  ],
-  "triples": [
-    {{"subject": "...", "relation": "...", "object": "..."}}
-  ]
-}}
-If there is nothing worth remembering, return {{"facts": [], "triples": []}}.
+Call the provided emit_json_result function with the extracted facts and
+triples. Fill every required field from the NEW messages. Never copy schema
+descriptions or placeholder text into a fact. If there is nothing worth
+remembering, use empty facts and triples arrays.

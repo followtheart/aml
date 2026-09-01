@@ -24,7 +24,13 @@ async def _understand(req: schemas.SearchRequest) -> Dict:
         options="\n".join(req.options or []) or "(none)",
         current_time="2026-09-01T00:00:00Z")
     try:
-        return llm.extract_json(await llm.complete(prompt))
+        return await llm.complete_json(
+            prompt,
+            '{"intent":"fact|multi_hop|temporal|preference|rule|'
+            'abstention_check","time_scope":{"from":null,"to":null,'
+            '"note":""},"entities":[],"sub_queries":["..."],'
+            '"expanded_queries":["..."]}',
+            schema=llm.STRUCTURED_SCHEMAS["query"])
     except Exception as e:
         log.warning("query understanding failed (%s); passthrough", e)
         return {"intent": "fact", "time_scope": None,
@@ -93,7 +99,11 @@ async def _filter_rerank(req: schemas.SearchRequest, plan: Dict,
         time_scope=f"{ts.get('from')} ~ {ts.get('to')}" if ts else "(any)",
         candidates=cand_text)
     try:
-        scores = llm.extract_json(await llm.complete(prompt))
+        result = await llm.complete_json(
+            prompt,
+            '{"scores":[{"id":"...","relevance":0.0,"keep":true}]}',
+            schema=llm.STRUCTURED_SCHEMAS["rerank"])
+        scores = result.get("scores", [])
         by_id = {s["id"]: s for s in scores if isinstance(s, dict)}
     except Exception as e:
         log.warning("rerank failed (%s); keep fused order", e)

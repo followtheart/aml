@@ -4,6 +4,7 @@ multi-index write. Synchronous from the caller's point of view.
 """
 import asyncio
 import logging
+import re
 from datetime import datetime, timezone
 from typing import Dict, List
 
@@ -31,24 +32,83 @@ def _embed_text(fact: Dict) -> str:
     return " ".join(p for p in parts if p)
 
 
+def _is_grounded_fact(fact: Dict, source: str) -> bool:
+    """Reject empty/schema-placeholder facts emitted by weak small models."""
+    if not isinstance(fact, dict):
+        return False
+    content = str(fact.get("content") or "").strip()
+    if len(content) < 4:
+        return False
+    source_lower = source.lower()
+    tokens = [t for t in re.findall(r"\w+", content.lower()) if len(t) >= 3]
+    if any(t in source_lower for t in tokens):
+        return True
+    # For CJK text, require at least one source-grounded character bigram.
+    cjk = "".join(re.findall(r"[\u3400-\u9fff]", content))
+    return any(cjk[i:i + 2] in source for i in range(len(cjk) - 1))
+
+
 async def _extract(st: store.Store, req: schemas.AddRequest) -> Dict:
     summary = st.get_summary(req.user_id, req.session_id)
-    recent = _format_messages(req.messages[-4:])
-    prompt = prompts.render(
-        "01_extract_amu.txt",
-        session_summary=summary or "(none yet)",
-        recent_messages=recent,
-        chunk_messages=_format_messages(req.messages),
-        reference_time=_ref_time(req.messages),
-    )
-    try:
-        data = llm.extract_json(await llm.complete(prompt))
-        data.setdefault("facts", [])
-        data.setdefault("triples", [])
-        return data
-    except Exception as e:
-        log.warning("extraction failed (%s); falling back to episode", e)
-        return {"facts": [], "triples": [], "_fallback": True}
+    batch_size = config.EXTRACT_BATCH_MESSAGES
+    facts, triples = [], []
+
+    for start in range(0, len(req.messages), batch_size):
+        batch = req.messages[start:start + batch_size]
+        prior = req.messages[max(0, start - 4):start]
+        prompt = prompts.render(
+            "01_extract_amu.txt",
+            session_summary=summary or "(none yet)",
+            recent_messages=_format_messages(prior) or "(none)",
+            chunk_messages=_format_messages(batch),
+            reference_time=_ref_time(batch),
+        )
+        try:
+            data = await llm.complete_json(
+                prompt,
+                '{"facts":[{"content":"...","retrieval_key":"...",'
+                '"type":"fact","entities":[],"keywords":[],'
+                '"event_time":null,"sensitivity":"normal"}],'
+                '"triples":[{"subject":"...","relation":"...",'
+                '"object":"..."}]}',
+                schema=llm.STRUCTURED_SCHEMAS["extraction"])
+            if not isinstance(data, dict):
+                raise ValueError("extraction result is not a JSON object")
+            raw_facts = data.get("facts") or []
+            grounded = [f for f in raw_facts
+                        if _is_grounded_fact(f, _format_messages(batch))]
+            facts.extend(grounded)
+            triples.extend(t for t in (data.get("triples") or [])
+                           if isinstance(t, dict))
+            if raw_facts and not grounded:
+                log.warning(
+                    "extraction batch %d-%d returned no grounded facts; "
+                    "storing that batch as an episode",
+                    start, start + len(batch) - 1)
+                facts.append({
+                    "content": _format_messages(batch),
+                    "retrieval_key": "Conversation episode",
+                    "type": "episode",
+                    "entities": [],
+                    "keywords": [],
+                    "event_time": None,
+                    "sensitivity": "normal",
+                })
+        except Exception as e:
+            log.warning(
+                "extraction batch %d-%d failed (%s); storing that batch as "
+                "an episode", start, start + len(batch) - 1, e)
+            facts.append({
+                "content": _format_messages(batch),
+                "retrieval_key": "Conversation episode",
+                "type": "episode",
+                "entities": [],
+                "keywords": [],
+                "event_time": None,
+                "sensitivity": "normal",
+            })
+
+    return {"facts": facts, "triples": triples}
 
 
 async def _govern_one(st: store.Store, user_id: str, fact: Dict,
@@ -67,7 +127,11 @@ async def _govern_one(st: store.Store, user_id: str, fact: Dict,
             new_memory=fact["content"],
             neighbor_memories=cand_text)
         try:
-            op = llm.extract_json(await llm.complete(prompt))
+            op = await llm.complete_json(
+                prompt,
+                '{"operation":"ADD|UPDATE|SUPERSEDE|NOOP","target_id":null,'
+                '"merged_content":null,"reason":"..."}',
+                schema=llm.STRUCTURED_SCHEMAS["governance"])
         except Exception:
             op = {"operation": "ADD", "target_id": None,
                   "merged_content": None}

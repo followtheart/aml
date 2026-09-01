@@ -1,10 +1,21 @@
 """Contract self-test (design doc §10.2): idempotency, ID echo, schema,
 auth, empty search, chunk replay, error injection.
 
-Usage: AML_FAKE=1 AML_API_KEY=testkey python scripts/selftest_contract.py
+Self-contained: forces offline Fake mode and its own temp DB, so you can
+just run `python scripts/selftest_contract.py` with no env vars and no keys.
 """
 import os
 import sys
+import tempfile
+
+# Force hermetic offline settings BEFORE importing the app
+os.environ.setdefault("AML_FAKE", "1")
+os.environ["AML_FAKE"] = "1"
+os.environ.setdefault("AML_API_KEY", "testkey")
+_tmp = tempfile.NamedTemporaryFile(suffix=".db", delete=False)
+_tmp.close()
+os.unlink(_tmp.name)  # fresh db every run
+os.environ["AML_DB_PATH"] = _tmp.name
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 

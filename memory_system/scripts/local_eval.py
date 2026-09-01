@@ -103,7 +103,9 @@ async def answer_and_judge(question, gold, memories):
     jp = prompts.render("07_eval_judge.txt", question=question,
                         gold_answer=gold, generated_answer=pred)
     try:
-        verdict = llm.extract_json(await llm.complete(jp))
+        verdict = await llm.complete_json(
+            jp, '{"label":"CORRECT|WRONG"}',
+            schema=llm.STRUCTURED_SCHEMAS["judge"])
         correct = verdict.get("label") == "CORRECT"
     except Exception:
         correct = False

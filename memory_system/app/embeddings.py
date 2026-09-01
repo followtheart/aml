@@ -16,10 +16,20 @@ async def embed(texts: List[str]) -> np.ndarray:
         kwargs["api_base"] = config.EMBED_API_BASE
     if config.EMBED_API_KEY:
         kwargs["api_key"] = config.EMBED_API_KEY
-    resp = await litellm.aembedding(model=config.EMBED_MODEL, input=texts,
-                                    **kwargs)
-    vecs = np.array([d["embedding"] for d in resp["data"]], dtype=np.float32)
-    return _fit_dim(vecs)
+    try:
+        resp = await litellm.aembedding(model=config.EMBED_MODEL, input=texts,
+                                        timeout=60, num_retries=1, **kwargs)
+        vecs = np.array([d["embedding"] for d in resp["data"]],
+                        dtype=np.float32)
+        return _fit_dim(vecs)
+    except Exception as e:
+        # Credential/network failure: degrade to hash embeddings so writes
+        # never hard-fail. Vector space is then hash-based until restart —
+        # acceptable for dev; fix credentials and rebuild for real runs.
+        import logging
+        logging.getLogger("aml.embed").warning(
+            "embedding call failed (%s); falling back to hash embedding", e)
+        return np.stack([_hash_embed(t) for t in texts])
 
 
 def _fit_dim(vecs: np.ndarray) -> np.ndarray:

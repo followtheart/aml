@@ -28,5 +28,6 @@ Scoring rules:
 - When two memories conflict, the more recent valid one scores higher.
 - Memories that merely share keywords but do not inform the answer score low.
 
-Return ONLY a JSON array in the same order as the candidates:
-[{{"id": "...", "relevance": 0.0, "keep": true}}]
+Return ONLY a JSON object. The scores array must use the same order as the
+candidates:
+{{"scores": [{{"id": "...", "relevance": 0.0, "keep": true}}]}}

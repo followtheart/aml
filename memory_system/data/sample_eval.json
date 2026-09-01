@@ -1,0 +1,24 @@
+[
+  {
+    "conversation_id": "demo-0",
+    "sessions": [
+      [
+        {"role": "user", "content": "Hi! I'm Caroline. I just started a new job at a design agency in March 2023.", "timestamp": 1677628800000},
+        {"role": "assistant", "content": "Congrats Caroline! How is the new role?", "timestamp": 1677628860000},
+        {"role": "user", "content": "It's great. I also adopted a cat named Milo last week.", "timestamp": 1677628920000}
+      ],
+      [
+        {"role": "user", "content": "Update: I left the design agency and joined a game studio in June 2023.", "timestamp": 1685577600000},
+        {"role": "assistant", "content": "Nice move! Still enjoying photography?", "timestamp": 1685577660000},
+        {"role": "user", "content": "Yes! I picked up photography in October 2023 actually, after the job switch.", "timestamp": 1685577720000}
+      ]
+    ],
+    "qa": [
+      {"question": "Where does Caroline work as of mid-2023?", "answer": "a game studio", "category": "knowledge-update"},
+      {"question": "When did Caroline pick up photography?", "answer": "October 2023", "category": "temporal"},
+      {"question": "What is the name of Caroline's cat?", "answer": "Milo", "category": "single-hop"},
+      {"question": "What hobby connects to Caroline's life after changing jobs?", "answer": "photography", "category": "multi-hop"},
+      {"question": "What is Caroline's favorite programming language?", "answer": "unknown", "category": "abstention"}
+    ]
+  }
+]

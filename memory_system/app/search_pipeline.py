@@ -30,7 +30,8 @@ async def _understand(req: schemas.SearchRequest) -> Dict:
             'abstention_check","time_scope":{"from":null,"to":null,'
             '"note":""},"entities":[],"sub_queries":["..."],'
             '"expanded_queries":["..."]}',
-            schema=llm.STRUCTURED_SCHEMAS["query"])
+            schema=llm.STRUCTURED_SCHEMAS["query"],
+            stage="search.understand")
     except Exception as e:
         log.warning("query understanding failed (%s); passthrough", e)
         return {"intent": "fact", "time_scope": None,
@@ -60,7 +61,7 @@ async def _recall(st: store.Store, req: schemas.SearchRequest,
     queries = list(dict.fromkeys(
         [req.query] + (plan.get("sub_queries") or []) +
         (plan.get("expanded_queries") or [])))[:6]
-    vecs = await embed(queries)
+    vecs = await embed(queries, stage="search.embed_queries")
     routes: List[List[Dict]] = []
 
     # route 1+3: dense vector over (sub)queries — primary route
@@ -102,7 +103,8 @@ async def _filter_rerank(req: schemas.SearchRequest, plan: Dict,
         result = await llm.complete_json(
             prompt,
             '{"scores":[{"id":"...","relevance":0.0,"keep":true}]}',
-            schema=llm.STRUCTURED_SCHEMAS["rerank"])
+            schema=llm.STRUCTURED_SCHEMAS["rerank"],
+            stage="search.rerank")
         scores = result.get("scores", [])
         by_id = {s["id"]: s for s in scores if isinstance(s, dict)}
     except Exception as e:

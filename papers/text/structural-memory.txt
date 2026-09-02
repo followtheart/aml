@@ -1,0 +1,1286 @@
+On the Structural Memory of LLM Agents
+Ruihong Zeng1∗, Jinyuan Fang1∗, Siwei Liu2†, Zaiqiao Meng1†
+1University of Glasgow 2University of Aberdeen
+zengrh3@gmail.com, j.fang.2@research.gla.ac.uk
+siwei.liu@abdn.ac.uk, zaiqiao.meng@glasgow.ac.uk
+Abstract
+Memory plays a pivotal role in enabling large
+language model (LLM)-based agents to engage
+in complex and long-term interactions, such
+as question answering (QA) and dialogue sys-
+tems. While various memory modules have
+been proposed for these tasks, the impact of
+different memory structures across tasks re-
+mains insufficiently explored. This paper inves-
+tigates how memory structures and memory re-
+trieval methods affect the performance of LLM-
+based agents. Specifically, we evaluate four
+types of memory structures, including chunks,
+knowledge triples, atomic facts, and summaries,
+along with mixed memory that combines these
+components. In addition, we evaluate three
+widely used memory retrieval methods: single-
+step retrieval, reranking, and iterative retrieval.
+Extensive experiments conducted across four
+tasks and six datasets yield the following key
+insights: (1) Different memory structures of-
+fer distinct advantages, enabling them to be
+tailored to specific tasks; (2) Mixed memory
+structures demonstrate remarkable resilience
+in noisy environments; (3) Iterative retrieval
+consistently outperforms other methods across
+various scenarios. Our investigation aims to
+inspire further research into the design of mem-
+ory systems for LLM-based agents. 1
+1 Introduction
+Large Language Models (LLMs) (Minaee et al.,
+2024) have attracted widespread attention in natural
+language tasks due to their remarkable capability.
+Recent advancements have significantly acceler-
+ated the development of LLM-based agents, with
+research primarily focusing on profile (Park et al.,
+2023; Hong et al.), planning (Qian et al., 2024;
+Qiao et al., 2024), action (Qin et al., 2023; Wang
+*Equal contribution.
+†Corresponding author.
+1All code and datasets are publicly available at: https:
+//github.com/zengrh3/StructuralMemory
+Structural
+Memory
+Memory
+Retrieval
+Planning
+Tools
+Action
+User
+External
+Information
+(e.g., Preference,
+Database, 
+Wikipedia,  
+Memory Module
+LLM-based Agents
+self-evolve
+Figure 1: The framework of LLM-based agents, where
+we focus on the study of memory modules, including
+memory structures and retrieval methods.
+et al., 2024c), self-evolving (Zhang et al., 2024a)
+and memory (Packer et al., 2023; Lee et al., 2024).
+These innovations have unlocked a wide range of
+applications across diverse applications (Li et al.,
+2023; Wang et al., 2024b; Chen et al., 2024).
+A fundamental element that underpins the ef-
+fectiveness of LLM-based agents is the memory
+module. In cognitive science (Simon and Newell,
+1971; Anderson, 2013), memory is the cornerstone
+of human cognition, enabling the storage, retrieval,
+and drawing from past experiences for strategic
+thinking and decision-making. Similarly, the mem-
+ory module is vital for LLM-based agents by fa-
+cilitating the retention and organization of past in-
+teractions, supporting complex reasoning capabili-
+ties, e.g., multi-hop question answering (QA) (Li
+et al., 2024a; Lee et al., 2024), and ensuring con-
+sistency and continuity in user interactions (Nuxoll
+and Laird, 2007).
+Developing an effective memory module in
+LLM-based agents typically involves two critical
+components: structural memory generation and
+memory retrieval methods (Wang et al., 2024a;
+Zhang et al., 2024b). Among the various memory
+structures used by agents, chunks (Hu et al., 2024),
+knowledge triples (Anokhin et al., 2024), atomic
+facts (Li et al., 2024a), and summaries (Lee et al.,
+2024) are the most prevalent. For instance, HiA-
+gent (Hu et al., 2024) utilizes sub-goals as memory
+chunks to manage the working memory of LLM-
+arXiv:2412.15266v1  [cs.CL]  17 Dec 2024
+
+based agents, ensuring task continuity and coher-
+ence, while Arigraph (Anokhin et al., 2024) adopts
+knowledge triples, which combine both semantic
+and episodic memories to store factual and detailed
+information, making it suitable for complex reason-
+ing tasks. Meanwhile, ReadAgent (Li et al., 2024a)
+compresses memory episodes into gits memory
+with summaries manner, organizing them within a
+structured memory directory.
+Upon reviewing the aforementioned memory
+structures, an important but under-explored ques-
+tion arises: Which memory structures are best
+suited for specific tasks, and how do their dis-
+tinct characteristics impact the performance of
+LLM-based agents? This question mirrors how
+humans organize memory into distinct forms, such
+as episodic memory for recalling events and seman-
+tic memory for understanding relationships (Simon
+and Newell, 1971; Anderson, 2013). Each form
+serves a unique purpose, enabling humans to tackle
+a variety of challenges with flexibility and preci-
+sion. Moreover, humans rely on effective retrieval
+processes to access relevant memories, ensuring
+the accurate recall of past experiences for problem-
+solving. This highlights the need to jointly ex-
+plore memory structures and retrieval methods to
+enhance the reasoning capabilities and overall ef-
+fectiveness of LLM-based agents.
+To bridge this gap, we systematically explore
+the impact of various memory structures and re-
+trieval methods in LLM-based agents. Specifi-
+cally, we evaluate existing four types of memory
+structures: chunks (Hu et al., 2024), knowledge
+triples (Anokhin et al., 2024),atomic facts (Li et al.,
+2024a), and summaries (Li et al., 2024a). Building
+on these, we explore the potential of mixed mem-
+ory structures, which combine multiple types of
+memories to examine whether their complemen-
+tary characteristics can enhance performance. Ad-
+ditionally, we assess the robustness of these mem-
+ory structures to noise, as understanding their re-
+liability under such conditions is essential for en-
+suring effectiveness across diverse tasks. Further-
+more, we investigate three memory retrieval meth-
+ods, including single-step retrieval (Packer et al.,
+2023), reranking (Gao et al., 2023a), and iterative
+retrieval (Li et al., 2024b), to uncover how differ-
+ent combinations of retrieval methods and memory
+structures influence overall performance.
+The main contributions of this work can be sum-
+marized as follows: (1) We present the first com-
+prehensive study on the impact of memory struc-
+tures and memory retrieval methods in LLM-based
+agents on six datasets across four tasks: multi-hop
+QA, single-hop QA, dialogue understanding, and
+reading comprehension. (2) Our findings reveal
+that mixed memory consistently achieves balanced
+and competitive performance across diverse tasks.
+Chunks and summaries excel in tasks involving ex-
+tensive and lengthy context (e.g., reading compre-
+hension and dialogue understanding), while knowl-
+edge triples and atomic facts are particularly effec-
+tive for relational reasoning and precision in multi-
+hop and single-hop QA. Additionally, mixed mem-
+ory demonstrates remarkable resilience to noise.
+(3) Iterative retrieval stands out as the most effec-
+tive memory retrieval method across most tasks,
+such as multi-hop QA, dialogue understanding and
+reading comprehension.
+2 Related Works
+2.1 LLM-based Agents
+The advent of Large Language Model (LLM)
+has positioned them as a transformative step
+towards achieving Artificial General Intelli-
+gence (AGI) (Wang et al., 2024a), offering robust
+capabilities for the development of LLM-based
+agents (Xi et al., 2023; Xu et al., 2024). Current
+research in this field primarily focuses on agent
+planning (Wang et al., 2023; Yao et al., 2024; Qian
+et al., 2024; Qiao et al., 2024), reflection mech-
+anisms (Shinn et al., 2024; Zhang et al., 2024a),
+external tools utilization (Qin et al., 2023; Wang
+et al., 2024c), self-evolving capabilities (Zhang
+et al., 2024a) and memory modules (Hu et al., 2024;
+Lee et al., 2024).
+2.2 Memory Structures
+Memory module serves as the foundation of LLM-
+based agents, enabling them to structure knowl-
+edge, retrieve relevant information, and leverage
+prior experiences for reasoning tasks (Zhang et al.,
+2024b). Among the widely adopted memory struc-
+tures of memory module are chunks (Packer et al.,
+2023; Liu et al., 2023; Hu et al., 2024), knowl-
+edge triples (Anokhin et al., 2024), atomic facts (Li
+et al., 2024a), and summaries (Lee et al., 2024). For
+instance, HiAgent (Hu et al., 2024) incorporates
+sub-goals as memory chunks to maintain task con-
+tinuity and coherence across interactions. On the
+other hand, GraphReader (Li et al., 2024a) employs
+atomic facts to compress chunks into finer details,
+providing agents with highly granular information
+
+Structural Memory
+Chunks
+Moneybomb (alternatively money bomb,
+money-bomb, or fundraising bomb) is a
+neologism coined in 2007 to describe a
+grassroots fundraising effort over a brief
+fixed time period, ...
+Atomic Facts
+Fact: The massive coordinate online
+donation drive was conducted on behalf of
+presidential candidate Ron Paul.
+Triples
+Supported
+Moneybomb
+Coined Term
+Trevor Lyman Ron Paul
+Summaries
+Summary: Trevor Lyman coined the term
+"moneybomb" to refer to a massive,
+coordinated online donation drive organized
+in support of presidential candidate Ron
+Paul, ...
+The term Moneybomb was
+coined by Trevor Lyman to
+describe a massive online
+donation drive on behalf of
+a presidential candidate
+that was the first chairman
+of what PAC?
+User
+Structural 
+Memory
+ Top-K 
+Retriever
+Single-step Retrieval
+Structural 
+Memory
+ Top-K 
+Retriever
+Top-R
+Rerank
+Rerank Retrieval
+Structural 
+Memory
+ Top-T
+Retriever
+Iterative Retrieval
+Enhanced 
+Query
+LLM
+ N Turns 
+Memory Retrieval
+Raw Information
+Moneybomb (alternatively money bomb,
+money-bomb, or fundraising bomb) is a
+neologism coined in 2007 to describe a
+grassroots fundraising effort over a brief fixed
+time period, usually to support a candidate for
+election by dramatically increasing, ...
+LLM
+Citizens for a Sound Economy
+Response
+Figure 2: Overview of the memory module workflow in LLM-based agents. Raw information is organized into
+structural memories, which are processed through retrieval methods to identify the most relevant memories for the
+query, enabling the generation of precise and contextually enriched responses.
+that improves precision in multi-hop question an-
+swering tasks. In this paper, we investigate how
+various memory structures impact the performance
+of LLM-based agents.
+2.3 Memory Retrieval
+The memory retrieval method is another critical
+component of the memory module, enabling LLM-
+based agents to retrieve relevant memories to ad-
+vanced reasoning. To facilitate this, LLM-based
+agents often employ retrieval-augmented genera-
+tion (RAG) (Lewis et al., 2020; Fang et al., 2024),
+where relevant memories are first retrieved and
+then used to generate answers with LLMs. In
+this setting, the retrieved memories are prepended
+to the queries and serve as input to the LLM to
+generate response (Ram et al., 2023). The most
+straightforward retrieval method is the single-step
+retrieval (Packer et al., 2023; Zhong et al., 2024),
+which aims to identify the Top- K most relevant
+memories for the query. Additionally, rerank-
+ing (Gao et al., 2023a; Ji et al., 2024) leverages
+the language understanding capabilities of LLMs
+to prioritize retrieved memories, while iterative re-
+trieval (Li et al., 2024b; Shi et al., 2024) focuses
+on reformulating queries to improve retrieval ac-
+curacy. These innovations make memory retrieval
+more adaptive and consistent with the query, main-
+taining effective performance across diverse and
+complex tasks. In this paper, we explore how differ-
+ent combinations of retrieval methods and memory
+structures influence overall performance.
+3 Methodology
+Figure 2 illustrates the overview of the memory
+module within LLM-based agents, highlighting
+three key components: Structural Memory Gen-
+eration, Memory Retrieval Methods and Answer
+Generation. This section begins with an introduc-
+tion to structural memory generation in § 3.1. Next,
+we introduce memory retrieval methods in § 3.2.
+Finally, § 3.3 discusses answer generation methods.
+3.1 Structural Memory Generation
+Structural memory generation enables agents to
+organize raw documents into structured represen-
+tations. By transforming unstructured documents
+Dq into structural memory Mq, the agent gains
+the ability to store, retrieve, and reason over infor-
+mation more effectively. In this work, we explore
+four distinct forms of structural memory: chunks
+Cq, knowledge triples Tq, atomic facts Aq, or sum-
+maries Sq. The generation process for each struc-
+tural memory is detailed as follows:
+Chunks (Cq). Chunks (Gao et al., 2023b) are a
+widely used form of structural memory in LLM-
+based agents. Each chunk represents a continuous
+segment of text from a document, typically con-
+strained to a fixed number of tokens L. Formally,
+raw documents Dq can be divided into a series
+of chunks, as defined: Cq(Dq) = {c1, c2, . . . , cj},
+where each chunk cj contains at most L tokens.
+
+Chunks
+Definition: Chunks are continuous, fixed-
+length segments of text from the document.
+Example: Generated chunks Cq:
+(1) Moneybomb (alternatively money bomb,
+money-bomb, or fundraising bomb) is a ne-
+ologism coined in 2007;
+(2) to describe a grassroots fundraising ef-
+fort over a brief fixed time period.
+Knowledge Triples (Tq). Knowledge triples rep-
+resent a structured form of memory that captures
+semantic relationships between entities. Each triple
+is composed of three components: a head entity,
+a relation, and a tail entity, represented in the
+format ⟨head; relation; tail entity⟩. Following pre-
+vious works (Anokhin et al., 2024; Fang et al.,
+2024), raw documentsDq are processed by an LLM
+guided by a tailored prompt PT to generate a set
+of semantic triples Tq. The generation process can
+be formally defined as: Tq = LLM(Dq, PT ).
+Knowledge Triples
+Definition: Knowledge triples capture rela-
+tionships between entities.
+Example: Generated triples Tq:
+(1) ⟨Moneybomb; type; neologism⟩;
+(2) ⟨Moneybomb; coined in; 2007⟩.
+Atomic Facts (Aq). Atomic facts are the small-
+est, indivisible units of information, presented as
+concise sentences that capture essential details.
+They represent a granular form of structural mem-
+ory, simplifying raw documents by preserving
+critical entities, actions, and attributes. Follow-
+ing Li et al. (2024a), atomic facts are generated
+from raw documents Dq using an LLM guided
+by a tailored prompt PA, formally denoted as:
+Aq = LLM(Dq, PA).
+Atomic Facts
+Definition: Atomic facts are the smallest
+units of indivisible information.
+Example: Generated atomic facts Aq:
+(1) Moneybomb is also known as money
+bomb, money-bomb, or fundraising bomb;
+(2) Moneybomb is a neologism.
+Summaries (Sq). Summaries provide a condensed
+and comprehensive description of documents, cap-
+turing both global content and key details. Follow-
+ing Lee et al. (2024), summaries are generated from
+raw documents Dq using an LLM guided by a tai-
+lored prompt PS, defined as: Sq = LLM(Dq, PS).
+Summaries
+Definition: Summaries compress the docu-
+ment into a comprehensive description.
+Example: Generated summaries Sq:
+Moneybomb, alternatively referred to as
+money bomb, money-bomb, or fundraising
+bomb, is a neologism coined in 2007. It de-
+scribes a grassroots fundraising effort that
+occurs over a brief fixed time period.
+Mixed (MMixed
+q ). Mixed memories represent a
+composite form of structural memory, combin-
+ing all the aforementioned types: chunks, knowl-
+edge triples, atomic facts, and summaries. This
+integration provides a comprehensive represen-
+tation, formally defined as follows: MMixed
+q =
+Cq ∪ Tq ∪ Aq ∪ Sq.
+Details of the prompts used by the LLM for gen-
+erating each type of structural memory, e.g., PT ,
+PA and PS, are provided in Appendix B.
+3.2 Memory Retrieval Methods
+Given the generated structural memories Mq, we
+employ a memory retrieval method to identify and
+integrate the most relevant supporting memories
+Mr ⊂ M q for the query q. Without this step, the
+agent would need to process all available memories,
+leading to inefficiency and potential inaccuracies
+due to irrelevant information. Our study mainly
+focuses on three retrieval approaches: single-step
+retrieval (Robertson et al., 2009; Rubin et al., 2022),
+reranking (Gao et al., 2023a; Ji et al., 2024), and
+iterative retrieval (Li et al., 2024b; Shi et al., 2024).
+The details of each memory retrieval method are
+outlined as follows:
+Single-step Retrieval . In the single-step re-
+trieval process, the goal is to identify the Top-
+K memories Mr that are most relevant to the
+query q. This process is formally defined as:
+Mr = Retriever(q, Mq, K), where the Re-
+triever (Robertson et al., 2009; Rubin et al., 2022)
+serves as the core component.
+Reranking. In the reranking process (Gao et al.,
+2023a; Dong et al., 2024), an initial retriever se-
+lects a candidate set of Top- K memories Mi,
+which are then reranked by an LLM prompted
+
+with PRerank based on their relevance scores. From
+this reranked list, the Top- R memories Mr, se-
+lected in descending order of relevance scores,
+are identified as the most relevant. This step en-
+hances retrieval precision by leveraging the LLM
+to strengthen query-memory connections, filtering
+out irrelevant memories, and prioritizing the most
+pertinent memories for the query. This process is
+formally defined as: Mr = LLM(q, Mi, R, PR) ,
+where Mi = Retriever(q, Mq, K).
+Iterative Retrieval . The iterative retrieval ap-
+proach (Gao et al., 2023b) begins with an initial
+query q0 = q and retrieves the Top- T most rel-
+evant structural memories Mj. These retrieved
+memories are used to refine the query through
+an LLM prompted by PRefine. This process is
+repeated over N iterations, refining the query to
+produce the final version qN that is informative
+for retrieving relevant memories. Formally, the
+iterative retrieval process can be defined as fol-
+lows: qj = LLM(Mj, PRefine), where Mj =
+Retriever(qj−1, Mq, T ). After N iterations, the
+final refined query qN is used to retrieve the Top-
+K most relevant memories for answer genera-
+tion. This step can be expressed as: Mr =
+Retriever(qN , Mq, K). The detailed prompts
+PRerank and PRefine can be found in Appendix B.
+3.3 Answer Generation
+Finally, the agent leverages the LLM to generate
+the answer based on the retrieved memory. To
+achieve this, we propose two methods of answer
+generation. In the first method, termed Memory-
+Only, the retrieved memories Mr are directly uti-
+lized as the context for generating the answer. The
+second method, termed Memory-Doc, uses the re-
+trieved memories to locate their corresponding orig-
+inal documents from Dq. These documents then
+serve as the context for answer generation, provid-
+ing the agent with more detailed and contextually
+enriched information.
+4 Experiments
+4.1 Datasets.
+We conduct experiments on six datasets across four
+tasks. For multi-hop long-context QA datasets,
+we experiment with HotPotQA (Yang et al.,
+2018), 2WikiMultihopQA (Ho et al., 2020), and
+MuSiQue (Trivedi et al., 2022). The single-hop
+long-context QA task is evaluated with Narra-
+tiveQA (Koˇcisk`y et al., 2018) from Longbench (Bai
+et al., 2023). Additionally, we leverage the Lo-
+CoMo dataset (Maharana et al., 2024) for dialogue-
+based long-context QA task, while the QuAL-
+ITY (Pang et al., 2022) dataset is used for the read-
+ing comprehension QA task2.
+4.2 Evaluation.
+To evaluate QA performance, we follow previous
+work (Li et al., 2024a) and use standard metrics
+such as Exact Match (EM) score and F1 score
+for the datasets HotPotQA, 2WikiMultihopQA,
+MuSiQue, NarrativeQA and LoCoMo. For QuAL-
+ITY , we follow the approach in (Lee et al., 2024)
+and use accuracy as the evaluation metric, with
+25% indicating chance performance.
+4.3 Implementation Details.
+In our experiments, we use GPT-4o-mini-128k with
+a temperature setting of 0.2. The input window
+is set to 4k tokens, while the maximum chunk
+size is up to 1k tokens. For text embedding, we
+employ the text-embedding-3-small model 3 from
+OpenAI and store the vectorized memories using
+LangChain (Chase, 2022).
+5 Results and Analysis
+5.1 Impact of Memory Structures
+Finding 1: Mixed memories delivers more bal-
+anced performance . The results as presented
+in Table 1 reveal key insights into the impact of
+various memory structures on task performance:
+(1) Mixed memories consistently outperform other
+memory structures. This is particularly evident
+under iterative retrieval, where mixed memories
+achieve the highest F1 scores of 82.11% on Hot-
+PotQA and 68.15% on 2WikiMultihopQA. (2)
+Chunks excel in tasks requiring a balance between
+concise and comprehensive contexts, as shown in
+datasets with long contexts. This is evidenced by
+its F1 score of 31.63% on NarrativeQA and an accu-
+racy of 78.5% on QuALITY under reranking. Sum-
+maries, which condense large contexts, is effective
+for tasks demanding abstraction, as shown by its
+competitive F1 score of 32.26% on NarrativeQA
+and solid performance on LoCoMo. (3) Knowledge
+triples and atomic facts are particularly effective
+for relational reasoning and precision. Knowledge
+2More details and statistics about the datasets are provided
+in Appendix A.
+3https://platform.openai.com/docs/guides/
+embeddings/
+
+Memory StructureHotPotQA 2WikiMultihopQA MuSiQue NarrativeQA LoCoMo QuALITY
+EM F1 EM F1 EM F1 EM F1 EM F1 ACC
+Full Content 55.50 75.77 44.00 54.33 36.00 51.60 7.00 24.99 13.61 41.82 81.50
+Single-step Retrieval
+Chunks 61.50 76.93 43.50 59.17 35.50 54.45 13.50 29.78 9.95 40.63 76.00
+Triples 59.50 74.09 44.50 60.82 31.00 50.13 11.50 22.04 8.42 41.08 61.50
+Atomic Facts 62.50 77.22 39.50 58.63 30.50 51.31 13.50 27.49 9.42 42.92 71.50
+Summaries 57.00 74.81 42.00 57.21 34.00 52.83 16.50 32.93 10.99 44.94 76.00
+Mixed 60.00 77.10 48.50 65.25 33.00 51.65 14.50 29.86 10.47 44.73 78.00
+Reranking
+Chunks 63.00 77.35 45.00 61.31 37.00 55.32 16.00 31.63 9.95 43.47 78.50
+Triples 61.00 76.75 43.50 55.43 26.50 42.05 10.00 20.65 8.83 41.82 60.00
+Atomic Facts 63.00 78.31 40.50 59.31 28.50 49.95 14.00 28.19 8.90 44.27 67.50
+Summaries 61.00 77.80 45.00 61.18 35.50 54.59 16.00 32.26 12.04 44.83 75.00
+Mixed 65.00 78.58 45.50 61.77 34.00 52.45 11.98 28.02 9.42 44.51 77.50
+Iterative Retrieval
+Chunks 63.00 79.10 46.50 62.13 37.00 56.78 14.50 30.88 10.47 45.14 77.00
+Triples 64.00 78.78 47.50 62.06 38.00 55.93 10.50 21.67 9.47 41.41 60.50
+Atomic Facts 65.50 81.29 44.00 63.89 34.50 57.55 14.50 28.28 9.95 43.62 67.50
+Summaries 60.50 78.11 46.50 62.35 33.50 53.12 17.00 31.79 12.04 43.93 75.00
+Mixed 67.00 82.11 51.00 68.15 39.00 61.38 12.50 28.36 7.85 45.25 79.50
+Table 1: Overall Performance (%) of various memory structures utilizing different retrieval methods across six
+datasets. The best performance is marked in boldface, while the second-best performance is underlined.
+Chunks Triples Atomic Facts Summaries72
+74
+76
+78
+80F1 (%)
+HotPotQA
+Memory-Only
+Memory-Doc
+Chunks Triples Atomic Facts Summaries45
+50
+55
+60
+65
+70F1 (%)
+2WikiMultihopQA
+Memory-Only
+Memory-Doc
+Chunks Triples Atomic Facts Summaries30
+40
+50
+60F1 (%)
+MuSiQue
+Memory-Only
+Memory-Doc
+Chunks Triples Atomic Facts Summaries36
+38
+40
+42
+44
+46
+48F1 (%)
+LoCoMo
+Memory-Only
+Memory-Doc
+Chunks Triples Atomic Facts Summaries10
+15
+20
+25
+30
+35
+40
+45F1 (%)
+NarrativeQA
+Memory-Only
+Memory-Doc
+Chunks Triples Atomic Facts Summaries50
+60
+70
+80
+90Accuracy (%)
+QuALITY
+Memory-Only
+Memory-Doc
+Figure 3: Performance across six datasets using two answer generation approaches:Memory-Only and Memory-Doc.
+triples achieve an F1 score of 62.06% on 2Wiki-
+MultihopQA under iterative retrieval, while atomic
+facts achieve an F1 score of 81.29% on HotPotQA.
+These findings emphasize the importance of tailor-
+ing memory structures to specific task requirements
+and demonstrate that integrating complementary
+memory types in mixed memories significantly en-
+hances performance across tasks.
+5.2 Impact of Memory Retrieval Methods
+Finding 2: Iterative retrieval as the optimal re-
+trieval method. The results in Table 1 demonstrate
+the significant influence of the retrieval method on
+performance: (1) Iterative retrieval consistently out-
+performs the others, achieving the highest scores
+across most datasets. Notably, with mixed mem-
+ories, iterative retrieval achieved an F1 score of
+82.11% on HotPotQA and 68.15% on 2WikiMul-
+tihopQA, showcasing its ability to refine queries
+iteratively for enhanced accuracy. (2) Reranking
+demonstrates strong performance on datasets with
+moderate complexity. For instance, it achieved
+F1 scores of 44.27% on LoCoMo and 28.19% on
+
+25 50 75 100 200
+K
+65
+70
+75
+80F1 (%)
+HotPotQA
+25 50 75 100 200
+K
+38
+40
+42
+44
+46F1 (%)
+LoCoMo
+Chunks Triples Atomic Facts Summaries
+Figure 4: Performance of different numbers of retrieved
+memories K on HotPotQA and LoCoMo using single-
+step retrieval.
+NarrativeQA with atomic fact memory. (3) In con-
+trast, single-step retrieval performs competitively
+in tasks requiring minimal contextual integration.
+Using summary memory, it achieved an F1 score
+of 32.93% on NarrativeQA, leveraging abstraction
+to extract coherent information. These findings em-
+phasize the importance of aligning retrieval mecha-
+nisms with task requirements, and iterative retrieval
+excels in reasoning tasks.
+5.3 Impact of Answer Generation Approaches
+Finding 3: Extensive Context tasks favor
+Memory-Doc, while precision tasks benefit from
+Memory-Only. As shown in Figure 3, which com-
+pares their performance across various datasets.
+retrieving documents through retrieved memories
+provides a more comprehensive understanding,
+much like how humans integrate immediate recall
+with broader context to interpret complex narra-
+tives. In contrast, for datasets involving multi-hop
+reasoning and dialogue understanding, such as Hot-
+PotQA and LoCoMo, the Memory-Only approach
+proves to be the more effective strategy. These
+findings highlight that tasks requiring extensive
+context benefit from the Memory-Doc approach,
+which incorporates broader document-level infor-
+mation for enriched responses. On the other hand,
+tasks prioritizing precision are better suited to the
+Memory-Only approach, ensuring focused and ac-
+curate retrieval.
+5.4 Hyperparameter Sensitivity
+Effect of Number of Retrieved Memories K. We
+first evaluate the impact of K in single-step re-
+trieval, with a limit of K = 200 due to compu-
+tational resource limitations. As depicted in Fig-
+ure 4, in HotPotQA, chunks demonstrate consistent
+performance, stabilizing around 77% across all K
+values. In LoCoMo, the chunks show moderate
+gains up to K = 50, whereas triples, atomics, and
+10 25 50 75
+R
+70
+75
+80F1 (%)
+HotPotQA
+10 25 50 75
+R
+35
+40
+45F1 (%)
+LoCoMo
+Chunks Triples Atomic Facts Summaries
+Figure 5: Performance of different numbers of reranked
+memories R on HotPotQA and LoCoMo in reranking.
+10 25 50 75
+T
+74
+76
+78
+80
+82F1 (%)
+HotPotQA
+10 25 50 75
+T
+38
+40
+42
+44
+46F1 (%)
+LoCoMo
+Chunks Triples Atomic Facts Summaries
+Figure 6: Performance of different numbers of retrieved
+memories T in each interaction on HotPotQA and Lo-
+CoMo using iterative retrieval.
+summaries improve up to K = 100 but then de-
+clined at K = 200, likely due to noise introduced
+by retrieving excessive memories. These findings
+indicate that the optimal K depends on both the
+dataset and memory structure. While moderate K
+values generally enhance performance, excessively
+large values can introduce irrelevant information,
+leading to a degraded performance.
+Effect of Number of Reranked Memories R. To
+evaluate the impact of R in reranking, we inves-
+tigate performance across a range of values, with
+a maximum R of 75 due to computational cost
+constraints, while fixing K at 100. As depicted
+in Figure 5, the results highlight that increasing
+the number of reranked memories does not always
+lead to better performance. For instance, chunks
+achieve the highest F1 score at R = 10 in Hot-
+PotQA, with a subsequent decline in performance
+beyond R = 50 . This pattern is consistent with
+triples and atomic facts, indicating that selecting a
+smaller number of highly relevant memories can
+outperform retrieving and reranking larger sets,
+which often introduces noise. A similar trend can
+be observed in LoCoMo. These findings suggest
+that reranking is more effective when it focuses on
+a smaller subset of highly relevant memories.
+Effect of Number of Retrieved Memories T on
+Each Iteration. We first investigate performance
+across a range of values of T using iterative re-
+trieval, with a maximum T of 75 and N of 4 due
+
+1 2 3 4
+N
+72
+74
+76
+78
+80
+82F1 (%)
+HotPotQA
+1 2 3 4
+N
+40
+42
+44
+46F1 (%)
+LoCoMo
+Chunks Triples Atomic Facts Summaries
+Figure 7: Performance of different numbers of retrieved
+memories N in each interaction on HotPotQA and Lo-
+CoMo using iterative retrieval.
+to computational cost constraints while keeping
+K fixed at 100. As illustrated in Figure 6, in-
+creasing the number of retrieved memories per
+iteration generally improves performance across
+datasets, though the gains diminish beyond a cer-
+tain threshold. For instance, in HotPotQA, atomic
+facts achieve an F1 score of approximately 81%
+at T = 50, with minimal additional gains from in-
+creasing T further. Similarly, in LoCoMo, chunks
+improve up to T = 50 before declining at T = 75.
+These results indicate that while increasing T can
+enhance query refinement and performance, exces-
+sively large T values may introduce noise, ulti-
+mately reducing effectiveness.
+Effect of Number of Iteration TurnsN. Next, we
+examine the impact of iteration turns N, with the
+number of retrieved memories T fixed at 50. As de-
+picted in Figure 6, the results reveal that increasing
+N initially enhances performance significantly, but
+the rate of improvement diminishes as N continues
+to rise. For HotPotQA, both triples and summars
+show notable gains from N = 1 to N = 3 , after
+which the improvements become marginal. In the
+case of LoCoMo, triples, atomic facts, and sum-
+maries reach a peak at N = 3 and stop increasing
+afterwards. These results suggest that an interme-
+diate number of iteration turns, typically between
+2 and 3, achieves optimal performance improve-
+ments, striking a balance between maximizing ef-
+fectiveness and minimizing resource expenditure.
+5.5 Impact of Noise Documents
+Finding 4: Mix memory excels in noise resilience.
+Finally, we evaluate the robustness of various mem-
+ory structures under increasing levels of noise using
+single-step retrieval with a fixed K = 100. As de-
+picted in Figure 8, the performance of all memory
+structures declines as the number of noise docu-
+ments increases. For HotPotQA, the mix memory
+consistently achieves the highest F1 scores, demon-
+0 10 50 100
+# Noise Documents
+75
+80
+85F1 (%)
+HotPotQA
+0 10 50 100
+# Noise Documents
+40
+50
+60
+70
+80F1 (%)
+2WikiMultihopQA
+0 10 50 100
+# Noise Documents
+50
+60
+70F1 (%)
+MuSiQue
+0 10 50 100
+# Noise Documents
+40
+45
+50F1 (%)
+LoCoMo
+Chunks Triples Atomic Facts Summaries Mixed
+Figure 8: Performance across varying numbers of noise
+documents using single-step retrieval.
+strating superior resilience to noise. While triples
+and summaries exhibit similar rates of decline, the
+chunks experience a slower decline, maintaining a
+competitive F1 score when increasing the number
+of noise documents. A similar pattern is shown in
+LoCoMo. These findings reveal the robustness of
+the mixed memory structure, which consistently
+outperforms others across datasets, making it the
+most effective choice in noisy environments.
+6 Conclusion & Future Work
+In this paper, we present the first comprehensive
+study on the impact of structural memories and
+memory retrieval methods in LLM-based agents,
+aiming to identify the most suitable memory struc-
+tures for specific tasks and explore how retrieval
+methods influence performance. This study yielded
+several key findings: (1) Mixed memories consis-
+tently deliver balanced performance. Chunks and
+summaries excel in tasks involving lengthy con-
+texts, such as reading comprehension and dialogue
+understanding, while knowledge triples and atomic
+facts are effective for relational reasoning and pre-
+cision in multi-hop and single-hop QA. (2) Mixed
+memories also demonstrate remarkable resilience
+to noise. (3) Iterative retrieval stands out as the
+most effective memory retrieval method, consis-
+tently outperforming in tasks such as multi-hop
+QA, dialogue understanding and reading compre-
+hension. While these findings provide valuable
+insights, further research is needed to explore how
+memory impacts areas such as self-evolution and
+social simulation, highlighting the importance of
+investigating how structural memories and retrieval
+techniques support these applications.
+
+Limitations
+We identify the following limitations in our work:
+(1) Our experiments are limited to tasks such as
+multi-hop QA, single-hop QA, dialogue under-
+standing, and reading comprehension, which re-
+stricts the applicability of our findings to other
+complex domains like self-evolving agents or so-
+cial simulation. Investigating the role of memory
+structures and retrieval methods in these topics
+could provide broader insights; (2) The evaluation
+of memory robustness primarily considers random
+document noise, leaving other challenging noise
+types, such as irrelevant or contradictory informa-
+tion, unexplored. Investigating these addition noise
+in future studies could offer a more comprehen-
+sive understanding of memory resilience; (3) Due
+to computational constraints, we limit the hyper-
+parameter ranges (e.g., K, R, T , N) in memory
+retrieval methods. Expanding these ranges in fu-
+ture research could yield deeper insights into their
+impact on performance.
+References
+John R Anderson. 2013. The architecture of cognition.
+Psychology Press.
+Petr Anokhin, Nikita Semenov, Artyom Sorokin, Dmitry
+Evseev, Mikhail Burtsev, and Evgeny Burnaev. 2024.
+Arigraph: Learning knowledge graph world models
+with episodic memory for llm agents. arXiv preprint
+arXiv:2407.04363.
+Yushi Bai, Xin Lv, Jiajie Zhang, Hongchang Lyu,
+Jiankai Tang, Zhidian Huang, Zhengxiao Du, Xiao
+Liu, Aohan Zeng, Lei Hou, et al. 2023. Longbench:
+A bilingual, multitask benchmark for long context
+understanding. arXiv preprint arXiv:2308.14508.
+Harrison Chase. 2022. LangChain.
+Jiangjie Chen, Xintao Wang, Rui Xu, Siyu Yuan, Yikai
+Zhang, Wei Shi, Jian Xie, Shuang Li, Ruihan Yang,
+Tinghui Zhu, et al. 2024. From persona to person-
+alization: A survey on role-playing language agents.
+arXiv preprint arXiv:2404.18231.
+Jialin Dong, Bahare Fatemi, Bryan Perozzi, Lin F Yang,
+and Anton Tsitsulin. 2024. Don’t forget to connect!
+improving rag with graph-based reranking. arXiv
+preprint arXiv:2405.18414.
+Jinyuan Fang, Zaiqiao Meng, and Craig MacDon-
+ald. 2024. TRACE the evidence: Constructing
+knowledge-grounded reasoning chains for retrieval-
+augmented generation. In Findings of the Association
+for Computational Linguistics: EMNLP 2024, pages
+8472–8494, Miami, Florida, USA. Association for
+Computational Linguistics.
+Luyu Gao, Xueguang Ma, Jimmy Lin, and Jamie Callan.
+2023a. Precise zero-shot dense retrieval without rel-
+evance labels. In Proceedings of the 61st Annual
+Meeting of the Association for Computational Lin-
+guistics (Volume 1: Long Papers), pages 1762–1777.
+Yunfan Gao, Yun Xiong, Xinyu Gao, Kangxiang Jia,
+Jinliu Pan, Yuxi Bi, Yi Dai, Jiawei Sun, Meng Wang,
+and Haofen Wang. 2023b. Retrieval-augmented gen-
+eration for large language models: A survey. arXiv
+preprint arXiv:2312.10997.
+Xanh Ho, Anh-Khoa Duong Nguyen, Saku Sugawara,
+and Akiko Aizawa. 2020. Constructing a multi-hop
+qa dataset for comprehensive evaluation of reasoning
+steps. In Proceedings of the 28th International Con-
+ference on Computational Linguistics, pages 6609–
+6625.
+Sirui Hong, Mingchen Zhuge, Jonathan Chen, Xiawu
+Zheng, Yuheng Cheng, Jinlin Wang, Ceyao Zhang,
+Zili Wang, Steven Ka Shing Yau, Zijuan Lin, et al.
+Metagpt: Meta programming for a multi-agent col-
+laborative framework. In The Twelfth International
+Conference on Learning Representations.
+Mengkang Hu, Tianxing Chen, Qiguang Chen, Yao Mu,
+Wenqi Shao, and Ping Luo. 2024. Hiagent: Hier-
+archical working memory management for solving
+long-horizon agent tasks with large language model.
+arXiv preprint arXiv:2408.09559.
+Jiarui Ji, Runlin Lei, Jialing Bi, Zhewei Wei, Yankai
+Lin, Xuchen Pan, Yaliang Li, and Bolin Ding. 2024.
+Dynamic and textual graph generation via large-
+scale llm-based agent simulation. arXiv preprint
+arXiv:2410.09824.
+Tomáš Koˇcisk`y, Jonathan Schwarz, Phil Blunsom, Chris
+Dyer, Karl Moritz Hermann, Gábor Melis, and Ed-
+ward Grefenstette. 2018. The narrativeqa reading
+comprehension challenge. Transactions of the Asso-
+ciation for Computational Linguistics, 6:317–328.
+Kuang-Huei Lee, Xinyun Chen, Hiroki Furuta, John F.
+Canny, and Ian Fischer. 2024. A human-inspired
+reading agent with gist memory of very long contexts.
+In Forty-first International Conference on Machine
+Learning, ICML 2024, Vienna, Austria, July 21-27,
+2024. OpenReview.net.
+Patrick Lewis, Ethan Perez, Aleksandra Piktus, Fabio
+Petroni, Vladimir Karpukhin, Naman Goyal, Hein-
+rich Küttler, Mike Lewis, Wen-tau Yih, Tim Rock-
+täschel, et al. 2020. Retrieval-augmented generation
+for knowledge-intensive nlp tasks. Advances in Neu-
+ral Information Processing Systems, 33:9459–9474.
+Shilong Li, Yancheng He, Hangyu Guo, Xingyuan Bu,
+Ge Bai, Jie Liu, Jiaheng Liu, Xingwei Qu, Yang-
+guang Li, Wanli Ouyang, et al. 2024a. Graphreader:
+Building graph-based agent to enhance long-context
+abilities of large language models. arXiv preprint
+arXiv:2406.14550.
+
+Xiaoxi Li, Zhicheng Dou, Yujia Zhou, and Fangchao
+Liu. 2024b. Corpuslm: Towards a unified language
+model on corpus for knowledge-intensive tasks. In
+Proceedings of the 47th International ACM SIGIR
+Conference on Research and Development in Infor-
+mation Retrieval, pages 26–37.
+Yuan Li, Yixuan Zhang, and Lichao Sun. 2023. Metaa-
+gents: Simulating interactions of human behav-
+iors for llm-based task-oriented coordination via
+collaborative generative agents. arXiv preprint
+arXiv:2310.06500.
+Lei Liu, Xiaoyan Yang, Yue Shen, Binbin Hu, Zhiqiang
+Zhang, Jinjie Gu, and Guannan Zhang. 2023. Think-
+in-memory: Recalling and post-thinking enable
+llms with long-term memory. arXiv preprint
+arXiv:2311.08719.
+Adyasha Maharana, Dong-Ho Lee, Sergey Tulyakov,
+Mohit Bansal, Francesco Barbieri, and Yuwei Fang.
+2024. Evaluating very long-term conversational
+memory of LLM agents. In Proceedings of the 62nd
+Annual Meeting of the Association for Computational
+Linguistics (Volume 1: Long Papers), pages 13851–
+13870, Bangkok, Thailand. Association for Compu-
+tational Linguistics.
+Shervin Minaee, Tomas Mikolov, Narjes Nikzad,
+Meysam Chenaghlu, Richard Socher, Xavier Am-
+atriain, and Jianfeng Gao. 2024. Large language
+models: A survey. arXiv preprint arXiv:2402.06196.
+Andrew M Nuxoll and John E Laird. 2007. Extend-
+ing cognitive architecture with episodic memory. In
+AAAI, pages 1560–1564.
+Charles Packer, Sarah Wooders, Kevin Lin, Vivian Fang,
+Shishir G Patil, Ion Stoica, and Joseph E Gonzalez.
+2023. Memgpt: Towards llms as operating systems.
+arXiv preprint arXiv:2310.08560.
+Richard Yuanzhe Pang, Alicia Parrish, Nitish Joshi,
+Nikita Nangia, Jason Phang, Angelica Chen, Vishakh
+Padmakumar, Johnny Ma, Jana Thompson, He He,
+et al. 2022. Quality: Question answering with long
+input texts, yes! In Proceedings of the 2022 Con-
+ference of the North American Chapter of the Asso-
+ciation for Computational Linguistics: Human Lan-
+guage Technologies, pages 5336–5358.
+Joon Sung Park, Joseph O’Brien, Carrie Jun Cai, Mered-
+ith Ringel Morris, Percy Liang, and Michael S Bern-
+stein. 2023. Generative agents: Interactive simulacra
+of human behavior. In Proceedings of the 36th an-
+nual acm symposium on user interface software and
+technology, pages 1–22.
+Chen Qian, Wei Liu, Hongzhang Liu, Nuo Chen, Yufan
+Dang, Jiahao Li, Cheng Yang, Weize Chen, Yusheng
+Su, Xin Cong, et al. 2024. Chatdev: Communicative
+agents for software development. In Proceedings
+of the 62nd Annual Meeting of the Association for
+Computational Linguistics (Volume 1: Long Papers),
+pages 15174–15186.
+Shuofei Qiao, Ningyu Zhang, Runnan Fang, Yujie Luo,
+Wangchunshu Zhou, Yuchen Eleanor Jiang, Chengfei
+Lv, and Huajun Chen. 2024. Autoact: Automatic
+agent learning from scratch via self-planning. arXiv
+preprint arXiv:2401.05268.
+Yujia Qin, Shihao Liang, Yining Ye, Kunlun Zhu, Lan
+Yan, Yaxi Lu, Yankai Lin, Xin Cong, Xiangru Tang,
+Bill Qian, et al. 2023. Toolllm: Facilitating large
+language models to master 16000+ real-world apis.
+arXiv preprint arXiv:2307.16789.
+Ori Ram, Yoav Levine, Itay Dalmedigos, Dor Muhlgay,
+Amnon Shashua, Kevin Leyton-Brown, and Yoav
+Shoham. 2023. In-context retrieval-augmented lan-
+guage models. Transactions of the Association for
+Computational Linguistics, 11:1316–1331.
+Stephen Robertson, Hugo Zaragoza, et al. 2009. The
+probabilistic relevance framework: Bm25 and be-
+yond. Foundations and Trends® in Information Re-
+trieval, 3(4):333–389.
+Ohad Rubin, Jonathan Herzig, and Jonathan Berant.
+2022. Learning to retrieve prompts for in-context
+learning. In Proceedings of the 2022 Conference
+of the North American Chapter of the Association
+for Computational Linguistics: Human Language
+Technologies, pages 2655–2671.
+Zhengliang Shi, Shuo Zhang, Weiwei Sun, Shen Gao,
+Pengjie Ren, Zhumin Chen, and Zhaochun Ren. 2024.
+Generate-then-ground in retrieval-augmented genera-
+tion for multi-hop question answering. In Proceed-
+ings of the 62nd Annual Meeting of the Association
+for Computational Linguistics (Volume 1: Long Pa-
+pers), pages 7339–7353.
+Noah Shinn, Federico Cassano, Ashwin Gopinath,
+Karthik Narasimhan, and Shunyu Yao. 2024. Re-
+flexion: Language agents with verbal reinforcement
+learning. Advances in Neural Information Process-
+ing Systems, 36.
+Herbert A Simon and Allen Newell. 1971. Human
+problem solving: The state of the theory in 1970.
+American psychologist, 26(2):145.
+Harsh Trivedi, Niranjan Balasubramanian, Tushar Khot,
+and Ashish Sabharwal. 2022. Musique: Multi-
+hop questions via single-hop question composition.
+Transactions of the Association for Computational
+Linguistics, 10:539–554.
+Guanzhi Wang, Yuqi Xie, Yunfan Jiang, Ajay Man-
+dlekar, Chaowei Xiao, Yuke Zhu, Linxi Fan, and
+Anima Anandkumar. 2023. V oyager: An open-ended
+embodied agent with large language models. arXiv
+preprint arXiv:2305.16291.
+Lei Wang, Chen Ma, Xueyang Feng, Zeyu Zhang, Hao
+Yang, Jingsen Zhang, Zhiyuan Chen, Jiakai Tang,
+Xu Chen, Yankai Lin, et al. 2024a. A survey on large
+language model based autonomous agents. Frontiers
+of Computer Science, 18(6).
+
+Xintao Wang, Yunze Xiao, Jen-tse Huang, Siyu Yuan,
+Rui Xu, Haoran Guo, Quan Tu, Yaying Fei, Ziang
+Leng, Wei Wang, et al. 2024b. Incharacter: Evaluat-
+ing personality fidelity in role-playing agents through
+psychological interviews. In Proceedings of the 62nd
+Annual Meeting of the Association for Computational
+Linguistics (Volume 1: Long Papers), pages 1840–
+1873.
+Zefan Wang, Zichuan Liu, Yingying Zhang, Aoxiao
+Zhong, Jihong Wang, Fengbin Yin, Lunting Fan,
+Lingfei Wu, and Qingsong Wen. 2024c. Rcagent:
+Cloud root cause analysis by autonomous agents
+with tool-augmented large language models. In Pro-
+ceedings of the 33rd ACM International Conference
+on Information and Knowledge Management, pages
+4966–4974.
+Zhiheng Xi, Wenxiang Chen, Xin Guo, Wei He, Yiwen
+Ding, Boyang Hong, Ming Zhang, Junzhe Wang,
+Senjie Jin, Enyu Zhou, et al. 2023. The rise and
+potential of large language model based agents: A
+survey. arXiv preprint arXiv:2309.07864.
+Yao Xu, Shizhu He, Jiabei Chen, Zihao Wang, Yangqiu
+Song, Hanghang Tong, Guang Liu, Kang Liu,
+and Jun Zhao. 2024. Generate-on-graph: Treat
+llm as both agent and kg in incomplete knowl-
+edge graph question answering. arXiv preprint
+arXiv:2404.14741.
+Zhilin Yang, Peng Qi, Saizheng Zhang, Yoshua Bengio,
+William Cohen, Ruslan Salakhutdinov, and Christo-
+pher D Manning. 2018. Hotpotqa: A dataset for
+diverse, explainable multi-hop question answering.
+In Proceedings of the 2018 Conference on Empiri-
+cal Methods in Natural Language Processing, pages
+2369–2380.
+Shunyu Yao, Dian Yu, Jeffrey Zhao, Izhak Shafran,
+Tom Griffiths, Yuan Cao, and Karthik Narasimhan.
+2024. Tree of thoughts: Deliberate problem solving
+with large language models. Advances in Neural
+Information Processing Systems, 36.
+Wenqi Zhang, Ke Tang, Hai Wu, Mengna Wang,
+Yongliang Shen, Guiyang Hou, Zeqi Tan, Peng Li,
+Yueting Zhuang, and Weiming Lu. 2024a. Agent-
+pro: Learning to evolve via policy-level reflection
+and optimization. arXiv preprint arXiv:2402.17574.
+Zeyu Zhang, Xiaohe Bo, Chen Ma, Rui Li, Xu Chen,
+Quanyu Dai, Jieming Zhu, Zhenhua Dong, and Ji-
+Rong Wen. 2024b. A survey on the memory mech-
+anism of large language model based agents. arXiv
+preprint arXiv:2404.13501.
+Wanjun Zhong, Lianghong Guo, Qiqi Gao, He Ye, and
+Yanlin Wang. 2024. Memorybank: Enhancing large
+language models with long-term memory. In Pro-
+ceedings of the AAAI Conference on Artificial Intelli-
+gence, volume 38, pages 19724–19731.
+
+A Datasets
+We conduct experiments on the following six
+datasets across four tasks, including multi-hop QA,
+single-hop QA, dialogue understanding and read-
+ing comprehension. The statistical information of
+datasets is provided in Table 2.
+Task Dataset Avg. # Tokens # Samples
+Multi-hop QA HotpotQA 1,362 200Multi-hop QA 2WikiMultihopQA 985 200Multi-hop QA MuSiQue 2,558 200
+Single-hop QA NarrativeQA 24,009 200
+Dialogue Understanding LoCoMo 24,375 191
+Reading Comprehension QuALITY 4,696 200
+Table 2: The statistic and example of datasets.
+B Prompts
+In this section, we present the prompts employed
+in our experiments, with detailed descriptions pro-
+vided in the respective subsections.
+B.1 Prompt for Generating Knowledge
+Triples
+The prompt used for extracting knowledge triples
+from a document is illustrated in Figure 9.
+B.2 Prompt for Generation Summaries
+The prompt designed for generating document sum-
+maries is depicted in Figure 10.
+B.3 Prompt for Generating Atomic Facts
+The prompt for generating atomic facts from a doc-
+ument is shown in Figure 11.
+B.4 Prompt for Reranking Retrieved
+Memories
+The prompt used for reranking retrieved memories
+is presented in Figure 12.
+B.5 Prompt for Iterative Refining Query
+The prompt for iterative query refinement is pro-
+vided in Figure 13.
+
+You are a knowledge graph constructor tasked with extracting knowledge triples in the form of <head entity; relation;
+tail entity> from a document.  Each triple denotes a speciﬁc relationship between entities or an event. The head entity
+and tail entity can be the provided title or phrases in the text.  If multiple tail entities share the same relation with a
+head entity, aggregate these tail entities using commas. 
+Format your output in the form of <head entity; relation; tail entity>.
+Demonstrations:
+Title: Morghem's .500 Nitro Express 
+Text: Morghem's .500 Nitro Express known as Frank's Khing at owner/call name registered events, is a UKC
+registered male American Pit Bull Terrier. Who competes in dog sports and conformation shows earning titles in Dock
+Jump, Lure Course, Show Champion, Rally Obedience and Weight Pull. Khing has been awarded the AKC Canine
+Good Citizen and USTTA temperament tested certiﬁcations. 
+Knowledge Triples:
+<Morghem's .500 Nitro Express; also known as; Frank's Khing>
+<Morghem's .500 Nitro Express; registered with; UKC>
+<Morghem's .500 Nitro Express; breed; male American Pit Bull Terrier>
+<Morghem's .500 Nitro Express; competes in; dog sports, conformation shows>
+<Morghem's .500 Nitro Express; titles earned; Dock Jump, Lure Course, Show Champion, Rally Obedience, Weight
+Pull>
+<Morghem's .500 Nitro Express; awarded; AKC Canine Good Citizen, USTTA temperament tested certiﬁcations>
+# Please strictly follow the above format. Let’s begin. 
+{DOCUMENT} 
+Knowledge Triples:
+Figure 9: Prompt for generating knowledge triples from a document.
+You are a helpful assistant responsible for generating a comprehensive summary of the data provided below. 
+Make sure to include information collected from all the documents.  If the provided documents are contradictory, please
+resolve the contradictions and provide a single, coherent summary.  Make sure it is written in third person, and include
+the names so we have the full context. 
+{DOCUMENT}
+Summaries: 
+Figure 10: Prompt for generating summaries from a document.
+
+You are now an intelligent assistant tasked with meticulously extracting both key elements and atomic facts from a
+context.
+1. Key Elements: The essential nouns (e.g., characters, times, events, places, numbers), verbs (e.g., actions), and
+adjectives (e.g., states, feelings) that are pivotal to the text's narrative. 
+2. Atomic Fact: The smallest, indivisible facts, presented as concise sentences. These include propositions, theories,
+existences, concepts, and implicit elements like logic, causality, event sequences, interpersonal relationships, timelines,
+etc. 
+Requirements: 
+1. Ensure that all the atomic facts contain full and complete information, reflecting the entire context of the sentence
+without omitting any key details. 
+2. Ensure that all identified key elements are reflected within the corresponding atomic facts. 
+3. Whenever applicable, replace pronouns with their specific noun counterparts (e.g., change I, He, She to actual
+names). 
+4. Your answer format for each line should be: [Serial Number], [Atomic Fact], [List of Key Elements, separated with
+'|'] 
+Demonstrations: 
+"Peter Dickson (born 23 June 1957), is a British voice-over artist. He is best known as the voice of E4, and he is the
+brand voice of The X Factor, Britain's Got Talent, The Price Is Right, Family Fortunes, All Star Mr \& Mrs, Live at the
+Apollo, Michael McIntyre's Comedy Roadshow and Chris Moyles' Quiz Night." 
+Atomic Fact and Key Elements: 
+1. Peter Dickson was born on June 23, 1957. | Peter Dickson | June 23, 1957 
+2. Peter Dickson is a British voice-over artist. | Peter Dickson | British voice-over artist 
+3. Peter Dickson is best known as the voice of E4. | Peter Dickson | voice | E4 
+4. Peter Dickson is the brand voice of The X Factor. | Peter Dickson | brand voice | The X Factor 
+\# Please strictly follow the above format. Let’s begin. 
+{DOCUMENT} 
+Atomic Fact and Key Elements:
+Figure 11: Prompt for generating atomic facts from a document.
+
+A list of documents is shown below. Each document has a number next to it along with a summary of the document. A
+question is also provided. 
+Respond with the numbers of the documents you should consult to answer the question, in order of relevance, as well 
+as the relevance score. The relevance score is a number from 1-10 based on how relevant you think the document is to
+the question.
+Respond with the numbers of **all** the documents along with a relevance score.
+Demonstrations: 
+Document 1:
+<summary of document 1>
+Document 2:
+<summary of document 2>
+Document 3:
+<summary of document 3>
+Question: <question>
+Answer:
+Doc: 2, Relevance Score: 7
+Doc: 1, Relevance Score: 4
+Doc: 3, Relevance Score: 3
+Let's try this now: 
+{CONTEXT}
+Question: {query}
+Answer:
+Figure 12: Prompt for reranking retrieved memories.
+
+Follow the examples to answer the input question by reasoning step-by-step. Output both reasoning steps and the
+answer. 
+Demonstrations:
+#####
+Question: Nobody Loves You was written by John Lennon and released on what album that was issued by Apple
+Records, and was written, recorded, and released during his 18 month separation from Yoko Ono?
+Thought: The album issued by Apple Records, and written, recorded, and released during John Lennon's 18 month
+separation from Yoko Ono is Walls and Bridges. Nobody Loves You was written by John Lennon on Walls and
+Bridges album. So the answer is: Walls and Bridges.
+Question: What is known as the Kingdom and has National Route 13 stretching towards its border?
+Thought: Cambodia is officially known as the Kingdom of Cambodia. National Route 13 streches towards border to
+Cambodia. So the answer is: Cambodia.
+Question: Jeremy Theobald and Christopher Nolan share what profession?
+Thought: Jeremy Theobald is an actor and producer. Christopher Nolan is a director, producer, and screenwriter.
+Therefore, they both share the profession of being a producer. So the answer is: producer.
+Question: What film directed by Brian Patrick Butler was inspired by a film directed by F.W. Murnau?
+Thought: Brian Patrick Butler directed the film The Phantom Hour. The Phantom Hour was inspired by the films such
+as Nosferatu and The Cabinet of Dr. Caligari. Of these Nosferatu was directed by F.W. Murnau. So the answer is: The
+Phantom Hour.
+Question: Vertical Limit stars which actor who also played astronaut Alan Shepard in \"The Right Stuff\"?
+Thought: The actor who played astronaut Alan Shepard in \"The Right Stuff\" is Scott Glenn. The movie Vertical
+Limit also starred Scott Glenn. So the answer is: Scott Glenn.
+#####
+Input:
+Context: 
+{context}
+Question: {question}
+Thought: 
+Figure 13: Prompt for the iterative refining query.

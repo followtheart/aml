@@ -57,6 +57,12 @@ uvicorn app.main:app --host 0.0.0.0 --port 8000
 # 本地代理评测（真实打分需要 OPENAI_API_KEY）
 python scripts/local_eval.py --data data/locomo_eval.json --convs 1 --limit 100
 
+# 默认显示 Add / Search / Answer+Judge 实时进度条；重定向时可关闭
+python scripts/local_eval.py --data data/locomo_eval.json --no-progress
+
+# 每次 LLM/Embedding 调用会输出 aml.metrics 日志：阶段、模型、
+# attempt/retries、耗时和 prompt/completion/total tokens，不记录正文或密钥。
+
 # 消融
 python scripts/local_eval.py --data data/locomo_eval.json --convs 1 --limit 100 \
     --no-graph          # 去掉图谱 PPR 路

@@ -9,7 +9,7 @@ import json
 import re
 from typing import Dict, Optional
 
-from . import config
+from . import config, metrics
 
 
 class LLMError(RuntimeError):
@@ -134,9 +134,11 @@ def _fake_available() -> bool:
 
 async def complete(prompt: str, system: Optional[str] = None,
                    response_format: Optional[dict] = None,
-                   max_tokens: Optional[int] = None) -> str:
+                   max_tokens: Optional[int] = None,
+                   stage: str = "llm.complete") -> str:
     """Single text completion, temperature 0. Returns raw text."""
     if _fake_available():
+        metrics.log_fake(kind="llm", stage=stage, model="fake")
         return FakeLLM().complete(prompt)
     try:
         import litellm
@@ -151,14 +153,20 @@ async def complete(prompt: str, system: Optional[str] = None,
             kwargs["api_key"] = config.LLM_API_KEY
         if response_format:
             kwargs["response_format"] = response_format
-        resp = await litellm.acompletion(
-            model=config.LLM_MODEL,
-            messages=messages,
-            temperature=config.LLM_TEMPERATURE,
-            max_tokens=max_tokens or config.LLM_MAX_TOKENS,
-            timeout=180,
-            num_retries=1,
-            **kwargs,
+        async def _call(_attempt):
+            return await litellm.acompletion(
+                model=config.LLM_MODEL,
+                messages=messages,
+                temperature=config.LLM_TEMPERATURE,
+                max_tokens=max_tokens or config.LLM_MAX_TOKENS,
+                timeout=180,
+                num_retries=0,
+                **kwargs,
+            )
+
+        resp = await metrics.measured_call(
+            kind="llm", stage=stage, model=config.LLM_MODEL,
+            call=_call, attempts=2,
         )
         return resp["choices"][0]["message"]["content"]
     except Exception as e:  # pragma: no cover - depends on provider
@@ -186,7 +194,8 @@ def extract_json(text: str):
 
 async def complete_json(prompt: str, schema_hint: str = "",
                         system: Optional[str] = None,
-                        schema: Optional[dict] = None):
+                        schema: Optional[dict] = None,
+                        stage: str = "llm.structured"):
     """Structured completion plus parsing, with one clean retry.
 
     SiliconFlow and OpenAI-compatible providers support JSON mode through
@@ -195,7 +204,8 @@ async def complete_json(prompt: str, schema_hint: str = "",
     a small model: repeated garbage can reinforce token degeneration.
     """
     if schema and not _fake_available():
-        return await _complete_tool_json(prompt, schema, system=system)
+        return await _complete_tool_json(
+            prompt, schema, system=system, stage=stage)
 
     json_system = system or (
         "You are a structured-data generator. Return exactly one valid JSON "
@@ -206,6 +216,7 @@ async def complete_json(prompt: str, schema_hint: str = "",
         system=json_system,
         response_format=json_format,
         max_tokens=config.LLM_JSON_MAX_TOKENS,
+        stage=stage,
     )
     try:
         return extract_json(out)
@@ -222,12 +233,14 @@ async def complete_json(prompt: str, schema_hint: str = "",
         system=json_system,
         response_format=json_format,
         max_tokens=config.LLM_JSON_MAX_TOKENS,
+        stage=f"{stage}.json_repair",
     )
     return extract_json(out2)
 
 
 async def _complete_tool_json(prompt: str, schema: dict,
-                              system: Optional[str] = None):
+                              system: Optional[str] = None,
+                              stage: str = "llm.tool"):
     """Force a top-level object through OpenAI-compatible function calling."""
     import litellm
 
@@ -245,10 +258,9 @@ async def _complete_tool_json(prompt: str, schema: dict,
         base_messages.append({"role": "system", "content": system})
     base_messages.append({"role": "user", "content": prompt})
 
-    last_error = None
-    for attempt in range(2):
+    async def _call(attempt):
         messages = list(base_messages)
-        if attempt:
+        if attempt > 1:
             messages.append({
                 "role": "user",
                 "content": (
@@ -260,34 +272,38 @@ async def _complete_tool_json(prompt: str, schema: dict,
             kwargs["api_base"] = config.LLM_API_BASE
         if config.LLM_API_KEY:
             kwargs["api_key"] = config.LLM_API_KEY
-        try:
-            resp = await litellm.acompletion(
-                model=config.LLM_MODEL,
-                messages=messages,
-                tools=[tool],
-                tool_choice={"type": "function",
-                             "function": {"name": tool_name}},
-                temperature=config.LLM_TEMPERATURE,
-                max_tokens=config.LLM_JSON_MAX_TOKENS,
-                timeout=180,
-                num_retries=1,
-                **kwargs,
-            )
-            message = resp["choices"][0]["message"]
-            calls = message.get("tool_calls") or []
-            if not calls:
-                raise ValueError("model returned no structured tool call")
-            arguments = calls[0]["function"]["arguments"]
-            result = arguments if isinstance(arguments, dict) \
-                else extract_json(arguments)
-            if not isinstance(result, dict):
-                raise ValueError("tool arguments are not a JSON object")
-            return result
-        except Exception as e:  # provider/model dependent
-            last_error = e
-    raise LLMError(
-        f"structured completion failed for model {config.LLM_MODEL}: "
-        f"{last_error}") from last_error
+        resp = await litellm.acompletion(
+            model=config.LLM_MODEL,
+            messages=messages,
+            tools=[tool],
+            tool_choice={"type": "function",
+                         "function": {"name": tool_name}},
+            temperature=config.LLM_TEMPERATURE,
+            max_tokens=config.LLM_JSON_MAX_TOKENS,
+            timeout=180,
+            num_retries=0,
+            **kwargs,
+        )
+        message = resp["choices"][0]["message"]
+        calls = message.get("tool_calls") or []
+        if not calls:
+            raise ValueError("model returned no structured tool call")
+        arguments = calls[0]["function"]["arguments"]
+        result = arguments if isinstance(arguments, dict) \
+            else extract_json(arguments)
+        if not isinstance(result, dict):
+            raise ValueError("tool arguments are not a JSON object")
+        return result, resp
+
+    try:
+        result, _resp = await metrics.measured_call(
+            kind="llm", stage=stage, model=config.LLM_MODEL,
+            call=_call, attempts=2, response_getter=lambda item: item[1])
+        return result
+    except Exception as e:  # provider/model dependent
+        raise LLMError(
+            f"structured completion failed for model {config.LLM_MODEL}: "
+            f"{e}") from e
 
 
 class FakeLLM:

@@ -1,0 +1,1351 @@
+A Survey on Long-Term Memory Security in LLM Agents:
+Attacks, Defenses, and Governance Across the Memory Lifecycle
+Zehao Lin1*, Xixuan Hao1∗, Renyu Fu1, Shaobo Cui2
+Kai Chen1, Chunyu Li1, Zhiyu Li1, Feiyu Xiong1
+1 MemTensor 2 Shanghai Jiao Tong University
+{linzh, haoxx, chenk, licy, lizy, xiongfy}@memtensor.cn
+shaobo.cui@sjtu.edu.cn
+Abstract
+The emergence of writable, cross-session per-
+sistent memory in LLM agents introduces a
+qualitatively different threat landscape from
+conventional input-centric security concerns,
+characterized by three properties: persistence,
+statefulness, and propagation. To systemati-
+cally characterize this landscape, we propose
+a Memory Lifecycle Framework that orga-
+nizes attacks, defenses, and their cross-phase
+dependencies along two axes: six lifecycle
+phases (WRITE, STORE, RETRIEVE, EXE-
+CUTE, SHARE& PROPAGATE, FORGET&
+ROLLBACK) and four security objectives (In-
+tegrity, Confidentiality, Availability, Gover-
+nance). This analysis in turn exposes the need
+for formal security guarantees at the system
+level, motivatingVerifiable Memory Gover-
+nance(VMG), a framework of five architec-
+tural primitives that specifies what verifiable
+mechanisms a long-term-memory system must
+provide to maintain auditable, recoverable con-
+trol over its memory state. Our analysis indi-
+cates that robust Long-Term Memory (LTM)
+security cannot be retrofitted at retrieval or
+execution time alone, but must be anchored
+in storage-time provenance, versioning, and
+policy-aware retention from the outset.
+1 Introduction
+Large language models (LLMs) are increasingly
+serving as the foundation for interactive and au-
+tonomous agents (Zhang et al., 2025d; Wang et al.,
+2024a). As their role expands from generating re-
+sponses to supporting decisions, tool use, and user
+interactions, their security risks also extend beyond
+isolated outputs (Zhan et al., 2024; Zhang et al.,
+2025c; Greshake et al., 2023). In recent years, re-
+search on the security of LLM-based agents has
+traditionally centered on two parts: knowledge en-
+coded parametrically in model weights (Carlini
+et al., 2021; Bourtoule et al., 2021; Maini et al.,
+*Equal Contribution.
+2024) and prompt manipulation within single- or
+multi-turn interactions (Liu et al., 2024; Russi-
+novich et al., 2025). As these agents evolve
+from stateless chatbots into autonomous systems
+equipped with persistent long-term memory, how-
+ever, the focus of security concern is shifting from
+transient inputs to durable state. This transition
+qualitatively changes the landscape of security: at-
+tackers no longer merely seek to influence an imme-
+diate response, but to manipulate how the system
+remembers, retrieves, plans, and actsacross future
+interactions.
+On the other hand, existing prompt-injection and
+RAG-corruption mitigations are fundamentally lim-
+ited for Long-Term Memory (LTM) security: they
+largely operate within a single session or retrieval
+episode (Debenedetti et al., 2025; Xiang et al.,
+2026) and do not fully address the cross-session,
+stateful nature of persistent memory (Packer et al.,
+2023; Zhong et al., 2024; Chhikara et al., 2025;
+Zou et al., 2026). Expanding context windows, for
+instance, do not subsume the security challenges
+introduced by LTM. Although a larger context win-
+dow improves within-session recall, it does not
+create persistent memory, as its contents are not
+automatically retained, shared, or retrieved across
+future interactions (Packer et al., 2023; Zhong et al.,
+2024; Chhikara et al., 2025). Provenance tagging,
+principal-scoped retrieval, rollbackable state, and
+verified forgetting arise whenever content outlives
+a session or crosses a principal boundary (Moreau
+et al., 2013; Li et al., 2025b; Rezazadeh et al., 2025;
+Bourtoule et al., 2021).
+Through a systematic review of existing litera-
+ture, we identify three fundamental properties in-
+troduced by long-term memory that remain unad-
+dressed by existing models. (1)Persistence. A
+poisoned entry can be recalled across an indefinite
+number of future sessions, long after the originat-
+ing context has closed (Dong et al., 2025; Zou et al.,
+2026). (2)Statefulness. The unit of security analy-
+arXiv:2604.16548v2  [cs.CR]  11 Jun 2026
+
+sis shifts from isolated input instances to the agent’s
+evolving memory state. An agent that has accumu-
+lated a cluster of subtly biased episodic memories
+may exhibit behavioral drift long before any sin-
+gle memory entry triggers a conventional safety
+classifier (Dong et al., 2025; Zou et al., 2026). (3)
+Propagation. In multi-agent and shared-state sys-
+tems, contamination spreads through inter-agent
+messages, shared stores, and tool arguments, pro-
+ducing cascading effects across session, role, and
+user boundaries (Gu et al., 2024; Men et al., 2025;
+El Yagoubi et al., 2026).
+Taken together, these properties suggest that
+LTM is not merely an extension of context or
+storage capacity, but a new security substrate that
+changes what must be protected, monitored, and
+governed. Existing agent-security frameworks,
+which are primarily organized around inputs, out-
+puts, or isolated interactions, therefore provide only
+a partial account of the risks introduced by persis-
+tent memory. The central question we pursue is:
+when an LLM agent acquires writable, retrievable,
+cross-session persistent memory, what qualitative
+change occurs in the security landscape, and how
+should the field organize its response?
+Comparison with exsiting surveys.Table 1 com-
+pares our work with existing surveys along three
+dimensions. While prior surveys address at most
+one of these axes partially, none organizes anal-
+ysis around the full memory lifecycle, accounts
+for benign risks, or proposes a unifying concep-
+tual framework. In contrast, our work addresses
+all three gaps through a unified lifecycle-oriented
+analysis of attacks, defenses, and governance.
+Our contributions.Through a systematic liter-
+ature review, we provide a taxonomy framework
+for LTM security in LLM agents, as shown in Fig-
+ure 1. This taxonomy serves as an organizational
+scaffold for analyzing how memory-related attacks,
+defenses, and governance requirements are con-
+nected across the memory lifecycle. In summary,
+our work makes three contributions:
+• A Memory Lifecycle Framework as an Organi-
+zational Principle. We propose a six-lifecycle-
+phase framework (WRITE; STORE; RETRIEVE;
+EXECUTE; SHARE& PROPAGATE; FORGET&
+ROLLBACK), exposing cross-phase attack chains
+invisible to single-turn or input-centric frame-
+works.
+• A Systematic Survey of Attacks and Defenses
+for LTM. We map representative attacks and de-
+fenses onto the lifecycle framework, revealing
+that threats at the write and retrieve phases are
+well-studied while defenses at the store, share,
+and forget phases remain comparatively sparse,
+and that no existing benchmark covers the full
+memory lifecycle.
+• A Formal Framework for Verifiable Memory Gov-
+ernance (VMG). We formalize memory gov-
+ernance into five primitives (Write Authoriza-
+tion, Provenance Visibility, Principal-Scoped
+Retrieval, Rollbackability, Verified Forgetting),
+each with a predicate definition and evaluation
+metric. This formalization transforms gover-
+nance from a qualitative desideratum into a set
+of verifiable, auditable system properties.
+Table 1: Comparison with existing surveys on agent
+and RAG memory. ✓ = explicit; G #= partial; ✗ = not
+addressed.
+Survey LifeCycle Benign Risk Conceptual Framework
+Zhang et al. (2025d)✗ ✗ ✗
+Wu et al. (2025b)✗ ✗ ✗
+Liang et al. (2025b)✗ ✗ ✗
+He et al. (2024)✗ ✗ ✗
+Mu et al. (2026)G #✗ ✗
+Bodea et al. (2026)G #✗ ✗
+Hu et al. (2025)✗ ✗ ✗
+Tang et al. (2026)G #✗ ✗
+Luo et al. (2026)G #✗ ✗
+Ours✓ ✓ ✓
+2 Memory Lifecycle Framework
+Both offensive and defensive literature tend to treat
+each work as an isolated phenomenon (Zhang et al.,
+2025d; Wu et al., 2025b; He et al., 2024; Tang et al.,
+2026; Mu et al., 2026), lacking a unified cross-stage
+framework to reveal the relationships among them.
+For example, poisoning implanted during the Write
+stage may be activated during the Retrieve stage
+and exploited during the Execute stage, while the
+most effective point of defensive intervention may
+lie in a different phase. In contrast, we organize
+our analysis around the memory lifecycle, which
+reveals where attacks are seeded, how they propa-
+gate across phases, and where defenses can most
+effectively intervene.
+As shown in Figure 2, we decompose the mem-
+ory lifecycle into six phases:Write, Store, Retrieve,
+Execute, Share & Propagate, Forget & Rollback.
+❶ Write. It commits content to long-term mem-
+ory through explicit user instruction, implicit dia-
+logue summarization, environmental observation,
+or cross-agent memory sharing. The central secu-
+rity question is whether memory writes are subject
+
+LTM Security
+in LLM Agents
+Attack Patterns
+Write
+Corpus-level Poisoning: AgentPoison (Chen et al., 2024),
+BadRAG (Xue et al., 2024), Phantom (Chaudhari et al., 2024)
+Query-induced Injection: MINJA (Dong et al., 2025),
+InjecMEM (Tian et al., 2026)
+Environment-injected: eTAMP (Zou et al., 2026),
+SpAIware (Herrador and Rehberger, 2026)
+Procedural Grafting: MemoryGraft (Srivastava and He, 2025)
+Store
+Compression Amplification: A-MEM (Xu et al., 2025),
+MemGPT (Packer et al., 2023)
+Provenance Stripping: MemOS (Li et al., 2025b)
+Retrieve & Execute
+Control-flow Hijacking: MCFA (Xu et al., 2026)
+Retrieval Poisoning: PoisonedRAG (Zou et al., 2025), (Liang et al., 2025a),
+KEPo (Chen et al., 2026)
+Backdoor / Trigger: AgentPoison (Chen et al., 2024),
+Phantom (Chaudhari et al., 2024)
+Share & Propagate
+Cross-agent Contagion: Agent Smith (Gu et al., 2024), (Men et al., 2025)
+Self-replicating Worms: AI Worm (Cohen et al., 2025)
+Cross-user Contamination: (Yang et al., 2026), (Wang et al., 2025)
+Forget & Rollback
+Residual Derivatives: Ghost of the Past (Zhang et al., 2024),
+PersistBench (Pulipaka et al., 2026)
+Reappearance after Deletion: (Wang et al., 2024b),
+Agentic Unlearning (Wang et al., 2026a)
+Failed Recovery / Traceback: RAGForensics (Zhang et al., 2025a),
+MemOS (Li et al., 2025b)
+Defenses
+Write-time Prevention
+Human-verified Freeze: VerificAgent (Nguyen et al., 2025)
+Provenance Tagging: PROV-AGENT (Souza et al., 2025)
+Retrieve-time Detection
+Certifiable Aggregation: RobustRAG (Xiang et al., 2026)
+Trust Scoring: TrustRAG (Zhou et al., 2025), SeCon-RAG (Si et al., 2025)
+Activation-based: RevPRAG (Tan et al., 2025b)
+Memory-native Consensus: A-MemGuard (Wei et al., 2025)
+Execute-time Containment
+Info-flow Control: CaMeL (Debenedetti et al., 2025),
+FIDES (Costa et al., 2025), PCAS (Palumbo et al., 2026)
+Tool Privilege: Progent (Shi et al., 2025),
+IsolateGPT (Wu et al., 2025c), (Jacob et al., 2025)
+Contextual Privacy: (Wen et al., 2026), AgentSpec (Wang et al., 2026b)
+Share-time Governance
+Principal-scoped Access: (Rezazadeh et al., 2025), (Li et al., 2025a)
+Contagion Detection: BlindGuard (Miao et al., 2025)
+Forget/Rollback Recovery
+Forensic Traceback: RAGForensics (Zhang et al., 2025a)
+Snapshot / Rollback: MemOS (Li et al., 2025b)
+Machine Unlearning: (Bourtoule et al., 2021), TOFU (Maini et al., 2024),
+RAG-unlearn (Wang et al., 2024b)
+Verifiable Memory
+Governance
+Write Authorization: VerificAgent (Nguyen et al., 2025), MINJA (Dong et al., 2025), eTAMP (Zou et al., 2026)
+Provenance Visibility: MemOS (Li et al., 2025b), PROV-AGENT (Souza et al., 2025)
+Principal-scoped Retrieval: (Rezazadeh et al., 2025), (Li et al., 2025a),
+NIST AI RMF (National Institute of Standards and Technology, 2023)
+Rollbackability: RAGForensics (Zhang et al., 2025a)
+Verified Forgetting: TOFU (Maini et al., 2024), RAG-unlearn (Wang et al., 2024b)
+Figure 1: Taxonomy of long-term memory security in LLM agents.
+to explicit source authentication and authorization,
+rather than allowing untrusted external content to
+enter memory as if it were user-endorsed (Dong
+et al., 2025; Zou et al., 2026; Tian et al., 2026;
+
+Greshake et al., 2023). ❷ Store. This phase in-
+dexes, compresses, merges, decays, and evicts writ-
+ten content (Packer et al., 2023; Zhong et al., 2024;
+Xu et al., 2025; Chhikara et al., 2025; Li et al.,
+2025b). It determines whether poisoned memory
+can persist, remain traceable, or become ampli-
+fied. When a poisoned entry is distilled into a
+high-level lesson, it may be effectively promoted to
+higher retrieval priority and presented with greater
+apparent authority. ❸ Retrieve. This phase brings
+previously stored memory entries back into con-
+text through embedding similarity, keyword match-
+ing, graph-based retrieval, or hybrid routing (Lewis
+et al., 2020; Edge et al., 2024; Zhang et al., 2025d).
+Rather than serving as a neutral lookup mechanism,
+retrieval shapes downstream reasoning by selecting
+which memories enter the model context and which
+are excluded (Barnett et al., 2024; Chen et al., 2024;
+Zou et al., 2025; Srivastava and He, 2025). ❹ Ex-
+ecute. In this phase, retrieved memories begin to
+shape the model’s planning, reasoning, and tool-
+use decisions (Sumers et al., 2024; Packer et al.,
+2023; Wang et al., 2024a). Recent work on memory
+control-flow attacks (Xu et al., 2026) shows that a
+sufficiently salient retrieved memory can override
+explicit user instructions, thereby shifting memory
+poisoning from a data-integrity issue to a control-
+flow problem. ❺ Share & Propagate. This phase
+determines whether contamination spreads later-
+ally, from agent to agent via shared memory (Gu
+et al., 2024); vertically, from individual users to
+organizational memory; or temporally, from one
+session to another through persistent profiles. It
+captures the risk that a poisoned memory may es-
+cape its original context and become reused, inher-
+ited, or trusted across broader interaction scopes.
+❻ Forget & Rollback. This phase concerns the
+system’s ability to remove contaminated memories,
+roll back to a known-safe state, trace the prove-
+nance of poisoned entries, and verify the effective-
+ness of remediation. It determines whether the
+system can recover after a successful attack. With-
+out snapshots, version diffs, and forensic traceback,
+defenses remain limited to best-effort prevention
+and provide no reliable path for post-breach reme-
+diation (Zhang et al., 2025a). The memory life-
+cycle decomposition is also motivated in part by
+an analogy with human memory, as introduced in
+Appendix B.
+3 Attack Patterns Across the Lifecycle
+We organize the attack literature along the lifecycle
+introduced in Section 2, tracing how a poisoned
+memory is seeded at WRITE, persists through
+STORE, reactivates at RETRIEVE, steers behavior
+at EXECUTE, spreads via SHARE& PROPAGATE,
+and survives incomplete cleanup during FORGET
+& ROLLBACK.
+3.1 Write: Seeding Poisoned Memory
+Within memory lifecycle, the WRITEphase is
+where memory poisoning attack first enters the
+system. Table 2 organizes write-path attacks by
+decreasing attacker privilege, ranging from corpus
+write access to query-only interaction and, finally,
+environment-only influence. Along this trajectory,
+both persistence and scope have expanded while
+attack effectiveness has remained high.
+Some representative works mark the concep-
+tual shifts in this gradient. AgentPoison (Chen
+et al., 2024) demonstrates that a corpus-level ad-
+versary can plant embedding-space backdoors with
+under 0.1% poison rate and over 80% attack suc-
+cess. MINJA (Dong et al., 2025) demonstrates that
+query-only interaction suffices to permanently alter
+memory state. eTAMP (Zou et al., 2026) closes
+the privilege gap entirely by showing that an at-
+tacker need not interact with the agent and only
+has to manipulate a web page the agent encounters
+during normal operation. Together, these results
+point to a clear defensive implication:the effective
+write-stage attack surface includes not only explicit
+memory updates, but also any observable context
+that can influence what the agent decides to store.
+3.2 Store: Provenance, Retention, and Audit
+in Long-Term Memory
+The STOREphase is a critical control point in long-
+term memory security because it determines how
+written entries are indexed, compressed, retained
+and evicted before later retrieval or execution. First,
+indexing determines which future queries can re-
+activate a memory entry, making retrieval keys,
+semantic labels, and storage-priority assignments
+potential adversarial amplifiers (Tian et al., 2026;
+Chen et al., 2024). Second, retention, decay, and
+eviction policies jointly regulate both availability
+and confidentiality. Retention schemes based on ac-
+cess frequency or recency may inadvertently keep
+adversarial entries alive while discarding legitimate
+ones. Furthermore, without automatic expiration or
+
+Memory Lifecycle Framework for Long-Term-Memory LLM Agents
+LifecyclePhase
+1WRITE2STORE3RETRIEVE4EXECUTE5SHARE & PROPAGATE6FORGET &ROLLBACK
+Commit content to long-term memory via explicit user input, summarization, environmental observation, or cross-agent sharing.
+Index, compress, merge,decay, and evict memories.Decides whatpersists, how it isrepresented, and how itcan be traced.
+✣◷⌫
+Retrieve relevant memoriesvia embedding, keyword,graph, or hybrid searchinto the active context.
+Retrieved memoriesinfluence reasoning,planning, and tool-usedecisions and actions.Memories spread acrossagents, users, sessions,or tools via messages,shared stores, orarguments.
+Delete, trace, or roll backmemories and verifythat they are fullyremoved or restored.
+TypicalArtifactsüRaw inputs üObservations üSummaries üExternal content
+üVector/graph indexüSummaries/lessonsüMetadata & provenanceüRetention policies
+üRetrieved items üScores & ranking üRetrieval context üProvenance info
+üPrompts w/ memoryüPlans / CoTüTool callsüActions / Outputs
+üMessagesüShared memoryüTool argumentsüCross-agent logs
+üDeletion recordsüRollback snapshotsüAudit logsüVerification proofs
+Cross-Phase Attack Chain
+Poison seeded at WRITELies dormant in STOREReactivated at RETRIEVESteers behavior at EXECUTESpreads via SHARESurvives in FORGET
+LegendData/Control FlowUser / External SourceAgent
+Memory Store
+Figure 2: The six-phase memory lifecycle of an LLM agent. Each phase introduces distinct security questions.
+user-accessible deletion, sensitive content can ac-
+cumulate in memory indefinitely, creating growing
+privacy exposure over time. (Zhong et al., 2024; Li
+et al., 2025b; Zhang et al., 2024; Zou et al., 2026).
+Third, versioning and audit determine whether post-
+breach forensics, rollback, and verifiable forgetting
+are possible; provenance, write logs, snapshots, and
+diff-auditable histories are prerequisites for tracing
+poisoned entries and their downstream effects (Li
+et al., 2025b; Zhang et al., 2025a). Thus, memory
+security must be anchored in storage-time prove-
+nance, versioning, auditability, and policy-aware
+retention, rather than retrofitted only at retrieval or
+execution time.
+3.3 Retrieve and Execute: From Selection to
+Action Steering
+RETRIEVEis the chokepoint that reconnects past
+writes with present use, allowing a memory entry
+written weeks earlier to re-enter the active context
+window and influence the agent’s current behav-
+ior. MCFA (Xu et al., 2026) shows that a suffi-
+ciently salient retrieved memory can override the
+user’s explicit instruction and dictate the tools the
+agent invokes, their invocation order, and their ar-
+guments, highlighting the risk that poisoned mem-
+ory can usurp the agent’s operational autonomy.
+MemoryGraft (Srivastava and He, 2025) extends
+this retrieval-to-execution threat beyond explicit
+tool control by showing that poisoned procedural
+memories, once retrieved as prior “successful ex-
+periences,” can be reused as task-solving strategies
+and silently replace the agent’s behavior without a
+separate trigger.
+Taken together, the WRITE, STORE, RETRIEVE,
+and EXECUTEphases yield the end-to-end attack
+chain. A manipulated web observation encoun-
+tered during routine browsing can be summarized
+as a memory entry and persisted to long-term stor-
+age. Days or weeks later, in a different session
+and possibly a different task context, the card is
+retrieved and silently steers tool invocation. The
+poisoning window closes before execution begins,
+so single-turn detection cannot observe both ends
+of the chain.
+3.4 Share & Propagate: Internal Channels
+Dominate Leakage
+In multi-agent and shared-state systems, contami-
+nation can spread through inter-agent messages,
+shared memory stores, and tool-mediated data
+flows, where poisoned content is passed as argu-
+ments to external tools or written into shared arti-
+facts. (Gu et al., 2024) shows that a single adversar-
+ial input can propagate exponentially through pair-
+wise exchanges, reaching approximately one mil-
+lion multimodal agents. (Men et al., 2025) demon-
+strates analogous propagation through dialogue;
+and ComPromptMized (Cohen et al., 2025) con-
+structs zero-click self-replicating prompts that tra-
+verse GenAI-powered email assistants, with each
+recipient’s agent absorbing and re-emitting the pay-
+load to its own contacts.
+
+Table 2: Write-path attacks ordered by decreasing attacker privilege.
+Work Attacker Access Activation Cross
+Session
+Cross
+Site Mechanism and Evidence
+AgentPoison (Chen
+et al., 2024)
+Corpus write Optimized
+backdoor
+✓–Embedding-space poisoning.Optimizes
+poisoned memories with<0.1%poison
+rate and≥80%ASR.
+InjecMEM (Tian
+et al., 2026)
+Single
+interaction
+Topic-
+conditioned
+✓–Retriever-agnostic anchoring.Combines
+anchors with Multi-GCG, reaching 76.6%
+ASR on MemoryOS.
+MINJA (Dong
+et al., 2025)
+Query-only Victim-term
+retrieval
+✓–Self-generated poison.Uses bridging steps
+and indication prompts to make the agent
+create the malicious memory.
+MemoryGraft (Sri-
+vastava and He,
+2025)
+Ingestion artifact Trigger-free✓–Procedural-memory grafting.Imitates
+semantic procedures rather than injecting
+factual memories.
+eTAMP (Zou
+et al., 2026)
+Environment
+only
+Observation-
+based
+✓ ✓Web-observation poisoning.Adversarial
+web content is absorbed during browsing,
+producing8×“frustration” amplification.
+3.5 Forget & Rollback: Residual State and
+Failed Recovery
+The FORGETphase is where the system is expected
+to remove poisoned or sensitive memory state after
+an attack has been detected. Unlike WRITEor RE-
+TRIEVE, the risk in FORGETdoes not come from
+introducing or reactivating a new payload, but from
+failing to fully remove poisoned or sensitive mem-
+ory state after it has been discovered. Incomplete
+forgetting arises because a single memory item may
+leave derivatives across raw dialogue logs, sum-
+marized memory cards, vector indexes, reflected
+lessons, shared stores, and audit records (Packer
+et al., 2023; Xu et al., 2025; Chhikara et al., 2025;
+Li et al., 2025b; Rezazadeh et al., 2025). Deleting
+only the visible entry can therefore leave retriev-
+able residues in compressed summaries, retrieval
+indices, or propagated copies, allowing contamina-
+tion to reappear after apparent cleanup (Wang et al.,
+2024b, 2026a).
+4 Defenses: Prevention, Containment,
+and Recovery
+Similar to attacks, defenses can be categorized
+based on their role in the lifecycle. Just as attacks
+exploit the sequential nature of memory operations
+by seeding poison at WRITE, amplifying it through
+STORE, reactivating it at RETRIEVE, and propagat-
+ing it via SHARE, defenses must be deployed in a
+correspondingly distributed fashion, with no single
+intervention point sufficient to break the full attack
+chain. This lifecycle-aware perspective motivates a
+layered defense architecture that addresses preven-
+tion, containment, and recovery as complementary,
+rather than competing, objectives. AtWRITEtime,
+the central objective is to prevent untrusted con-
+tent from being consolidated into persistent mem-
+ory. VerificAgent (Nguyen et al., 2025) introduces
+human-verified freezing, where candidate memo-
+ries are audited before being committed to a frozen
+safety contract. MemCube-style memory units (Li
+et al., 2025b) instead attach source, version, sensi-
+tivity, and temporal metadata at write time, making
+later audit, access control, and rollback possible.
+STORE-time defenses remain comparatively un-
+derdeveloped. Nevertheless, versioned snapshots,
+write logs, content-addressable records, and com-
+pression audits provide the necessary architectural
+substrate for subsequent recovery. Provenance stan-
+dards, such as W3C PROV (Moreau et al., 2013),
+further offer a principled serialization layer for
+representing and managing these lineage-bearing
+memory objects.
+Among the memory lifecycle stages, theRE-
+TRIEVEphase has seen the most concentrated
+development of defensive mechanisms. Ro-
+bustRAG (Xiang et al., 2026) offers certifiable
+robustness against retrieval corruption through
+isolate-then-aggregate generation, substantially re-
+ducing the effectiveness of poisoning attacks.
+TrustRAG (Zhou et al., 2025) and SeCon-RAG (Si
+et al., 2025) use clustering, trust scoring, semantic
+similarity, and contradiction-aware filtering to dis-
+tinguish benign from malicious retrieved content.
+RevPRAG (Tan et al., 2025b) detects poisoning
+through activation differences between poisoned
+and non-poisoned generations. A-MemGuard (Wei
+et al., 2025) is more memory-native: it retrieves
+semantically related memories, compares indepen-
+dent reasoning paths, treats disagreement as an
+
+anomaly signal, and distills detected attacks into
+lesson memories for future hardening. EXECUTE-
+time defenses ask not what enters the context win-
+dow, but what the model may do with it. CaMeL,
+FIDES, and PCAS enforce information-flow con-
+trol by separating data and control planes and re-
+stricting the influence of untrusted content on tool
+use or program flow (Debenedetti et al., 2025;
+Costa et al., 2025; Palumbo et al., 2026). Progent,
+IsolateGPT, and type-directed privilege separation
+further reduce blast radius through fine-grained tool
+policies, execution isolation, and typed privilege
+boundaries (Shi et al., 2025; Wu et al., 2025c; Jacob
+et al., 2025).
+SHARE-time defenses shift the focus from
+content-level inspection to principal-aware access
+and interaction modeling. Collaborative Mem-
+ory (Rezazadeh et al., 2025) models multi-user
+and multi-agent access through a time-evolving
+principal–resource graph, while BlindGuard (Miao
+et al., 2025) uses unsupervised graph-level anomaly
+detection to flag previously unseen multi-agent con-
+tagion patterns. Finally, defenses for theFORGET
+&ROLLBACKphase remain comparatively sparse.
+RAGForensics (Zhang et al., 2025a) shows that
+post-hoc traceback is feasible for static RAG cor-
+pora, and (owa) provides an industry reference for
+integrity checks, policy enforcement, snapshots,
+and rollback primitives. However, end-to-end eval-
+uations of these defenses remain limited for dy-
+namically updated agent memories, especially for
+verifying deletion, ensuring reliable rollback, and
+supporting forensic traceback.
+5 Verifiable Memory Governance: An
+Operational Framework
+After surveying the landscape of attacks and de-
+fenses in the preceding sections, we arrive at a
+central question:what verifiable mechanisms must
+a long-term-memory Agent or LLM system provide
+in order to maintain auditable, recoverable control
+over its own memory state, and thereby support
+trustworthy user operations such as control, trac-
+ing, isolation, recovery, and deletion? We refer
+to this requirement asVerifiable Memory Gover-
+nance (VMG). In this work, we identify five core
+primitives that support Verifiable Memory Gover-
+nance:
+• Write Authorization (WA)requires that every
+entry committed to long-term memory be at-
+tributable to an authenticated source and pass
+an explicit authorization check before consolida-
+tion, preventing untrusted external content from
+entering memory as if user-endorsed.
+• Provenance Visibility (PV)requires that ev-
+ery memory entry carry a queryable, lineage-
+complete provenance record tracing back to its
+originating write event through any intermediate
+summarization or merging steps, enabling post-
+breach attribution and forensic analysis.
+• Principal-Scoped Retrieval (PS)requires that
+the retrieval function return only entries whose
+authorized scope includes the querying princi-
+pal, preventing cross-user or cross-agent memory
+leakage even under adversarial queries.
+• Rollbackability (RB)requires that the system
+maintain versioned snapshots and write logs suffi-
+cient to restore the memory store to a known-safe
+state at any prior point in time, enabling recovery
+after a successful attack.
+• Verified Forgetting (VF)requires that after a
+deletion operation, the system can demonstrate
+through post-deletion membership tests that the
+target content is no longer recoverable from any
+substrate—including raw logs, compressed sum-
+maries, vector indices, and propagated copies.
+As summarized in Table 3 in Appendix, for each
+primitive, we specify the representative threat it
+withstand, the corresponding defense direction, and
+a proposed evaluation metric.
+Formal definition.To make the five primi-
+tives evaluable, we cast them as predicates over
+a memory store Mt at time t. Each entry
+m∈M t carries metadata (src(m),scope(m),
+prov(m),ver(m)) denoting source principal, au-
+thorized principal set, provenance record, and ver-
+sion identifier. Mt denotes the complete state of
+the system’s memory store at timet. Formally, we
+define the following criteria:
+W A(Mt) :=∀m∈M t,src(m)̸=⊥
+∧auth W(src(m), m, t) = 1,
+(1)
+where ⊥ denotes an undefined or missing source
+principal, and authW denotes an explicit write-
+time authorization check.
+PV(Mt) :=∀m∈M t,Queryable(m)
+∧LineageComplete(m),
+(2)
+
+which requires every memory entry to maintain
+queryable provenance traceable to its original write
+event, with lineage preserved across summariza-
+tion, merging, or distillation.
+PS(Mt) :=∀q, π, R(q, π, M t)
+⊆ {m∈M t :π∈scope(m)},
+(3)
+which requires that, for any query q and requesting
+principal π, the output of R(q, π, Mt) be strictly
+restricted to entries for whichπ∈scope(m).
+RB(Mt) :=∀t 0 < ts.t.
+rollback(Mt, t0) =M t0,
+(4)
+which requires that the system be able to roll back
+the current memory store to an exact prior state
+Mt0 for somet 0 < t.
+VFε(Mt)
+:=∀X,Pr
+q∼QX
+[ExposeX (q, FX (Mt)) = 1]
+≤ε,
+(5)
+which bounds the probability that any probing
+query q can re-expose target content X after dele-
+tion by FX to at most ε. FX (·) denotes the dele-
+tion operator removing target content X from the
+memory store. QX is the distribution over adver-
+sarial probing queries whose intent is to recover X.
+ExposeX (q, M ′) is a binary indicator that equals
+1 if the post-deletion store M ′ =F X (Mt) returns
+a response sufficiently reconstructsX.
+A optimal system should satisfy ε-VMG at time
+tif all five hold simultaneously:
+MSε(Mt) :=W A∧PV∧PS∧RB∧VF ε.(6)
+Under lineage-based deletion the primitives form a
+design pre-order:
+VFε ⪯RB⪯PV⪯W A,(7)
+where X⪯Y means implementing X requires
+Y as an architectural precondition; PS is orthog-
+onal to this lineage chain but necessary for any
+confidentiality claim. Specifically,PVdepends
+onWAbecause lineage-complete provenance re-
+quires every write event to carry an authenticated
+source principal src(m)̸=⊥ ; without write-time
+authorization, provenance records may exist but
+Layer1Layer2Layer3Layer4
+Write AuthorizationProvenance Visibility
+Principal-Scoped Retrieval 
+Rollbackability
+Verified Forgetting
+Layer5
+Partial supportPartial support in MemOS, VerificAgent
+Early-stageLargely absentNo existing literature
+Dependency
+Figure 3: The five primitives as a dependency tower.
+cannot be anchored to a verified origin, rendering
+the lineage incomplete and post-breach attribution
+unreliable.
+Figure 3 renders the dependency as a tower: the
+widest, most mature foundation is WA; each suc-
+cessive layer narrows and becomes less deployed.
+This dependency structure most clearly shows why
+VMG must be treated as a lifecycle property rather
+than as a final layer added post hoc. However,
+existing literature suggests that PV , which under-
+pins both RB and VF, remains rare in published
+architectures. This observation yields a key diag-
+nostic insight: near-term progress should focus on
+building provenance infrastructure before pursuing
+higher-level primitives whose architectural precon-
+ditions are not yet in place.
+6 Conclusion and Future Work
+As LLM agents increasingly rely on persistent
+memory, cross-session long-term memory intro-
+duces risks beyond conventional input-centric or
+single-turn security frameworks. We propose a
+Memory Lifecycle Framework organizing attacks
+and defenses across six phases and four objectives,
+showing that memory threats unfold as cross-phase
+chains where poisoned content can persist, propa-
+gate, and resist cleanup. We further introduce Veri-
+fiable Memory Governance, specifying five primi-
+tives for auditable and recoverable memory control,
+and highlight key gaps in provenance infrastruc-
+ture, cross-principal propagation, and post-deletion
+verification.
+A critical future direction is to design bench-
+marks that assess LTM security across the entire
+memory lifecycle, including cross-session contam-
+ination, share-time propagation, and forget-time
+recovery, all of which are still only partially cov-
+ered by existing benchmarks (Zhang et al., 2025c;
+Debenedetti et al., 2024; Zhang et al., 2025b; Zhan
+et al., 2024; Wu et al., 2025a; Maharana et al., 2024;
+Tan et al., 2025a; Hu et al., 2026; Yoon et al., 2026;
+Guo et al., 2026; Pulipaka et al., 2026).
+
+Limitations
+The scope and findings of this survey should be
+understood in light of several limitations. First,
+long-term memory security for LLM agents is a
+rapidly evolving area, and many relevant systems,
+attacks, and benchmarks keep emerging. Although
+we aim to cover representative work across attacks,
+defenses, and governance, our taxonomy may not
+fully capture recent or unpublished developments,
+especially in industrial memory systems whose in-
+ternal designs are not publicly documented.
+Second, our Memory Lifecycle Framework is
+intended as an organizational scaffold rather than
+a strict decomposition of all memory operations.
+In practice, the boundaries between phases can
+be blurred: retrieval and execution may be tightly
+coupled, storage and summarization may occur
+continuously, and sharing may implicitly happen
+through tool calls, logs, or external artifacts. There-
+fore, some attacks and defenses may span multiple
+phases and can be categorized differently depend-
+ing on the system architecture.
+References
+GitHub - OWASP/www-project-agent-memory-
+guard: OWASP Foundation web repository
+— github.com. https://github.com/OWASP/
+www-project-agent-memory-guard . [Accessed
+23-05-2026].
+Scott Barnett, Stefanus Kurniawan, Srikanth Thudumu,
+Zach Brannelly, and Mohamed Abdelrazek. 2024.
+Seven failure points when engineering a retrieval
+augmented generation system. InProceedings of
+the IEEE/ACM 3rd International Conference on AI
+Engineering (CAIN ’24), pages 194–199.
+Andreea-Elena Bodea, Stephen Meisenbacher, Alexan-
+dra Klymenko, and Florian Matthes. 2026. SoK:
+Privacy risks and mitigations in retrieval-augmented
+generation systems. InIEEE Conference on Secure
+and Trustworthy Machine Learning (SaTML).
+Lucas Bourtoule, Varun Chandrasekaran, Christopher A
+Choquette-Choo, Hengrui Jia, Adelin Travers, Baiwu
+Zhang, David Lie, and Nicolas Papernot. 2021. Ma-
+chine unlearning.IEEE Symposium on Security and
+Privacy.
+Nicholas Carlini, Florian Tramer, Eric Wallace,
+Matthew Jagielski, Ariel Herbert-V oss, Katherine
+Lee, Adam Roberts, Tom Brown, Dawn Song, Ulfar
+Erlingsson, and 1 others. 2021. Extracting training
+data from large language models. InUSENIX Secu-
+rity Symposium.
+Harsh Chaudhari, Giorgio Severi, John Abascal, An-
+shuman Suri, Matthew Jagielski, Christopher A
+Choquette-Choo, Milad Nasr, Cristina Nita-Rotaru,
+and Alina Oprea. 2024. Phantom: General backdoor
+attacks on retrieval augmented language generation.
+arXiv preprint arXiv:2405.20485.
+Qizhi Chen, Chao Qi, Yihong Huang, Muquan Li,
+Rongzheng Wang, Dongyang Zhang, Ke Qin, and
+Shuang Liang. 2026. KEPo: Knowledge evolution
+poison on graph-based retrieval-augmented genera-
+tion. InProceedings of the ACM Web Conference
+(WWW). ArXiv:2603.11501.
+Zhaorun Chen, Zhen Xiang, Chaowei Xiao, Dawn Song,
+and Bo Li. 2024. AgentPoison: Red-teaming LLM
+agents via poisoning memory or knowledge bases. In
+Advances in Neural Information Processing Systems
+(NeurIPS). ArXiv:2407.12784.
+Prateek Chhikara, Dev Khant, Saket Aryan, Taranjeet
+Singh, and Deshraj Yadav. 2025. Mem0: Building
+production-ready AI agents with scalable long-term
+memory.arXiv preprint arXiv:2504.19413.
+Stav Cohen, Ron Bitton, and Ben Nassi. 2025. Here
+comes the AI worm: Unleashing zero-click worms
+that target GenAI-powered applications. InACM
+Conference on Computer and Communications Secu-
+rity (CCS). ArXiv:2403.02817.
+Manuel Costa, Boris Köpf, Aashish Kolluri, An-
+drew Paverd, Mark Russinovich, Ahmed Salem,
+Shruti Tople, Lukas Wutschitz, and Santiago
+Zanella-Béguelin. 2025. Securing AI agents
+with information-flow control.arXiv preprint
+arXiv:2505.23643. Microsoft Research.
+Edoardo Debenedetti, Ilia Shumailov, Tianqi Fan, Jamie
+Hayes, Nicholas Carlini, Daniel Fabian, Christoph
+Kern, Chongyang Shi, Andreas Terzis, and Florian
+Tramèr. 2025. CaMeL: Defeating prompt injections
+by design.arXiv preprint arXiv:2503.18813.
+Edoardo Debenedetti and 1 others. 2024. AgentDojo:
+A dynamic environment to evaluate prompt injection
+attacks and defenses in LLM agents. InAdvances
+in Neural Information Processing Systems (NeurIPS)
+Datasets and Benchmarks Track. ArXiv:2406.13352.
+Shen Dong, Shaochen Xu, Pengfei He, Yige Li, Jiliang
+Tang, Tianming Liu, Hui Liu, and Zhen Xiang. 2025.
+Memory injection attacks on LLM agents via query-
+only interaction. InAdvances in Neural Information
+Processing Systems (NeurIPS). ArXiv:2503.03704.
+Darren Edge, Ha Trinh, Newman Cheng, Joshua
+Bradley, Alex Chao, Apurva Mody, Steven Truitt,
+Dasha Metropolitansky, Robert Osazuwa Ness, and
+Jonathan Larson. 2024. From local to global: A
+graph RAG approach to query-focused summariza-
+tion.arXiv preprint arXiv:2404.16130.
+Faouzi El Yagoubi, Godwin Badu-Marfo, and Ranwa
+Al Mallah. 2026. AgentLeak: A full-stack bench-
+mark for privacy leakage in multi-agent LLM sys-
+tems.arXiv preprint arXiv:2602.11510.
+
+Kai Greshake, Sahar Abdelnabi, Shailesh Mishra,
+Christoph Endres, Thorsten Holz, and Mario Fritz.
+2023. Not what you’ve signed up for: Compromis-
+ing real-world llm-integrated applications with indi-
+rect prompt injection. InProceedings of the 16th
+ACM workshop on artificial intelligence and security,
+pages 79–90.
+Xiangming Gu and 1 others. 2024. Agent Smith: A
+single image can jailbreak one million multimodal
+LLM agents exponentially fast. InProceedings of
+the International Conference on Machine Learning
+(ICML).
+Jiahe Guo, Xiangran Guo, Yulin Hu, Zimo Long,
+Xingyu Sui, Xuda Zhi, Yongbo Huang, Hao He,
+Weixiang Zhao, Yanyan Zhao, and Bing Qin. 2026.
+When personalization legitimizes risks: Uncovering
+safety vulnerabilities in personalized dialogue agents.
+arXiv preprint arXiv:2601.17887.
+Feng He, Tianqing Zhu, Dayong Ye, Bo Liu, Wanlei
+Zhou, and Philip S Yu. 2024. The emerged secu-
+rity and privacy of LLM agent: A survey with case
+studies.arXiv preprint arXiv:2407.19354.
+Yu He, Yifei Chen, Yiming Li, Shuo Shao, Leyi Qi,
+Boheng Li, Dacheng Tao, and Zhan Qin. 2025.
+External data extraction attacks against retrieval-
+augmented large language models.arXiv preprint
+arXiv:2510.02964.
+Manuel Herrador and Johann Rehberger. 2026. SpAI-
+ware: Uncovering a novel artificial intelligence attack
+vector through persistent memory in LLM applica-
+tions and agents.Future Generation Computer Sys-
+tems, 174:107994. First disclosed as a blog post by
+Rehberger, September 2024.
+Yuanzhe Hu, Yu Wang, and Julian McAuley. 2026.
+Evaluating memory in LLM agents via incre-
+mental multi-turn interactions. InInternational
+Conference on Learning Representations (ICLR).
+ArXiv:2507.05257.
+Yuyang Hu, Shichun Liu, Yanwei Yue, Guibin Zhang,
+Boyang Liu, Fangyi Zhu, Jiahang Lin, Honglin
+Guo, Shihan Dou, Zhiheng Xi, and 1 others. 2025.
+Memory in the age of ai agents.arXiv preprint
+arXiv:2512.13564.
+Dennis Jacob, Emad Alghamdi, Zhanhao Hu, Basel
+Alomair, and David Wagner. 2025. Better privilege
+separation for agents by restricting data types.arXiv
+preprint arXiv:2509.25926.
+Patrick Lewis, Ethan Perez, Aleksandra Piktus, Fabio
+Petroni, Vladimir Karpukhin, Naman Goyal, Hein-
+rich Küttler, Mike Lewis, Wen-tau Yih, Tim Rock-
+täschel, and 1 others. 2020. Retrieval-augmented
+generation for knowledge-intensive NLP tasks.Ad-
+vances in Neural Information Processing Systems,
+33:9459–9474.
+Xinfeng Li, Dong Huang, Jie Li, Hongyi Cai, Zhenhong
+Zhou, Wei Dong, XiaoFeng Wang, and Yang Liu.
+2025a. A vision for access control in LLM-based
+agent systems.arXiv preprint arXiv:2510.11108.
+Zhiyu Li, Shichao Song, Hanyu Wang, Simin Niu, Ding
+Chen, Jiawei Yang, Chenyang Xi, Huayi Lai, Ji-
+hao Zhao, Yezhaohui Wang, and 1 others. 2025b.
+MemOS: A memory OS for AI system.arXiv
+preprint arXiv:2507.03724.
+Jiacheng Liang, Yuhui Wang, Changjiang Li, Rongyi
+Zhu, Tanqiu Jiang, Neil Gong, and Ting Wang.
+2025a. GraphRAG under fire.arXiv preprint
+arXiv:2501.14050.
+Jiafeng Liang, Hao Li, Chang Li, Jiaqi Zhou, Shixin
+Jiang, Zekun Wang, Changkai Ji, Zhihao Zhu,
+Runxuan Liu, Tao Ren, Jinlan Fu, See-Kiong Ng,
+Xia Liang, Ming Liu, and Bing Qin. 2025b. AI
+meets brain: Memory systems from cognitive neu-
+roscience to autonomous agents.arXiv preprint
+arXiv:2512.23343.
+Yupei Liu, Yuqi Jia, Runpeng Geng, Jinyuan Jia, and
+Neil Zhenqiang Gong. 2024. Formalizing and bench-
+marking prompt injection attacks and defenses. In
+33rd USENIX Security Symposium (USENIX Security
+24), pages 1831–1847.
+Elizabeth F Loftus. 2005. Planting misinformation in
+the human mind: A 30-year investigation of the mal-
+leability of memory.Learning & Memory, 12(4):361–
+366.
+Jinghao Luo, Yuchen Tian, Chuxue Cao, Ziyang Luo,
+Hongzhan Lin, Kaixin Li, Chuyi Kong, Ruichao
+Yang, and Jing Ma. 2026. From storage to expe-
+rience: A survey on the evolution of LLM agent
+memory mechanisms.Preprints.org 202601.0618.
+ICLR 2026 Workshop on Memory for LLM-Based
+Agentic Systems (MemAgents).
+Adyasha Maharana, Dong-Ho Lee, Sergey Tulyakov,
+Mohit Bansal, Francesco Barbieri, and Yuwei Fang.
+2024. Evaluating very long-term conversational
+memory of LLM agents. InProceedings of the 62nd
+Annual Meeting of the Association for Computational
+Linguistics (ACL).
+Pratyush Maini, Zhili Feng, Avi Schwarzschild,
+Zachary C Lipton, and J Zico Kolter. 2024.
+TOFU: A task of fictitious unlearning for LLMs.
+InConference on Language Modeling (COLM).
+ArXiv:2401.06121.
+Tianyi Men, Pengfei Cao, Zhuoran Jin, Yubo Chen,
+Kang Liu, and Jun Zhao. 2025. A troublemaker with
+contagious jailbreak makes chaos in honest towns. In
+Proceedings of the 63rd Annual Meeting of the ACL
+(Volume 1: Long Papers). ArXiv:2410.16155.
+Rui Miao, Yixin Liu, Yili Wang, Xu Shen, Yue
+Tan, Yiwei Dai, Shirui Pan, and Xin Wang. 2025.
+BlindGuard: Safeguarding LLM-based multi-agent
+systems under unknown attacks.arXiv preprint
+arXiv:2508.08127.
+
+Niloofar Mireshghallah, Neal Mangaokar, Narine
+Kokhlikyan, Arman Zharmagambetov, Manzil Za-
+heer, Saeed Mahloujifar, and Kamalika Chaudhuri.
+2026. CIMemories: A compositional benchmark for
+contextual integrity of persistent memory in LLMs.
+InInternational Conference on Learning Representa-
+tions (ICLR). ArXiv:2511.14937.
+Luc Moreau, Paolo Missier, Khalid Belhajjame, James
+Cheney, Sam Coppens, Stephen Cresswell, Yolanda
+Gil, Paul Groth, Graham Klyne, Timothy Lebo, and 1
+others. 2013. PROV-DM: The PROV data model.
+https://www.w3.org/TR/prov-dm/. W3C Rec-
+ommendation.
+Yanming Mu, Hao Hu, Feiyang Li, Qiao Yuan, Jiang
+Wu, Zichuan Liu, Pengcheng Liu, Mei Wang, Hong-
+wei Zhou, and Yuling Liu. 2026. Towards secure
+retrieval-augmented generation: A comprehensive
+review of threats, defenses and benchmarks.arXiv
+preprint arXiv:2603.21654.
+Karim Nader, Glenn E Schafe, and Joseph E LeDoux.
+2000. Fear memories require protein synthesis in the
+amygdala for reconsolidation after retrieval.Nature,
+406(6797):722–726.
+Milad Nasr, Chawin Sitawarin, Sander V Schul-
+hoff, Michael Ilie, Jamie Hayes, Juliette Pluto,
+Abhradeep Guha Thakurta, Shuang Song, Andreas
+Terzis, Ilia Shumailov, Harsh Chaudhari, Kai Yuan-
+qing Xiao, Florian Tramèr, and Nicholas Carlini.
+2026. The attacker moves second: Stronger adaptive
+attacks bypass defenses against LLM jailbreaks and
+prompt injections.
+National Institute of Standards and Technology. 2023.
+Artificial intelligence risk management framework
+(AI RMF 1.0). Technical Report NIST AI 100-1, U.S.
+Department of Commerce.
+Thong Q Nguyen, Shubhang Desai, Raja Hasnain An-
+war, Firoz Shaik, Vishwas Suryanarayanan, and
+Vishal Chowdhary. 2025. VerificAgent: Domain-
+specific memory verification for scalable oversight
+of aligned computer-use agents.arXiv preprint
+arXiv:2506.02539.
+Charles Packer, Sarah Wooders, Kevin Lin, Vivian Fang,
+Shishir G Patil, Ion Stoica, and Joseph E Gonzalez.
+2023. MemGPT: Towards LLMs as operating sys-
+tems.arXiv preprint arXiv:2310.08560.
+Nils Palumbo, Sarthak Choudhary, Jihye Choi, Prasad
+Chalasani, and Somesh Jha. 2026. Policy com-
+piler for secure agentic systems.arXiv preprint
+arXiv:2602.16708.
+Sidharth Pulipaka, Oliver Chen, Manas Sharma, Taaha S
+Bajwa, Vyas Raina, and Ivaxi Sheth. 2026. Persist-
+Bench: When should long-term memories be forgot-
+ten by LLMs?arXiv preprint arXiv:2602.01146.
+Alireza Rezazadeh, Zichao Li, Ange Lou, Yuying
+Zhao, Wei Wei, and Yujia Bao. 2025. Collabora-
+tive memory: Multi-user memory sharing in LLM
+agents with dynamic access control.arXiv preprint
+arXiv:2505.18279.
+Henry L Roediger III, Michelle L Meade, and Erik T
+Bergman. 2001. Social contagion of memory.Psy-
+chonomic Bulletin & Review, 8(2):365–371.
+Mark Russinovich, Ahmed Salem, and Ronen Eldan.
+2025. Great, now write an article about that: The
+Crescendo multi-turn LLM jailbreak attack. In
+USENIX Security Symposium.
+Daniel L Schacter and Donna Rose Addis. 2007. Re-
+membering the past to imagine the future: The
+prospective brain.Nature Reviews Neuroscience,
+8(9):657–661.
+Daniel L Schacter, Kenneth A Norman, and Wilma
+Koutstaal. 1998. The cognitive neuroscience of con-
+structive memory.Annual Review of Psychology,
+49:289–318.
+Tianneng Shi, Jingxuan He, Zhun Wang, Hongwei
+Li, Linyu Wu, Wenbo Guo, and Dawn Song. 2025.
+Progent: Programmable privilege control for LLM
+agents.arXiv preprint arXiv:2504.11703.
+Xiaonan Si, Meilin Zhu, Simeng Qin, Lijia Yu, Li-
+jun Zhang, Shuaitong Liu, Xinfeng Li, Ranjie
+Duan, Yang Liu, and Xiaojun Jia. 2025. SeCon-
+RAG: A two-stage semantic filtering and conflict-
+free framework for trustworthy RAG.arXiv preprint
+arXiv:2510.09710. NeurIPS 2025.
+Renan Souza, Amal Gueroudji, Stephen DeWitt, Daniel
+Rosendo, Tirthankar Ghosal, Robert Ross, Prasanna
+Balaprakash, and Rafael Ferreira da Silva. 2025.
+PROV-AGENT: Unified provenance for tracking
+AI agent interactions in agentic workflows.arXiv
+preprint arXiv:2508.02866. Extends W3C PROV-
+DM to agent workflow provenance.
+Larry R Squire, Lisa Genzel, John T Wixted, and
+Richard G Morris. 2015. Memory consolida-
+tion.Cold Spring Harbor Perspectives in Biology,
+7(8):a021766.
+Saksham Sahai Srivastava and Haoyu He. 2025. Mem-
+oryGraft: Persistent compromise of LLM agents
+via poisoned experience retrieval.arXiv preprint
+arXiv:2512.16962.
+Theodore R Sumers, Shunyu Yao, Karthik Narasimhan,
+and Thomas L Griffiths. 2024. Cognitive architec-
+tures for language agents (CoALA).Transactions on
+Machine Learning Research.
+Haoran Tan, Zeyu Zhang, Chen Ma, Xu Chen, Quanyu
+Dai, and Zhenhua Dong. 2025a. MemBench: To-
+wards more comprehensive evaluation on the mem-
+ory of LLM-based agents. InFindings of the Annual
+Meeting of the Association for Computational Lin-
+guistics (ACL). ArXiv:2506.21605.
+
+Xue Tan, Hao Luan, Mingyu Luo, Xiaoyan Sun, Ping
+Chen, and Jun Dai. 2025b. RevPRAG: Revealing
+poisoning attacks in retrieval-augmented generation
+through LLM activation analysis. InFindings of
+the Conference on Empirical Methods in Natural
+Language Processing (EMNLP). ArXiv:2411.18948.
+Yaxin Tang, Yijia Liu, Jiahe Lan, Zheng Yan, and Erol
+Gelenbe. 2026. Security of LLM-based agents re-
+garding attacks, defenses, and applications: A com-
+prehensive survey.Information Fusion, 127:103941.
+Hanling Tian, Zeyang Sha, Jingying Wang, Yuhang
+Liu, Zhehao Huang, and Xiaolin Huang. 2026. In-
+jecMEM: Memory injection attack on LLM agent
+memory systems.OpenReview preprint. OpenRe-
+view: QVX6hcJ2um.
+Bin Wang, Fan Wang, Pingping Wang, Jinyu Cong,
+Yang Yu, Yilong Yin, Zhongyi Han, and Benzheng
+Wei. 2026a. Agentic unlearning: When LLM
+agent meets machine unlearning.arXiv preprint
+arXiv:2602.17692.
+Bo Wang, Weiyi He, Shenglai Zeng, Zhen Xiang, Yue
+Xing, Jiliang Tang, and Pengfei He. 2025. Un-
+veiling privacy risks in LLM agent memory. In
+Proceedings of the 63rd Annual Meeting of the
+Association for Computational Linguistics (ACL).
+ArXiv:2502.13172.
+Haoyu Wang, Christopher M Poskitt, and Jun Sun.
+2026b. AgentSpec: Customizable runtime en-
+forcement for safe and reliable LLM agents. In
+Proceedings of the 48th IEEE/ACM International
+Conference on Software Engineering (ICSE ’26).
+ArXiv:2503.18666.
+Lei Wang, Chen Ma, Xueyang Feng, Zeyu Zhang, Hao
+Yang, Jingsen Zhang, Zhiyuan Chen, Jiakai Tang,
+Xu Chen, Yankai Lin, and 1 others. 2024a. A survey
+on large language model based autonomous agents.
+Frontiers of Computer Science, 18(6):186345.
+Shang Wang, Tianqing Zhu, Dayong Ye, and Wan-
+lei Zhou. 2024b. When machine unlearning
+meets retrieval-augmented generation (RAG): Keep
+secret or forget knowledge?arXiv preprint
+arXiv:2410.15267.
+Qianshan Wei, Tengchao Yang, Yaochen Wang, Xin-
+feng Li, Lijun Li, Zhenfei Yin, Yi Zhan, Thorsten
+Holz, Zhiqiang Lin, and XiaoFeng Wang. 2025.
+A-MemGuard: A proactive defense framework
+for LLM-based agent memory.arXiv preprint
+arXiv:2510.02373.
+Yule Wen, Yanzhe Zhang, Jianxun Lian, Xiaoyuan Yi,
+Xing Xie, and Diyi Yang. 2026. Contextualized
+privacy defense for LLM agents.arXiv preprint
+arXiv:2603.02983.
+Di Wu, Hongwei Wang, Wenhao Yu, Yuwei Zhang, Kai-
+Wei Chang, and Dong Yu. 2025a. LongMemEval:
+Benchmarking chat assistants on long-term interac-
+tive memory. InInternational Conference on Learn-
+ing Representations (ICLR).
+Yaxiong Wu, Sheng Liang, Chen Zhang, Yichao Wang,
+Yongyue Zhang, Huifeng Guo, Ruiming Tang, and
+Yong Liu. 2025b. From human memory to AI mem-
+ory: A survey on memory mechanisms in the era of
+LLMs.arXiv preprint arXiv:2504.15965.
+Yuhao Wu, Franziska Roesner, Tadayoshi Kohno, Ning
+Zhang, and Umar Iqbal. 2025c. IsolateGPT: An exe-
+cution isolation architecture for LLM-based agentic
+systems. InNetwork and Distributed System Security
+Symposium (NDSS). ArXiv:2403.04960.
+Chong Xiang, Tong Wu, Zexuan Zhong, David Wag-
+ner, Danqi Chen, and Prateek Mittal. 2026. Certi-
+fiably robust RAG against retrieval corruption. In
+IEEE Conference on Secure and Trustworthy Ma-
+chine Learning (SaTML). ArXiv:2405.15556.
+Wujiang Xu, Zujie Liang, Kai Mei, Hang Gao, Jun-
+tao Tan, and Yongfeng Zhang. 2025. A-MEM:
+Agentic memory for LLM agents.arXiv preprint
+arXiv:2502.12110. NeurIPS 2025.
+Zhenlin Xu, Xiaogang Zhu, Yu Yao, Minhui Xue, and
+Yiliao Song. 2026. From storage to steering: Mem-
+ory control flow attacks on LLM agents.arXiv
+preprint arXiv:2603.15125.
+Jiaqi Xue and 1 others. 2024. BadRAG: Identifying vul-
+nerabilities in retrieval augmented generation of large
+language models.arXiv preprint arXiv:2406.00083.
+Tiankai Yang, Jiate Li, Yi Nian, Shen Dong, Ruiyao Xu,
+Ryan Rossi, Kaize Ding, and Yue Zhao. 2026. No
+attacker needed: Unintentional cross-user contami-
+nation in shared-state LLM agents.arXiv preprint
+arXiv:2604.01350.
+Sangyeon Yoon, Sunkyoung Kim, Hyesoo Hong, Wonje
+Jeung, Yongil Kim, Wooseok Seo, Heuiyeen Yeen,
+and Albert No. 2026. BenchPreS: A benchmark
+for context-aware personalized preference selectiv-
+ity of persistent-memory LLMs.arXiv preprint
+arXiv:2603.16557.
+Yosif Zaki and Denise J Cai. 2025. Memory engram
+stability and flexibility.Neuropsychopharmacology,
+50:285–293.
+Qiusi Zhan, Zhixiang Liang, Zifan Ying, and Daniel
+Kang. 2024. InjecAgent: Benchmarking indi-
+rect prompt injections in tool-integrated large lan-
+guage model agents. InFindings of the As-
+sociation for Computational Linguistics (ACL).
+ArXiv:2403.02691.
+Baolei Zhang, Haoran Xin, Minghong Fang, Zhuqing
+Liu, Biao Yi, Tong Li, and Zheli Liu. 2025a. Trace-
+back of poisoning attacks to retrieval-augmented gen-
+eration. InProceedings of The Web Conference
+(WWW). ArXiv:2504.21668.
+Baolei Zhang, Haoran Xin, Jiatong Li, Dongzhe Zhang,
+Minghong Fang, Zhuqing Liu, Lihai Nie, and Zheli
+Liu. 2025b. Benchmarking poisoning attacks against
+retrieval-augmented generation.arXiv preprint
+arXiv:2505.18543.
+
+Hanrong Zhang, Jingyuan Huang, Kai Mei, Yifei Yao,
+Zhenting Wang, Chenlu Zhan, Hongwei Wang, and
+Yongfeng Zhang. 2025c. Agent security bench
+(ASB): Formalizing and benchmarking attacks and
+defenses in LLM-based agents. InInternational
+Conference on Learning Representations (ICLR).
+ArXiv:2410.02644.
+Shuning Zhang, Lvmanshan Ye, Xin Yi, Jingyu Tang,
+Bo Shui, Haobin Xing, Pengfei Liu, and Hewu Li.
+2024. “ghost of the past”: Identifying and resolving
+privacy leakage of LLM’s memory through proactive
+user interaction.arXiv preprint arXiv:2410.14931.
+Zeyu Zhang, Quanyu Dai, Xiaohe Bo, Chen Ma, Rui Li,
+Xu Chen, Jieming Zhu, Zhenhua Dong, and Ji-Rong
+Wen. 2025d. A survey on the memory mechanism of
+large language model-based agents.ACM Trans. Inf.
+Syst., 43(6).
+Wanjun Zhong, Lianghong Guo, Qiqi Gao, He Ye, and
+Yanlin Wang. 2024. MemoryBank: Enhancing large
+language models with long-term memory. InPro-
+ceedings of the AAAI Conference on Artificial Intelli-
+gence.
+Huichi Zhou, Kin-Hei Lee, Zhonghao Zhan, Yue
+Chen, Zhenhao Li, and 1 others. 2025. TrustRAG:
+Enhancing robustness and trustworthiness in
+retrieval-augmented generation.arXiv preprint
+arXiv:2501.00879. AAAI 2026 Workshop.
+Wei Zou, Mingwen Dong, Miguel Romero Calvo,
+Shuaichen Chang, Jiang Guo, Dongkyu Lee, Xing
+Niu, Xiaofei Ma, Yanjun Qi, and Jiarong Jiang. 2026.
+Poison once, exploit forever: Environment-injected
+memory poisoning attacks on web agents.arXiv
+preprint arXiv:2604.02623.
+Wei Zou, Runpeng Geng, Binghui Wang, and Jinyuan
+Jia. 2025. PoisonedRAG: Knowledge corruption
+attacks to retrieval-augmented generation of large
+language models. InUSENIX Security Symposium.
+ArXiv:2402.07867.
+
+Appendix
+A Architectural Governance Primitives.
+Table 3 summarizes the five VMG primitives from
+Section 5, specifying for each the representative
+threat, corresponding defense direction, and pro-
+posed evaluation metric.
+B Human-Memory Bridge / Conceptual
+Grounding
+Our lifecycle memory view is grounded in a lim-
+ited analogy with human memory. Cognitive neu-
+roscience frames memory not as a fixed archive
+but as a reconstructive and reconsolidatable system
+where experiences are encoded, consolidated, re-
+activated, and sometimes rewritten as context and
+goals evolve (Squire et al., 2015; Schacter et al.,
+1998; Schacter and Addis, 2007; Nader et al., 2000;
+Zaki and Cai, 2025). This perspective underscores
+why long-term memory in LLM agents cannot be
+reduced to mere context extension or passive stor-
+age. Profile memories, episodic logs, summaries,
+and retrieval stores determine what persists, what
+is later reactivated, how traces are compressed, and
+how the agent interprets its own past. The security
+question is therefore not only whether a single in-
+put is malicious, but whether an untrusted trace can
+be written, consolidated, retrieved, elevated, propa-
+gated, or deleted across the memory lifecycle.
+The analogy also clarifies the primitives needed
+for Verifiable Memory Governance (VMG). In
+human memory, misinformation often operates
+through source-monitoring failure, confidence in-
+flation, reconsolidation after recall, and social con-
+tagion rather than direct overwrite (Loftus, 2005;
+Roediger III et al., 2001; Nader et al., 2000). The
+corresponding agent-level failures include prove-
+nance failure, read-time rewriting through summa-
+rization or reflection, and cross-agent contamina-
+tion. Injected content may be misattributed as the
+agent’s own experience (Dong et al., 2025; Tian
+et al., 2026), promoted through compression into
+more authoritative lesson memory (Packer et al.,
+2023; Xu et al., 2025), or propagated via shared
+memory and inter-agent communication (Gu et al.,
+2024; Men et al., 2025). Robust LTM security
+therefore needs to operate across the full lifecy-
+cle. Write authorization and provenance visibility
+protect the origin of memory, principal-scoped re-
+trieval limits who can reactivate it, and rollbacka-
+bility together with verified forgetting determines
+whether corrupted or sensitive traces can be re-
+moved after they have spread.
+
+Table 3: Architectural governance primitives.
+Primitive Representative Threat Representative Defense Proposed Metric
+Write
+Authorization
+(W A)
+Query-induced injection;
+environment-injected
+poisoning (Dong et al., 2025; Tian
+et al., 2026; Zou et al., 2026)
+Typed write validation; human or
+policy arbitration (Nguyen et al.,
+2025; Jacob et al., 2025; Palumbo
+et al., 2026)
+Adaptive injection-survival rate at
+bounded false-positive rate
+(FPR) (Nasr et al., 2026)
+Provenance
+Visibility (PV)
+Source-monitoring failure;
+imitation-based
+grafting (Srivastava and He, 2025)
+Provenance-gated retrieval;
+lineage-preserving
+compression (Moreau et al., 2013;
+Souza et al., 2025)
+Fraction of entries traceable to
+source event
+Principal-
+Scoped
+Retrieval (PS)
+Cross-user contamination;
+black-box extraction (Yang et al.,
+2026; Wang et al., 2025;
+El Yagoubi et al., 2026; He et al.,
+2025)
+Capability- or label-based retrieval
+policy (Li et al., 2025a; Costa et al.,
+2025; Mireshghallah et al., 2026)
+Cross-principal leakage rate under
+scripted query suites
+Rollbackability
+(RB)
+Compression-amplified toxins;
+behavioral drift (Packer et al.,
+2023; Xu et al., 2025)
+RAGForensics-style traceback
+adapted to agent memory (Zhang
+et al., 2025a)
+Time-to-remediation; fraction of
+toxic entries localized
+Verified
+Forgetting (VF)
+Residual derivatives; reappearance
+in summaries (Zhang et al., 2024;
+Pulipaka et al., 2026)
+Coordinated deletion across raw,
+summary, index,
+weights (Bourtoule et al., 2021;
+Maini et al., 2024; Wang et al.,
+2024b, 2026a)
+Post-deletion membership /
+reappearance tests (Maini et al.,
+2024; Wang et al., 2024b)

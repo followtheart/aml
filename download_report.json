@@ -1,0 +1,168 @@
+{
+  "a-mem": {
+    "status": "ok",
+    "arxiv": "2502.12110",
+    "size": 1015164
+  },
+  "hipporag": {
+    "status": "ok",
+    "arxiv": "2405.14831",
+    "size": 3404698
+  },
+  "hipporag2": {
+    "status": "ok",
+    "arxiv": "2502.14802",
+    "size": 2498688
+  },
+  "memgpt": {
+    "status": "ok",
+    "arxiv": "2310.08560",
+    "size": 663708
+  },
+  "memorybank": {
+    "status": "ok",
+    "arxiv": "2305.10250",
+    "size": 516536
+  },
+  "mem0": {
+    "status": "ok",
+    "arxiv": "2504.19413",
+    "size": 1144031
+  },
+  "memoryos": {
+    "status": "ok",
+    "arxiv": "2506.06326",
+    "size": 849565
+  },
+  "mirix": {
+    "status": "ok",
+    "arxiv": "2507.07957",
+    "size": 2304996
+  },
+  "zep": {
+    "status": "ok",
+    "arxiv": "2501.13956",
+    "size": 148771
+  },
+  "g-memory": {
+    "status": "ok",
+    "arxiv": "2506.07398",
+    "size": 13280730
+  },
+  "nemori": {
+    "status": "not_found",
+    "query": "Nemori Self-Organizing Agent Memory Inspired by Cognitive Science"
+  },
+  "memos": {
+    "status": "not_found",
+    "query": "MemOS Operating System for Memory-Augmented Generation"
+  },
+  "evermemos": {
+    "status": "ok",
+    "arxiv": "2601.02163",
+    "size": 1663951
+  },
+  "expel": {
+    "status": "ok",
+    "arxiv": "2308.10144",
+    "size": 9870272
+  },
+  "agent-workflow-memory": {
+    "status": "ok",
+    "arxiv": "2409.07429",
+    "size": 941281
+  },
+  "reasoningbank": {
+    "status": "ok",
+    "arxiv": "2509.25140",
+    "size": 5545249
+  },
+  "ace": {
+    "status": "ok",
+    "arxiv": "2510.04618",
+    "size": 2313268
+  },
+  "voyager": {
+    "status": "ok",
+    "arxiv": "2305.16291",
+    "size": 18830859
+  },
+  "memory-r1": {
+    "status": "ok",
+    "arxiv": "2508.19828",
+    "size": 3472962
+  },
+  "dynamic-cheatsheet": {
+    "status": "ok",
+    "arxiv": "2504.07952",
+    "size": 3794457
+  },
+  "larimar": {
+    "status": "ok",
+    "arxiv": "2403.11901",
+    "size": 1407195
+  },
+  "memoryllm": {
+    "status": "ok",
+    "arxiv": "2402.04624",
+    "size": 1414691
+  },
+  "m-plus": {
+    "status": "ok",
+    "arxiv": "2502.00592",
+    "size": 760680
+  },
+  "mem1": {
+    "status": "ok",
+    "arxiv": "2506.15841",
+    "size": 4492356
+  },
+  "memagent": {
+    "status": "ok",
+    "arxiv": "2507.02259",
+    "size": 6085243
+  },
+  "titans": {
+    "status": "ok",
+    "arxiv": "2501.00663",
+    "size": 3657065
+  },
+  "locomo": {
+    "status": "ok",
+    "arxiv": "2402.17753",
+    "size": 1608560
+  },
+  "longmemeval": {
+    "status": "ok",
+    "arxiv": "2410.10813",
+    "size": 749169
+  },
+  "secom": {
+    "status": "not_found",
+    "query": "SeCom Memory Construction and Retrieval for Long-Term Personalized Conversational Agents"
+  },
+  "evo-memory": {
+    "status": "ok",
+    "arxiv": "2511.20857",
+    "size": 3817139
+  },
+  "survey-memory-mechanism": {
+    "status": "ok",
+    "arxiv": "2404.13501",
+    "size": 2040345
+  },
+  "survey-human-to-ai": {
+    "status": "not_found",
+    "query": "From Human Memory to AI Memory Survey on Memory Mechanisms in the Era of LLMs"
+  },
+  "survey-security": {
+    "status": "ok",
+    "arxiv": "2604.16548",
+    "size": 859496
+  },
+  "structural-memory": {
+    "status": "ok",
+    "arxiv": "2412.15266",
+    "size": 7819783
+  }
+}

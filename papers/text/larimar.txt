@@ -1,0 +1,1682 @@
+Larimar: Large Language Models with Episodic Memory Control
+Payel Das * 1 Subhajit Chaudhury * 1 Elliot Nelson 1 Igor Melnyk 1
+Sarathkrishna Swaminathan 1 Sihui Dai 1 2 Aur´elie Lozano 1 Georgios Kollias 1 Vijil Chenthamarakshan 1
+Jiˇr´ı Navr´atil 1 Soham Dan 1 Pin-Yu Chen1
+Abstract
+Efficient and accurate updating of knowledge
+stored in Large Language Models (LLMs) is one
+of the most pressing research challenges today.
+This paper presents Larimar - a novel, brain-
+inspired architecture for enhancing LLMs with a
+distributed episodic memory. Larimar’s memory
+allows for dynamic, one-shot updates of knowl-
+edge without the need for computationally ex-
+pensive re-training or fine-tuning. Experimen-
+tal results on multiple fact editing benchmarks
+demonstrate that Larimar attains accuracy com-
+parable to most competitive baselines, even in the
+challenging sequential editing setup, but also ex-
+cels in speed—yielding speed-ups of 8-10x de-
+pending on the base LLM —as well as flexibility
+due to the proposed architecture being simple,
+LLM-agnostic, and hence general. We further
+provide mechanisms for selective fact forget-
+ting, information leakage prevention, and input
+context length generalization with Larimar and
+show their effectiveness. Our code is available at
+https://github.com/IBM/larimar.
+1. Introduction
+Pre-trained Large Language Models (LLMs) have achieved
+impressive performance on various Natural Language Pro-
+cessing (NLP) tasks (Devlin et al., 2018; Raffel et al.,
+2020; Brown et al., 2020; Vaswani et al., 2017), and are
+often considered as knowledge repositories (Petroni et al.,
+2019). In order to keep these models fact-relevant, safe,
+and ethical after deployment - the knowledge of the LLM
+needs to be constantly updated . Thus, it is critical to de-
+velop efficient mechanisms to quickly update LLMs so
+that models can protect privacy, eliminate bias and hal-
+lucination, and catch up with new facts. Model editing
+*Equal contribution 1IBM AI Research 2Princeton University;
+work done during internship at IBM Research. Correspondence
+to: Payel Das and Subhajit Chaudhury <daspa@us.ibm.com;
+subhajit@ibm.com>.
+should remove the undesired, incorrect, or obsolete facts
+from the LLM’s “memory”, and optionally replace it with
+the desired outcome. Similarly, the ability to quickly up-
+date the LLM can also help with the challenging problem
+of input context length generalization beyond the training
+distribution,which is crucial when learning from datasets
+where longer context instances are rare (Anil et al., 2022;
+Kazemnejad et al., 2023). A straightforward solution is to
+fine-tune the model on the corrected/new datasets. Such
+an approach suffers the risk of overfitting and catastrophic
+forgetting (Kirkpatrick et al., 2017; Zhu et al., 2020), as
+the knowledge is implicitly and distributionally encoded
+across the LLM parameters. Several lines of research have
+proposed effective and precise LLM editing (for compre-
+hensive surveys on LLM editing, see (Li et al., 2022; Liu
+et al., 2023; Zhu et al., 2020)), which includes training an
+external memory model or a hypernetwork model to work
+alongside with the frozen LLM. Another popular approach
+is to locate the original fact within LLM features and then
+do a local parameter update. As shown in Table 1, both
+lines of methods face scalability problems due to overfit-
+ting and the need for retraining or locating for new states,
+causing a slow-down in editing speed. The high memory
+needs for storing numerous edits provide a further obsta-
+cle in terms of scaling to sequential and batch editing se-
+tups. These challenges hinder the application of updat-
+ing large language models in real-world industrial settings.
+Further, handling fact editing and selective fact forgetting
+appear challenging within the same methodological frame-
+work even for current state-of-the-art editing methods (Patil
+et al., 2023), while both new information learning and old
+information forgetting are intrinsically related to each other
+in in brain (Dempsey et al., 2022; Autore et al., 2023).
+Humans, in contrast, can very quickly perform knowl-
+edge updating and generalization, both of which con-
+form to rapid learning after seeing the first relevant in-
+stance. In the brain, such rapid learning is thought to
+depend on the hippocampus and its capacity for episodic
+memory. Consistently, while both semantic and working
+memory systems struggle with sequential decision making
+tasks, the episodic memory systems are found to be ben-
+eficial (Blundell et al., 2016; Lengyel and Dayan, 2007).
+1
+arXiv:2403.11901v4  [cs.LG]  21 Aug 2024
+
+LLMs with Episodic Memory Control
+The complementary learning systems (CLS) theory (Ku-
+maran et al., 2016) provides rationale for coupling com-
+plementary fast (hippocampus) and slow (neocortex) learn-
+ing systems in brain, former learning from single in-
+stances while later modeling the input distribution. The
+neocortex-hippocampus interactions in brain is known to
+promote adaptive behavior via memorization and general-
+ization (Sun et al., 2023). Further, it is proposed that the
+memory consolidation from hippocampus to neocortex is
+facilitated through the activation synchronized with multi-
+ple exact or false replays of the encoded experience in hip-
+pocampus – suggesting hippocampus taking the form of a
+generative associative network (Ramirez et al., 2013).
+Inspired by these insights, we proposeLarimar – a class of
+LLMs augmented with an external episodic memory con-
+troller. We follow the CLS view, where a hippocampal fast-
+learning system records samples as episodic memory, and
+a neocortical slow learning system (the LLM) learns sum-
+mary statistics of the input distribution as semantic mem-
+ory. Our aim is to treat the episodic memory module as
+the global storage of the current set of factual updates or
+edits, and enforce this memory as a condition to the LLM
+decoder. It is important to learn to update this memory ef-
+ficiently and accurately, without having to go through any
+training, as new edits arrive.
+To tackle this, we seek to utilize a hierarchical memory,
+similar in spirit to the Kanerva Machine (Wu et al., 2018a),
+where the memory writes and reads are interpreted as in-
+ference in a generative model. Specifically, we consider
+the memory model of (Pham et al., 2021), which treats the
+memory as deterministic, thereby allowing reformulating
+the Bayesian updates of memory and address proposed in
+Kanerva Machine as finding least-square solutions to linear
+systems. Once updated, this fast-learning memory is then
+used to condition a slow-learning LLM decoder.
+The use of a global memory associated a set of samples
+and the ability to fast write to memory make this hierarchi-
+cal memory framework attractive for efficient LLM updat-
+ing with respect to new knowledge. Implementation-wise,
+the memory is coupled to the LLM by end-to-end gradient
+descent on generic data and does not assume access to ed-
+its. During inference, the new data is written to memory
+in one-shot, the updated memory then conditions the LLM
+decoding to enforce the edited output. We further formal-
+ize training-free selective fact forgetting and information
+leakage prevention operations based on Larimar’s one-shot
+memory updating mechanism.
+To our knowledge, this is the first work that proposes and
+demonstrates online distributed writing to a hierarchical
+conditional memory model as a solution to test-time adap-
+tation of LLMs to new knowledge. We demonstrate Lari-
+mar on single and sequential fact editing tasks on existing
+benchmarks and compared with baseline methods. Larimar
+provides accurate and precise editing across these settings,
+while being up to 10 times faster compared to competitive
+model editing baselines We further subject Larimar to se-
+lective fact forgetting and information leakage prevention
+and show its efficacy in those tasks. Lastly, we provide a
+simple recursive search-based solution that enables Lari-
+mar’s memory to generalize to longer input context.
+Our contributions are:
+• Inspired by complementary learning mechanisms in the
+brain, we propose a class of episodic and adaptable
+memory-conditioned LLM architectures for test time
+adaptation in real-time. Our method does not need
+any time-intensive gradient-based learning or fact trac-
+ing within the LLM for performing the edit, providing a
+faster alternative for LLM updating.
+• We demonstrate the utility of this architecture on two
+relevant and challenging use cases: knowledge editing
+and input context length generalization. Larimar shows
+fast and accurate training-free adaptation to new inputs
+in both scenarios, compared to baseline editing methods
+and language models.
+• We show selective fact forgetting and information leak-
+age prevention using one-shot memory updating.
+• We provide a simple means to enable long context gen-
+eralization in Larimar, based on a recursive search on its
+memory space.
+2. Model Details
+Notation: We define input and output spaces as X and Y,
+respectively. The model comprises an encoder e : X →
+RC and a decoder d : RC → Y , linked via an adap-
+tive memory. The encoder outputs in a latent space of di-
+mension C. The memory uses K rows to store encoded
+episodes of length N, with initial state M0 ∈ RK×C and
+updates through reading and writing weights W, W0 ∈
+RN ×K, resulting in updated memory M.
+Background Information: Generative memory networks
+are a type of associative memory networks that treat mem-
+ory ‘read’/‘write’ and addressing operations as Bayesian
+inference where posteriors are updated when a new
+data episode arrives. Generative Pseudo-inverse Memory
+(GPM) framework proposed in (Pham et al., 2021) refor-
+mulates these Bayesian updates as finding least-square so-
+lutions to linear systems, thereby enabling fast and effi-
+cient memory operations. One can then generate exam-
+ples similar to a given input based on memory by sampling
+from the ‘read’ distribution. In the following sections, we
+will elaborate the training and inference mechanisms, as
+2
+
+LLMs with Episodic Memory Control
+!!
+!!: Argentina won the 2023 FIFA World cup.…!": Oppenheimer won the best movie award.
+"×$ memory matrix
+{#%,…,#&}Write operation
+!"#$%&
+Read operation!#'
+!(
+Memory Module
+Decoder block 1
+Decoder block L
+…TheWorldby<BOS>'!!# '%') '*'+Argen',tina
+ℎ!!ℎ$! ℎ%!ℎ&! ℎ'!ℎ(!
+Decoder block 2ℎ!$ℎ$$ ℎ%$ℎ&$ ℎ'$ℎ($
+…
+…...
+#$#) #'#! #(<EOS>
+ℎ-.
+ℎ%.
+ℎ)....
+Decoder
+Encoder block 1Encoder block 2
+Encoder block N...
+TheWorldCupwaswonbyCLS)!
+$%
+%*+,#-)%)))/)0)1)*
+$&
+Pooler$!$$$)$.$/
+Encoder
+Data episode of length N
+<latexit sha1_base64="vTFsWPD5piJIhmEhyvwXp0e3GmM=">AAAB9HicbVBNS8NAEJ3Ur1q/qh69BIvgqSQi1WPRi8cK9gPaUDabSbt0s4m7m0oJ/R1ePCji1R/jzX/jts1BWx8MPN6bYWaen3CmtON8W4W19Y3NreJ2aWd3b/+gfHjUUnEqKTZpzGPZ8YlCzgQ2NdMcO4lEEvkc2/7odua3xygVi8WDniToRWQgWMgo0Ubyek8sQM14gFl72i9XnKozh71K3JxUIEejX/7qBTFNIxSacqJU13US7WVEakY5Tku9VGFC6IgMsGuoIBEqL5sfPbXPjBLYYSxNCW3P1d8TGYmUmkS+6YyIHqplbyb+53VTHV57GRNJqlHQxaIw5baO7VkCdsAkUs0nhhAqmbnVpkMiCdUmp5IJwV1+eZW0LqpurVq7v6zUb/I4inACp3AOLlxBHe6gAU2g8AjP8Apv1th6sd6tj0VrwcpnjuEPrM8fPkqSbQ==</latexit>
+fW
+Figure 1. Larimar Architecture: X and Xquery respectively denote data input and query,Z, Zquery and Zr are the latent vectors, andM
+is the fixed-size memory. W and W0 are reading/writing weights to memory. WM interfaces the readout from memory to the decoder.
+Editor +Edit Train +Fact Trace Sequential Edit Batch Edit Forgetting/Deletion Time (GPT-2) Time (GPT-J)
+ROME No Yes No No Yes 4.8s 13.9s
+GRACE Yes No Yes No No 13.9s 19.3s
+Larimar No No Yes Yes Yes 1.1s 1.7s
+Table 1. Requirement and capability comparison between Larimar, and two existing editing methods, ROME and GRACE.
+we adapt that to train a LLM decoder. In Section 3, we
+will review the ‘write’, ‘read’ and ‘generate’ operations
+derived in (Pham et al., 2021) in detail, and formulate ad-
+ditional newly proposed ‘sequential writing’ and ‘forget-
+ting/unlearning’ operations.
+2.1. Training
+Given the memory M, Kanerva Machine aims to maxi-
+mize the conditional log-likelihood of ln p(X|M), where
+X is an exchangeable (order invariant) episode: X =
+{x1, . . . , xN }, a subset of the input data consisting of N
+samples. A variational lower bound of this conditional
+likelihood is optimized, similar to in variational autoen-
+coders (Kingma and Welling, 2013). Consequently, the
+model learns to compress X in a memory M, which then
+becomes a distributed associative memory. In practice, M
+is learned on a noisy version of the latent encodings Z + ξ
+where Z = e(X) for an episode. In the remainder of this
+study, we use M as the posterior memory dependent on
+an episode X, whereas M0 denotes a prior memory. The
+reading weight matrix, W, is a random variable to enforce
+generative ability of the model, for which we use a stan-
+dard Gaussian prior p(W) ∼ N (0, IN ×K) and posterior
+q(W) ∼ N (W, σ2
+W · IN ×K), where the mean W is esti-
+mated from each episode and σW is learnable. The mem-
+ory readouts are obtained asZreadout = WM. The overall
+memory-augmented architecture is depicted in Figure 1.
+During training all the three modules – encoder ( e), asso-
+ciative memory (M), and decoder ( d) – are jointly trained
+and optimized for an episode X, using the following loss:
+L =EX∼data
+ 
+Eq(W) ln p(X|W, M)
++ α ln p(d(e(X)) − βDKL(q(W)||p(W))
++ EX∼pretrain ln p(xi|xi−1..x1). (1)
+The first term is the negative reconstruction loss with mem-
+ory and W, a N × K matrix. The second is the autoen-
+coder’s negative reconstruction loss without memory. The
+third is the KL divergence between prior p(W) and poste-
+rior q(W). To maintain decoder performance during train-
+ing, a pretraining data regularization term is added.
+2.2. Memory inference
+The memory at the end of training via backpropagation is
+then considered as a prior M0, the posterior memory M
+is updated in one-shot by solving a minimization problem
+as proposed in (Pham et al., 2021), which is min M||Zζ −
+W0M||2
+F . This minimization problem, which corresponds
+to solving a linear system of equations, is efficiently done
+via computing matrix pseudo inverses.
+3. Memory operations
+Write, Read, Generate operations The three basic
+memory operations, write in, read out, and generate, which
+act upon the Z encodings, are cast as in (Pham et al., 2021).
+See Algorithm 1 for details.
+Sequential Writing and Forgetting Given an initial set
+of encodings Z0 and writing weights W0, we initialize the
+3
+
+LLMs with Episodic Memory Control
+memory matrix and key covariance matrix:
+M0 = W†
+0Z0, C0 = W⊤
+0 W0 (2)
+To sequentially update the memory Mi−1, either to add a
+new set of encodings Zi or to forget a previously written
+set of encodings Zi, we jointly update the memory matrix
+and key covariance matrix for i = 1, 2, ... as follows:
+Ci = Ci−1 + αiW⊤
+i Wi (3)
+Mi = Mi−1 + αiC−1
+i W⊤
+i (Zi − WiMi−1) (4)
+When writing new encodings to memory, we use αi = 1.
+When forgetting encodings which were previously written
+to memory with αiwrite = 1 at any iwrite < i , we use
+αi = −1. Eq. (4) updates the memory sequentially such
+that it remains the least-squares solution for the growing
+sequence of data. Assuming that Mi−1 is the least-squares
+solution with respect to encodings Z0:i−1, that is,
+Mi−1 = argminM
+i−1X
+j=0
+||Zj − WjM||2
+2, (5)
+then Eq. (4) with αi = 1 ensures that Mi likewise is the
+least-squares solution with respect to Z0:i ((Meng et al.,
+2023)). In the case αi = −1 and Zi = Zif orget for some
+if orget < i , Eq. (4) ensures that Mi is the least-squares
+solution with Zif orget removed from the data, that is,
+Mi = argminM
+i−1X
+j=0,j̸=if orget
+||Zj − WjM||2
+2, (6)
+The weights can be computed either (following (Pham
+et al., 2021)) in terms of the current memory, Wi =
+ZiM†
+i−1, or in terms of a fixed reference memory, Wi =
+Zi(M(ref))†. M(ref) remains unchanged across all sequen-
+tial updates (i.e. is i-independent), is used only during
+inference, and can (optionally) be constructed using the
+episode of data encountered during inference. In the event
+that we wish to remove a given previously written encoding
+from memory, the fixed nature of M(ref) allows the origi-
+nal writing key Wiwrite to be recomputed at a later point in
+the sequence if orget > i write, so that the information can
+be located in memory and removed.
+4. Scope Detector
+We also optionally use a scope detection mechanism to
+detect if the incoming query is close to the facts writ-
+ten in the memory, which is conceptually similar to
+SERAC (Mitchell et al., 2022). If the query is in-scope,
+then the corresponding readout from memory is passed to
+the decoder for memory-conditional decoding otherwise
+Algorithm 1 Basic Memory operations (Pham et al., 2021)
+Function write(Z):
+// Z - encoding of the episode to be
+written to memory (i.e. Z = e(X))
+1 Sample ξ ∼ N (0, σ2
+ξ I)
+Let Zξ = Z + ξ
+Compute addressing weight W0 = ZξM†
+0
+// M0 is a learned parameter
+representing prior memory
+2 Compute posterior memory M = W†
+0Zξ
+return M
+Function read(Z, M):
+// M - posterior memory from previous
+write
+// Z - encoding of the read input (ie.
+Z = e(X))
+3 Compute mean addressing weight W = ZM†
+Sample W ∼ N (W, σ2
+WI)
+// σW is a learned parameter
+4 Compute output latent Zread = WM
+return Zread
+Function generate(M):
+// M is the posterior memory from a
+previous write
+5 Sample W ∼ N (0, I)
+Compute output latent Z = WM
+return Z
+the query is subjected to unconditioned decoding. We con-
+sider two different scenarios:
+External encoding-based scope detector (ESD) : Sample
+embeddings are estimated from an external sentence en-
+coder (MiniLM1) trained on 1.1B sentence pairs and with
+an output space dimensionality of 384. The ESD stores en-
+coded facts as vectors in its own scope storage. At test
+time, given an encoded input sentence, 1-nearest neigh-
+bor cosine similarity is calculated and serves as detection
+score. Any multi-sentence input is first split into isolated
+sentences, each of which is processed separately and maxi-
+mum similarity is taken. Measured on 3800 positive and
+negative samples from the EasyEdit data set, this ESD
+model achieves a detection equal-error-rate of 2.9% and an
+F1 score of 0.974.
+Internal Encoding-based scope detector (ISD) : Larimar
+encoder e is used to embed CounterFact samples. The
+encodings are then used to train a binary scope classifier,
+where positive samples come from rephrasings of an origi-
+nal fact and negative data correspond to neighboring facts.
+5. Results
+Implementation: We employed a BERT large en-
+coder (Devlin et al., 2018) combined with either a GPT2-
+1https://huggingface.co/sentence-transformers/all-MiniLM-
+L6-v2
+4
+
+LLMs with Episodic Memory Control
+large (Radford et al., 2019) or a GPTJ-6B decoder and a
+memory matrix (512x768) for our training experiments,
+naming the resulting models Larimar-1.3B and Larimar-
+6B, respectively. Our training data comprised 7.6 million
+examples constructed by splitting WikiText (Merity et al.,
+2016) texts to small chunks of 64 tokens. We used existing
+pretrained weights from Huggingface to initialize the train-
+ing. From the Zr (the readout vector), using learned lin-
+ear projection WM , the hidden states are transformed and
+broadcasted to act as a KV cache across all layers. Dur-
+ing the decoder forward pass, this compressed KV cache
+is used as past KV cache values to generate the memory-
+controlled output. The hidden size for GPTJ, for exam-
+ple, is 4096 with 28 layers. In testing, the Larimar-1.3B
+model achieved a perplexity of 14.6, while the Larimar-6B
+model reached 15.9 on 1,000 random WikiText samples,
+indicating that adding memory barely affects performance.
+We trained Larimar-6B models for 10 epochs using Adam
+optimizer, learning rate 5e-6 and batch size 32. For the
+Larimar-6B’s training, we used a setup with eight NVIDIA
+A100-80GB GPUs on a single node, utilizing bfloat16 pre-
+cision and PyTorch Lightning with the DeepSpeed ZeRO
+Stage 2 for efficient distributed training.
+5.1. Wall Clock time
+Table 1 presents the wall clock time for each editing
+method across 10 edits, calculated within the EasyEdit
+framework (Yao et al., 2023) on a single A100 GPU. Re-
+sults show that Larimar is 4-10x times faster compared
+to ROME (Meng et al., 2022a) and GRACE (Hartvigsen
+et al., 2022), two most competitive existing LLM edit-
+ing baselines. Table 7 further provides a edit-time com-
+parison within other existing baselines, as shown in (Yao
+et al., 2023), establishing Larimar’s advantage on high-
+speed editing. Table 1 further lists Larimar’s abilities to
+handle edits in a training- or tracing- free manner, en-
+abling high-speed editing, handling selective forgetting,
+and maintain ability to sequential editing setup.
+5.2. Single Fact editing
+We compare the performance of Larimar against a number
+of recently proposed knowledge editing approaches on the
+CounterFact dataset (Meng et al., 2022a) designed for test-
+ing language models handling of counterfactual edits. It
+includes 21,919 records to assess if the models can learn
+new facts rather than simply memorizing the target words.
+Following other works (Meng et al., 2022a; Zheng et al.,
+2023), we used the first 2000 samples of this dataset and re-
+port the average over single fact editing results for Larimar-
+1.3B and Larimar-6B in Table 2. The baseline perfor-
+mances are taken from (Meng et al., 2022a; Zheng et al.,
+2023) (see Related Work and Appendix for details on base-
+line methods). As opposed to training the LLM on edits,
+Editor
+Edit Success Paraphrase Neighborhood
+S M S M S M
+GPT-2 XL 22.2 -4.8 24.7 -5.0 78.1 5.0
+FT 100.0 98.8 87.9 46.6 40.4 -6.2
+FT+L 99.1 91.5 48.7 28.9 70.3 3.5
+KN 28.7 -3.4 28.0 -3.3 72.9 3.7
+KE 84.3 33.9 75.4 14.6 30.9 -11.0
+KE-CF 99.9 97.0 95.8 59.2 6.9 -63.2
+MEND 99.1 70.9 65.4 12.2 37.9 -11.6
+MEND-CF 100.0 99.2 97.0 65.6 5.5 -69.9
+ROME 100.0 97.9 96.4 62.7 75.4 4.2
+Larimar-1.3B 100.0 99.7 83.5 50.5 74.7 1.8
+Larimar-1.3B+ 1 rephrase100.0 99.6 89.8 62.4 73.3 0.5
+Larimar-1.3B+ 2 rephrases100.0 99.6 90.8 63.6 73.3 0.6
+GPT-J 16.3 -7.2 18.6 -7.4 83.0 7.3
+FT 100.0 99.9 96.6 71.0 10.3 -50.7
+FT+L 99.6 95.0 47.9 30.4 78.6 6.8
+MEND 97.4 71.5 53.6 11.0 53.9 -6.0
+ROME 99.9 99.4 99.1 74.1 78.9 5.2
+PROMPT 99.7 80.9 91.0 32.9 37.9 -2.8
+IKE (w/ 32 demonstrations)100.0 91.7 95.2 64.5 77.0 35.2
+IKE (w/o paraphrases)100.0 – 73.8 – 83.4 –
+IKE (w/o neighbors) 100.0 – 99.8 – 11.5 –
+Larimar-6B 99.6 96.0 88.4 54.7 80.4 4.22
+Larimar-6B+ 1 rephrase 99.7 95.9 92.9 67.0 79.3 3.5
+Larimar-6B+ 2 rephrases 99.8 95.7 93.6 67.0 79.2 3.38
+Table 2. Single fact editing on CounterFact dataset. Top two best
+editing methods are highlighted. Larimar uses dynamic memory
+updates with memory-conditioned decoding and does not require
+gradient update on edit samples, as opposed to methods need-
+ing training (FT, FT+L, MEND) or tracing plus decoder updating
+(ROME) on edit samples (ROME) or in-context demonstrations
+(IKE) of (paraphrased) edits and neighboring samples retrieved
+from a corpus. Though generalization increases when Larimar’s
+memory is augmented with rephrases at test time.
+or causally tracing the original fact within LLM and up-
+dating the relevant parameters to reflect edit, we leverage
+Larimar’s one-shot memory update for editing. Wherein,
+the memory posterior is updated as the edit(s) of interest
+is written, and then the updated memory is queried. The
+read-out from the memory then conditions the decoder to
+output the edit.
+The evaluation metrics used in Table 2 are as follows: Edit
+Success, which is the percent of cases where the edited fact
+(s, r, o∗), (subject, relation, object) with modified object
+has higher probability than the one based on the original
+object (s, r, oc). Specifically, column S measures percent-
+age of P[o∗] > P[oc] cases, while M is the average of
+P[o∗] − P[oc] in the logits space of the language model.
+Paraphrase measures the same performance on (s, r, o∗)
+but using paraphrased prompts. Neighborhood evaluates
+the model’s ability to retain knowledge about the origi-
+nal object but in the context of neighboring subjects s′:
+(s′, r, oc). Here the column S reflects percentage of cases
+where P[oc] > P[o∗], while M is the average P[oc] − P[o∗].
+As can be seen, when compared to existing editing base-
+lines, Larimar achieves comparable performance in suc-
+5
+
+LLMs with Episodic Memory Control
+cessfully editing new facts, and in the ability to handle
+neighborhood prompts. For example, when compared with
+ROME, Larimar performs on par when based on GPT-2
+Large, and better when based on GPT-J on editing success
+and neighborhood specificity, while there remains room to
+improve generalization. When compared to existing in-
+context editing approaches (PROMPT and IKE) (Zheng
+et al., 2023), Larimar does not need multiple in-context
+demonstrations of the edits and its paraphrases, as well as
+of neighboring facts, to the decoder, which are retrieved
+from a corpus. However, as shown in Tables 2 and 8,
+when Larimar has access to one or two additional para-
+phrase(s) per fact, by writing it in the memory, the gen-
+eralization performance increases from 88.4 to 93.6. Note
+that in this setup the average number of added paraphrase
+per fact is at most two and we queried the model with a
+paraphrased prompt unseen by the memory. And, writ-
+ing latent encodings of paraphrases in memory and condi-
+tioning the decoder on the memory is more cost-effective
+than in-context demonstrations, as the context length does
+not increase with Larimar’s in-memory mechanisms. Ab-
+lation experiments in Appendix shows that a scope detec-
+tor, either trained on Larimar encodings or encodings from
+an external LLM, helps with better paraphrase generaliza-
+tion, at the cost of sacrificing the neighborhood specificity.
+In the absence of a scope detector, the same approach of
+augmenting memory with two additional rephrases provide
+an additional 2-3% increase in generalization, irrespective
+of the dataset (see next paragraph). Throughout the paper,
+Larimar is configured with a scope detector, unless other-
+wise mentioned.
+We also evaluated Larimar on the ZsRE benchmark (Levy
+et al., 2017), a QA dataset for relation extraction through
+reading comprehension, with results displayed in Table
+12. Performance scores for GPT-2 XL based baselines are
+cited from (Meng et al., 2022a), whereas performance of
+ROME on GPT-J was independently estimated by us. Un-
+like the CounterFact evaluation, this assessment uses ex-
+act match counts for scoring I[o∗ = argmaxoP[o]]. Com-
+pared to baselines, Larimar demonstrates effective editing
+and comparable neighborhood specificity on ZsRE, with
+slightly lower generalization, maintaining consistent re-
+sults across GPT-2 and GPT-J decoders, underscoring its
+model-agnostic editing capabilities. We again see that test-
+time augmentation of the memory with additional para-
+phrases of the fact boosts generalization from 70.4% to
+82.2%, with two rephrases written in memory (Table 13).
+5.3. Sequential Fact Editing
+We evaluated Larimar on a sequential editing task, follow-
+ing the setup of (Hartvigsen et al., 2022), which tackles
+the issue of forgetting previous edits after multiple sequen-
+tial edits. Hartvigsen et. al. introduced a continual edit-
+MEND GRACE Larimar-1.3B Larimar-6B
+Edit Retention Rate 0.270.93 0.97 0.92
+Table 3. Sequential editing on ZsRE, showing Larimar does not
+forget older edits, baselines are from (Hartvigsen et al., 2022).
+ing method that integrates an adaptor to update a codebook
+of edit key-value pairs with a pre-trained language model
+(GPT2-XL), showing memory retention during sequential
+edits. We adapt Larimar to this experimental setup, wherein
+a subset of 200 facts with 5 rephrasings each is selected
+from the ZsRE validation dataset for testing. In Larimar,
+a sequential edit is handled by updating the global mem-
+ory through Eq. (4), again requiring no gradient-based
+update on incoming edits. For each edit, the encoding
+of the rephrased query concatenated with the correspond-
+ing answer is written to memory. We assessed Larimar’s
+performance, compared to GRACE, using the edit reten-
+tion rate (ERR), which is the mean F1 score after 1000
+sequential edits when querying the memory with the en-
+coded query Zquery for each written fact. Larimar is not
+finetuned on question-answer data; instead, we write each
+question-answer pair as a fact in the memory and query
+the memory with the original question. Results show Lari-
+mar’s comparable ERR performance to GRACE, that is the
+best-performing baseline, while Larimar performing edit-
+ing approximately 10 or more times faster than GRACE on
+GPT-2 XL. We found the batch editing method SERAC (re-
+ferred as DEFER in (Hartvigsen et al., 2022);) to perform
+worse (ERR=0.31) compared to both Larimar (ERR=0.98)
+and GRACE (ERR=0.96) on sequential editing on an edit
+dataset containing duplicates of fact and corresponding
+rephrasings, though SERAC was trained on fact edits.
+We also evaluated Larimar’s generalization to rephrased
+prompts, again comparing to GRACE. We use (i) a dataset
+of unique 1000 ZsRE facts, each with 10 variations, divided
+into edit and holdout sets, and (ii) an edit/holdout dataset
+with more ( ≈ 20 per fact rephrasings and fewer ( ≈ 500)
+unique ZsRE facts. Our analysis, depicted in Figure 2 (b),
+examines the mean F1 score on the holdout set against the
+number of memory writes using the edit set, compared to
+GRACE on the same datasets.2 As Larimar has no knowl-
+edge of upcoming edits, it starts with near-zero F1; in con-
+trast, GRACE has prior knoweldge from training on the
+edit set. As the sequence of edits grows, Larimar surpasses
+GRACE’s generalization performance at around 600 edits.
+In these experiments, we use K = 1000, setting the mem-
+ory size proportional to the number of facts to be written.
+We also checked an alternative method (Appendix E) for
+computing the reading and writing weights, which uses a
+Gaussian convolution to store each encoding z in memory
+2We use GRACE with ϵinit = 3 .0 to edit block 4 of T5
+(Hartvigsen et al., 2022).
+6
+
+LLMs with Episodic Memory Control
+location(s) corresponding to the most similar content in a
+reference memory M(ref), and which we found to perform
+better than the pseudoinverse method of (Pham et al., 2021)
+when there are a relatively small number of rephrasings per
+fact (Figure 5).
+5.4. Selective Forgetting
+(a) Efficacy Success(b) Sequential Fact Editing
+RewriteAccuracy (%)
+Figure 2. (a) Batch editing accuracy on Counterfact dataset. Base-
+line performances are taken from (Meng et al., 2023). Green:
+MEMIT, Orange: ROME, Magenta: MEND, Black: Larimar-6B.
+(b) Mean F1 score on a held-out set of unseen rephrasings from
+ZsRE over a sequence of 3000 edits, showing Larimar’s general-
+izes better over GRACE on two datasets with 1000 or 511 inde-
+pendent facts (10 and ≈ 20 rephrasings per fact, respectively).
+The goal of this section is to check if a specific fact can be
+selectively erased from a batch ofN facts that are written to
+Larimar’s memory in one-shot. We first checked the batch
+editing performance of Larimar. Figure 2 (a) shows that the
+rewrite accuracy is near 100% for up to 512 edits (eqv. to
+the memory size K) and then drops to 82% for 1024 edits.
+This result shows Larimar’s ability to effectively compress
+more than K facts into its size-K memory (Figure 3 in ap-
+pendix). This performance level is higher when compared
+to baselines like MEND and ROME, but subpar compared
+to MEMIT (Meng et al., 2023), which can accurately han-
+dle a very large batch of edits at a cost of reduced editing
+speed (see Table 7) and is also not meant to handle sequen-
+tial editing. Note that Larimar’s recall matches MEMIT
+for N < K facts, and K can be chosen as needed during
+inference (Figure 4 in appendix).
+To test the ability of Larimar for selectively forgetting
+specified facts during inference, we first write N facts to
+memory ( αi = 1 in Eq. (4)), and then forget one fact
+(αi = −1), and also write to memory in its place (with
+αi = 1) the same fact with the answer replaced with the
+string “unknown.” We compare recall for the forgotten
+fact before and after the forgetting operation. To demon-
+strate that forgetting does not compromise other memories,
+we also report the recall on the remaining N − 1 facts
+in memory. The samples used are from the ZsRE vali-
+dation set and from the Counterfact test set. Table 4 re-
+ports these results, comparing to a k-shot in-context learn-
+ing (see Appendix) baseline with Llama2-13B, and show-
+ing that Larimar can selectively forget using the memory
+updating mechanism, while retaining the remaining knowl-
+edge, whereas in-context learning struggles.
+Counterfact ZsRE
+Model Forgotten Retained Forgotten Retained
+Llama2 13B,N= 20, 6-shot 0.75 0.77 0.68 0.73
+Larimar 1.3B,N= 1 0.0 – 0.0 –
+Larimar 1.3B,N=K 0.001 0.997 0.02 0.95
+Larimar 1.3B,N= 2K 0.02 0.79 0.03 0.52
+Larimar 6B,N= 1 0.0 – 0.0 –
+Larimar 6B,N=K 0.0 0.993 0.03 0.86
+Larimar 6B,N= 2K 0.03 0.71 0.04 0.50
+Table 4. Fraction of facts with accurate recall, for the Counterfact
+and ZsRE datasets, after writingN facts to memory and removing
+one. “Forgotten” and “Retained” indicate, respectively, recall of
+the fact to which forgetting was applied, and mean recall of the
+N − 1 retained facts. K = 512 in all cases.
+We also evaluate Larimar to prevent generation of specific
+information by writing an empty ( i.e., censored) response
+for the corresponding prompt to the memory. The baselines
+we consider are ROME and MEMIT, which were adapted
+to delete information in (Patil et al., 2023). Specifically,
+the decoder d was updated with an empty response ob-
+jective for a given string x that is known to the decoder
+and is aimed to be deleted, such that the probability of an
+“empty” target string E is maximized, argmax dP[E|x, d].
+A blackbox input rephrasing attack was then used; the pres-
+ence of information of interest was checked in a number of
+model outputs as the model was prompted with different in-
+put rephrases. For Larimar, a single input prompt followed
+by “unknown” (= empty response) is written to the mem-
+ory during inference to prevent leakage of the answer in the
+decoded outputs. The attack is considered successful on a
+input prompt if the answer is found within a fixed num-
+ber of model generations obtained using prompt rephrases.
+About 300 samples from Counterfact known to GPT-J 6B
+and Larimar’s decoder were used for this experiment. We
+used 5 sample responses for each of 4 paraphrases per fact
+(total attack budget of 20), which were generated as pre-
+scribed in (Patil et al., 2023). Table 5 shows the results,
+suggesting that writing to Larimar’s memory is more ef-
+fective than direct model editing methods for preventing
+answer leakage for a single input prompt (17.6% attack
+success for Larimar, vs. 29% and 49% for ROME and
+MEMIT, respectively). Larimar can further restrict the re-
+sponse for a batch of facts in one shot – the robustness to
+rephrase attacks remains still higher than baselines.
+ROME (s) MEMIT (s) Larimar (s) Larimar (b)
+Attack Success (%) 29.0 49.3 17.6 21.5
+Table 5. Input rephrasing attack success: Larimar-6B in-memory
+writing (single fact (s) or batch (b) mode) vs. GPT-J 6B editing.
+7
+
+LLMs with Episodic Memory Control
+5.5. Generalization to long input context
+We perform fact recall with long context using data that is
+not present in the base decoders pretraining corpus. For
+this purpose, we curated facts from CNN Fast Facts (CNN,
+2023) for 2021, 2022, and 2023. We divide the input text
+into T chunks, which is in the range of Larimar’s training
+context window, and store each of these chunks in a sep-
+arate memory Mi, i = 1 ..T . Given a query, we address
+and read from each of these memories. The readouts from
+these memories form the basis of the successive memory,
+which is then queried and read from again. This process is
+continued until the number of readout in the final memory
+is similar to Larimar’s input training context window. The
+recursive search in latent memory space and using readouts
+to construct new higher-level memory is performed to pro-
+cess the long context with Larimar’s memory trained on a
+relative small episode length. The retrieved Zr from the fi-
+nal successor memory is passed to the decoder for predict-
+ing response. It should be noted that memory hierarchy is
+found in hippocampus and is implicated in learning (Collin
+et al., 2015).
+Table 6 shows Larimar’s recall does not degrade much
+with increasing input context length, even compared to
+some of most competitive baseline LLMs trained with
+longer training context. We also compare with Supersizing
+Transformer (Klett and Ahle, 2023), a memory-augmented
+model, however it did not show competitive recall per-
+formance because it was not trained to perform memory-
+conditioned generation. Due to memory processing in the
+latent space, Larimar is also efficient is terms of number of
+KV cache token computation compared to baseline meth-
+ods. Our experiments on 128 facts show that the average
+time required by Larimar to read from memory is 0.36s
+compared to 1.44s for Mistral-7b base model.
+Learning to copy from the context remains an important
+aspect underlying transformers’ impressive language mod-
+eling and other abilities (Devlin et al., 2018; Raffel et al.,
+2020; Olsson et al., 2022). LLMs with non-attention based
+architectures, such as state space models, often underper-
+form (Gu et al., 2022; Gu and Dao, 2023) transformers in
+language modeling, which is at least partly attributed to an
+inability to copy from the context, as well as an inability to
+generalize to longer contexts, when compared to transform-
+ers (Jelassi et al., 2024). Those investigations have fueled
+research on hybrid architectures. The results presented here
+suggest that combining a hierarchical memory model with
+a generative pretrained transformer, as in Larimar, could be
+a promising path in that direction. The end-to-end training
+of the fixed-size latent memory with the decoder in Lari-
+mar adds an explicit state to the decoder, writing to which
+helps controlling the decoding, thus allowing truthful copy-
+ing from context in a generalized manner. The memory
+control also provides real-time knowledge editing as well
+as information leakage prevention. Attending to the mem-
+ory read-out while decoding uses O(1) memory to predict
+each token, providing memory and computational benefits.
+6. Related work
+Memory-augmented NNs External memory augmented
+neural networks (MANNs) were already proposed in pre-
+transformer era, with the aim of better learning long-term
+dependencies in input data (Weston et al., 2014; Graves
+et al., 2014; Miller et al., 2016) showing enhanced per-
+formance in generative tasks, language modeling, long-
+term planning, and sample-efficient RL, etc. MANNs add
+a trainable slot-based memory to a recurrent neural net.
+An attention-based reading mechanism is typically used
+to compute a weighted average of memory contents. This
+mechanism is estimated from training data, and thus it re-
+mains unclear how they can generalize to new data. Al-
+ternatively, Kanerva Machine (Wu et al., 2018a), inspired
+by Kanerva’s sparse distributed memory model (Kanerva,
+1988), views memory as a global latent variable in a gen-
+erative model and aims to learn a memory dependent data
+prior and learnable addresses. In this framework, the mem-
+ory update and read/write are considered as Bayesian in-
+ference, i.e., the posterior parameters are updated as new
+data arrives. KM and its successors (Wu et al., 2018b;
+Ramapuram et al., 2022; Pham et al., 2021) show that these
+conditional generative memory models offer better perfor-
+mance on image reconstuction, denoising, and generation
+tasks compared to variational autoencoders (Kingma and
+Welling, 2013) and memory networks (Bornschein et al.,
+2017). However, to our knowledge this is the first report on
+investigating how those models can adapt to LLM and aid
+in their knowledge updating.
+Transformers struggle with accessing and updating long-
+term memory (Fan et al., 2021). Efforts to extend input
+context length struggle integrating inherent model knowl-
+edge with external facts, thereby lacking robustness (Li
+et al., 2022; Liu et al., 2023). Augmenting transform-
+ers with external, non-differentiable memory and k-nearest
+neighbor (kNN) attention has shown promise in improving
+language modeling by utilizing additional context (Grave
+et al., 2017; Khandelwal et al., 2019). However, kNN-
+augmented models face challenges in controlling memory
+during decoding, leading to difficulties in updating facts
+due to conflicts between encoded knowledge and real-time
+information (Liu et al., 2023; Zhu et al., 2020).
+Model Editing For comprehensive surveys of editing ap-
+proaches see (Yao et al., 2023; Zhang et al., 2024; Wang
+et al., 2023a). Editing methods can be broadly catego-
+8
+
+LLMs with Episodic Memory Control
+Method Train Context nf act= 64 nf act= 96 nf act= 128 nf act= 256
+mistral-7b (3-shot) 8192 0.98/ 2655 0.96/ 3495 0.57 / 4334 0.42 / 7417
+gpt-neox-20b (3-shot) 2048 0.52 / 2366 0.36 / 3193 0.33 / 4020 0.35 / 7231
+llama2-13b (3-shot) 4096 0.97/ 2755 0.66 / 3628 OOM OOM
+Supersizing Transformer 2048 0.39 / 1462 0.39 / 2249 0.37 / 3072 0.37 / 6201
+Supersizing Transformer + filtering 2048 0.72 / 1640 0.71 / 2375 0.70 / 3110 0.69 / 5809
+Larimar-1.3b 384/1024 0.89 / 1565 0.88/ 2276 0.88/ 2988 0.86/ 5607
+Larimar-6b 384/2048 0.82 / 1565 0.81 / 2276 0.81/ 2988 0.80/ 5607
+Table 6. Novel fact addition recall rate on FastFacts. Larimar shows good recall performance and can extrapolate to higher context length
+than it was trained on. Baseline models show good recall on shorter context but recall degrades significantly for longer context.
+rized into three categories: ‘Recognition Phase’, ‘Associa-
+tion Phase’ and ‘Mastery Phase’ (Zhang et al., 2024). The
+‘recognition phase’-targeting methods consider demon-
+strating right context to help the LLM output correct facts,
+either via in-context demonstrations of similar examples
+(Zheng et al., 2023), or training an external model on edits
+(Mitchell et al., 2022).The ‘association phase’ -related edit-
+ing methods consider merging new knowledge to that of the
+base LLM, either by patching (adding and training) error-
+specific neurons (Huang et al., 2023), or by adding a an
+adaptor storing edit key-value pairs to a specific LLM layer
+(Hartvigsen et al., 2022). The ‘mastery phase’ methods
+learn to update base LLM’s own parameters. Examples are
+regularized finetuning (Zhu et al., 2020) and hypernetwork-
+based methods (Mitchell et al., 2021; De Cao et al., 2021).
+Recent works also explore the ‘locate-then-edit’ approach:
+(Meng et al., 2022a;b) first perform a causal tracing to de-
+tect which part of hidden states can be attributable to the
+fact and then do a rank-one update of the corresponding
+weight parameters to directly write in the updated fact.
+Current model editing approaches, while promising (Yao
+et al., 2023), face significant limitations, such as high train-
+ing costs and difficulties in generalizing to new data. These
+methods often cannot efficiently update LLMs due to ex-
+tensive time and memory requirements (Mitchell et al.,
+2022). Furthermore, the assumption that knowledge within
+LLMs is localized has been challenged (Hase et al., 2023),
+indicating that simple parameter updates may not be effec-
+tive for comprehensive edits. The performance of LLMs
+degrades with multiple edits, leading to issues like knowl-
+edge forgetting and distortion (Mitchell et al., 2022; Meng
+et al., 2023; Gupta et al., 2024; Li et al., 2023; Gu et al.,
+2024). Alternatives like external cache or memory-based
+editing have been proposed to circumvent direct model
+modifications, yet challenges in selectively forgetting out-
+dated or sensitive knowledge persist (Ishibashi and Shi-
+modaira, 2023; Patil et al., 2023).
+Different from the above-mentioned works, we present a
+novel approach to augment LLMs with generative memory,
+enabling dynamic editing and adaptation without retrain-
+ing. This differs from existing works that update LLM pa-
+rameters (Meng et al., 2022a;b) or external memories (Han
+et al., 2023; Hartvigsen et al., 2022), or requires multiple
+in-context demonstrations (Zheng et al., 2023).
+Larimar’s forgetting operation does not use negative exam-
+ples to fine-tune LLMs for unlearning (Yu et al., 2023).
+Neither Larimar requires tailored fine-tuning (Eldan and
+Russinovich, 2023) or inserting extra layers (Chen and
+Yang, 2023), and is complimentary to in-context unlearn-
+ing (e.g., (Pawelczyk et al., 2023)) for fact forgetting.
+7. Conclusions
+In this work, we propose augmenting LLMs with a dy-
+namically updatable and distributed episodic memory as
+a means to online knowledge adaptation. By exploiting
+a one-shot memory update mechanism, combined with
+memory-conditioned decoding, the proposed framework
+shows accurate, precise, robust, and significantly faster
+editing performance compared to baselines in single-fact,
+as well as the challenging sequential editing experiments.
+We exploit the same memory updating mechanism to en-
+able a fast and selective fact forgetting operation, as well
+as an effective information deletion mechanism. We also
+provide a simple approach for handling long input context
+by recursively reading from Larimar’s memory space, re-
+vealing better fact recall from long input context by Lari-
+mar when compared to state-of-the-art LLMs trained with a
+much larger training context window. The proposed frame-
+work thus provides a simple, general, and principled ap-
+proach to update LLMs in real-time by coupling them with
+an adaptable episodic memory control.
+One obvious limitation of current Larimar architecture is
+being able to only handle shorter-lengh facts. In addi-
+tion, the training is currently limited to sentence comple-
+tion tasks. Future works will include expanding Larimar
+to modeling longer sentences and to more tasks like ques-
+tion answering, and summarization. Further, we will sub-
+ject Larimar to more challenging tasks during inference,
+whereas the knowledge update in latent memory is needed
+for the model to navigate the task, for example in conver-
+sational setting.
+9
+
+LLMs with Episodic Memory Control
+Impact Statement
+This paper presents work whose goal is to advance the field
+of machine learning and large language models. There are
+many potential societal consequences of our work, none
+which we feel must be specifically highlighted here.
+References
+Jacob Devlin, Ming-Wei Chang, Kenton Lee, and Kristina
+Toutanova. Bert: Pre-training of deep bidirectional
+transformers for language understanding. arXiv preprint
+arXiv:1810.04805, 2018.
+Colin Raffel, Noam Shazeer, Adam Roberts, Katherine
+Lee, Sharan Narang, Michael Matena, Yanqi Zhou, Wei
+Li, and Peter J Liu. Exploring the limits of transfer learn-
+ing with a unified text-to-text transformer. The Journal
+of Machine Learning Research, 21(1):5485–5551, 2020.
+Tom Brown, Benjamin Mann, Nick Ryder, Melanie Sub-
+biah, Jared D Kaplan, Prafulla Dhariwal, Arvind Nee-
+lakantan, Pranav Shyam, Girish Sastry, Amanda Askell,
+et al. Language models are few-shot learners. Ad-
+vances in neural information processing systems , 33:
+1877–1901, 2020.
+Ashish Vaswani, Noam Shazeer, Niki Parmar, Jakob
+Uszkoreit, Llion Jones, Aidan N Gomez, Łukasz Kaiser,
+and Illia Polosukhin. Attention is all you need.Advances
+in neural information processing systems, 30, 2017.
+Fabio Petroni, Tim Rockt ¨aschel, Sebastian Riedel, Patrick
+Lewis, Anton Bakhtin, Yuxiang Wu, and Alexander
+Miller. Language models as knowledge bases? In Pro-
+ceedings of the 2019 Conference on Empirical Methods
+in Natural Language Processing and the 9th Interna-
+tional Joint Conference on Natural Language Process-
+ing (EMNLP-IJCNLP), pages 2463–2473, 2019.
+Cem Anil, Yuhuai Wu, Anders Johan Andreassen, Aitor
+Lewkowycz, Vedant Misra, Vinay Venkatesh Ramasesh,
+Ambrose Slone, Guy Gur-Ari, Ethan Dyer, and Behnam
+Neyshabur. Exploring length generalization in large
+language models. In Alice H. Oh, Alekh Agar-
+wal, Danielle Belgrave, and Kyunghyun Cho, editors,
+Advances in Neural Information Processing Systems ,
+2022. URL https://openreview.net/forum?
+id=zSkYVeX7bC4.
+Amirhossein Kazemnejad, Inkit Padhi, Karthikeyan Nate-
+san Ramamurthy, Payel Das, and Siva Reddy. The im-
+pact of positional encoding on length generalization in
+transformers, 2023.
+James Kirkpatrick, Razvan Pascanu, Neil Rabinowitz, Joel
+Veness, Guillaume Desjardins, Andrei A Rusu, Kieran
+Milan, John Quan, Tiago Ramalho, Agnieszka Grabska-
+Barwinska, et al. Overcoming catastrophic forgetting in
+neural networks. Proceedings of the national academy
+of sciences, 114(13):3521–3526, 2017.
+Chen Zhu, Ankit Singh Rawat, Manzil Zaheer, Srinadh
+Bhojanapalli, Daliang Li, Felix Yu, and Sanjiv Kumar.
+Modifying memories in transformer models, 2020.
+Daliang Li, Ankit Singh Rawat, Manzil Zaheer, Xin Wang,
+Michal Lukasik, Andreas Veit, Felix Yu, and Sanjiv Ku-
+mar. Large language models with controllable working
+memory, 2022.
+Nelson F. Liu, Kevin Lin, John Hewitt, Ashwin Paranjape,
+Michele Bevilacqua, Fabio Petroni, and Percy Liang.
+Lost in the middle: How language models use long con-
+texts, 2023.
+Vaidehi Patil, Peter Hase, and Mohit Bansal. Can sensitive
+information be deleted from llms? objectives for defend-
+ing against extraction attacks, 2023.
+William P Dempsey, Zhuowei Du, Anna Nadtochiy,
+Colton D Smith, Karl Czajkowski, Andrey Andreev,
+Drew N Robson, Jennifer M Li, Serina Applebaum,
+Thai V Truong, et al. Regional synapse gain and loss
+accompany memory formation in larval zebrafish. Pro-
+ceedings of the National Academy of Sciences , 119(3):
+e2107661119, 2022.
+Livia Autore, James D O’Leary, Clara Ortega-de San Luis,
+and Tom´as J Ryan. Adaptive expression of engrams by
+retroactive interference. bioRxiv, pages 2023–03, 2023.
+Charles Blundell, Benigno Uria, Alexander Pritzel, Yazhe
+Li, Avraham Ruderman, Joel Z Leibo, Jack Rae, Daan
+Wierstra, and Demis Hassabis. Model-free episodic con-
+trol, 2016.
+M´at´e Lengyel and Peter Dayan. Hippocampal contribu-
+tions to control: the third way. Advances in neural infor-
+mation processing systems, 20, 2007.
+Dharshan Kumaran, Demis Hassabis, and James L McClel-
+land. What learning systems do intelligent agents need?
+complementary learning systems theory updated. Trends
+in cognitive sciences, 20(7):512–534, 2016.
+Weinan Sun, Madhu Advani, Nelson Spruston, Andrew
+Saxe, and James E Fitzgerald. Organizing memories for
+generalization in complementary learning systems. Na-
+ture neuroscience, 26(8):1438–1448, 2023.
+Steve Ramirez, Xu Liu, Pei-Ann Lin, Junghyup Suh,
+Michele Pignatelli, Roger L Redondo, Tom ´as J Ryan,
+and Susumu Tonegawa. Creating a false memory in the
+hippocampus. Science, 341(6144):387–391, 2013.
+10
+
+LLMs with Episodic Memory Control
+Yan Wu, Greg Wayne, Alex Graves, and Timothy Lillicrap.
+The kanerva machine: A generative distributed memory,
+2018a.
+Kha Pham, Hung Le, Man Ngo, Truyen Tran, Bao Ho,
+and Svetha Venkatesh. Generative pseudo-inverse mem-
+ory. In International Conference on Learning Represen-
+tations, 2021.
+Diederik P Kingma and Max Welling. Auto-encoding vari-
+ational bayes. arXiv preprint arXiv:1312.6114, 2013.
+Kevin Meng, Arnab Sen Sharma, Alex J Andonian,
+Yonatan Belinkov, and David Bau. Mass-editing mem-
+ory in a transformer. In The Eleventh International Con-
+ference on Learning Representations, 2023.
+Eric Mitchell, Charles Lin, Antoine Bosselut, Christo-
+pher D Manning, and Chelsea Finn. Memory-based
+model editing at scale. In International Conference
+On Machine Learning, Vol 162. JMLR-JOURNAL MA-
+CHINE LEARNING RESEARCH, 2022.
+Alec Radford, Jeffrey Wu, Rewon Child, David Luan,
+Dario Amodei, Ilya Sutskever, et al. Language models
+are unsupervised multitask learners. OpenAI blog, 1(8):
+9, 2019.
+Stephen Merity, Caiming Xiong, James Bradbury, and
+Richard Socher. Pointer sentinel mixture models, 2016.
+Yunzhi Yao, Peng Wang, Bozhong Tian, Siyuan Cheng,
+Zhoubo Li, Shumin Deng, Huajun Chen, and Ningyu
+Zhang. Editing large language models: Prob-
+lems, methods, and opportunities. arXiv preprint
+arXiv:2305.13172, 2023.
+Kevin Meng, David Bau, Alex Andonian, and Yonatan Be-
+linkov. Locating and editing factual associations in gpt.
+Advances in Neural Information Processing Systems, 35:
+17359–17372, 2022a.
+Thomas Hartvigsen, Swami Sankaranarayanan, Hamid
+Palangi, Yoon Kim, and Marzyeh Ghassemi. Aging with
+grace: Lifelong model editing with discrete key-value
+adaptors. arXiv preprint arXiv:2211.11031, 2022.
+Ce Zheng, Lei Li, Qingxiu Dong, Yuxuan Fan, Zhiyong
+Wu, Jingjing Xu, and Baobao Chang. Can we edit factual
+knowledge by in-context learning?, 2023.
+Omer Levy, Minjoon Seo, Eunsol Choi, and Luke Zettle-
+moyer. Zero-shot relation extraction via reading com-
+prehension. arXiv preprint arXiv:1706.04115, 2017.
+CNN. 2023 in review fast facts, 2023. URL:
+\https://www.cnn.com/2023/11/13/us/
+2023-in-review-fast-facts/index.html .
+Silvy HP Collin, Branka Milivojevic, and Christian F
+Doeller. Memory hierarchies map onto the hippocam-
+pal long axis in humans. Nature neuroscience, 18(11):
+1562–1564, 2015.
+Phoebe Klett and Thomas Ahle. Supersizing trans-
+formers: Going beyond rag with extended minds
+for llms. The Normal Blog, 2023. URL: https:
+//blog.normalcomputing.ai/posts/
+2023-09-12-supersizing-transformers/
+supersizing-transformers.html.
+Catherine Olsson, Nelson Elhage, Neel Nanda, Nicholas
+Joseph, Nova DasSarma, Tom Henighan, Ben Mann,
+Amanda Askell, Yuntao Bai, Anna Chen, Tom Con-
+erly, Dawn Drain, Deep Ganguli, Zac Hatfield-Dodds,
+Danny Hernandez, Scott Johnston, Andy Jones, Jackson
+Kernion, Liane Lovitt, Kamal Ndousse, Dario Amodei,
+Tom Brown, Jack Clark, Jared Kaplan, Sam McCan-
+dlish, and Chris Olah. In-context learning and induction
+heads, 2022.
+Albert Gu, Karan Goel, and Christopher R ´e. Efficiently
+modeling long sequences with structured state spaces,
+2022.
+Albert Gu and Tri Dao. Mamba: Linear-time sequence
+modeling with selective state spaces, 2023.
+Samy Jelassi, David Brandfonbrener, Sham M. Kakade,
+and Eran Malach. Repeat after me: Transformers are
+better than state space models at copying, 2024.
+Jason Weston, Sumit Chopra, and Antoine Bordes. Mem-
+ory networks. arXiv preprint arXiv:1410.3916, 2014.
+Alex Graves, Greg Wayne, and Ivo Danihelka. Neural tur-
+ing machines. arXiv preprint arXiv:1410.5401, 2014.
+Alexander Miller, Adam Fisch, Jesse Dodge, Amir-
+Hossein Karimi, Antoine Bordes, and Jason Weston.
+Key-value memory networks for directly reading docu-
+ments, 2016.
+Pentti Kanerva. Sparse distributed memory . MIT press,
+1988.
+Yan Wu, Greg Wayne, Karol Gregor, and Timothy Lilli-
+crap. Learning attractor dynamics for generative mem-
+ory, 2018b.
+Jason Ramapuram, Yan Wu, and Alexandros Kalousis.
+Kanerva++: extending the kanerva machine with differ-
+entiable, locally block allocated latent memory, 2022.
+J¨org Bornschein, Andriy Mnih, Daniel Zoran, and Danilo J.
+Rezende. Variational memory addressing in generative
+models, 2017.
+11
+
+LLMs with Episodic Memory Control
+Angela Fan, Thibaut Lavril, Edouard Grave, Armand
+Joulin, and Sainbayar Sukhbaatar. Addressing some lim-
+itations of transformers with feedback memory, 2021.
+Edouard Grave, Moustapha Cisse, and Armand Joulin. Un-
+bounded cache model for online language modeling with
+open vocabulary, 2017.
+Urvashi Khandelwal, Omer Levy, Dan Jurafsky, Luke
+Zettlemoyer, and Mike Lewis. Generalization through
+memorization: Nearest neighbor language models.
+arXiv preprint arXiv:1911.00172, 2019.
+Ningyu Zhang, Yunzhi Yao, Bozhong Tian, Peng Wang,
+Shumin Deng, Mengru Wang, Zekun Xi, Shengyu Mao,
+Jintian Zhang, Yuansheng Ni, et al. A comprehensive
+study of knowledge editing for large language models.
+arXiv preprint arXiv:2401.01286, 2024.
+Song Wang, Yaochen Zhu, Haochen Liu, Zaiyi Zheng,
+Chen Chen, and Jundong Li. Knowledge editing for
+large language models: A survey, 2023a.
+Zeyu Huang, Yikang Shen, Xiaofeng Zhang, Jie Zhou,
+Wenge Rong, and Zhang Xiong. Transformer-patcher:
+One mistake worth one neuron. In The Eleventh In-
+ternational Conference on Learning Representations ,
+2023. URL https://openreview.net/forum?
+id=4oYUGeGBPm.
+Eric Mitchell, Charles Lin, Antoine Bosselut, Chelsea
+Finn, and Christopher D Manning. Fast model editing
+at scale. arXiv preprint arXiv:2110.11309, 2021.
+Nicola De Cao, Wilker Aziz, and Ivan Titov. Editing
+factual knowledge in language models. arXiv preprint
+arXiv:2104.08164, 2021.
+Kevin Meng, Arnab Sen Sharma, Alex Andonian, Yonatan
+Belinkov, and David Bau. Mass-editing memory in a
+transformer. arXiv preprint arXiv:2210.07229, 2022b.
+Peter Hase, Mohit Bansal, Been Kim, and Asma Ghan-
+deharioun. Does localization inform editing? surpris-
+ing differences in causality-based localization vs. knowl-
+edge editing in language models. In Thirty-seventh
+Conference on Neural Information Processing Systems ,
+2023. URL https://openreview.net/forum?
+id=EldbUlZtbd.
+Akshat Gupta, Anurag Rao, and Gopala Anumanchipalli.
+Model editing at scale leads to gradual and catastrophic
+forgetting. arXiv preprint arXiv:2401.07453, 2024.
+Zhoubo Li, Ningyu Zhang, Yunzhi Yao, Mengru Wang,
+Xi Chen, and Huajun Chen. Unveiling the pitfalls of
+knowledge editing for large language models, 2023.
+Jia-Chen Gu, Hao-Xiang Xu, Jun-Yu Ma, Pan Lu, Zhen-
+Hua Ling, Kai-Wei Chang, and Nanyun Peng. Model
+editing can hurt general abilities of large language mod-
+els, 2024.
+Yoichi Ishibashi and Hidetoshi Shimodaira. Knowledge
+sanitization of large language models, 2023.
+Xiaoqi Han, Ru Li, Hongye Tan, Wang Yuanlong,
+Qinghua Chai, and Jeff Pan. Improving sequen-
+tial model editing with fact retrieval. In Houda
+Bouamor, Juan Pino, and Kalika Bali, editors, Find-
+ings of the Association for Computational Linguis-
+tics: EMNLP 2023 , pages 11209–11224, Singa-
+pore, December 2023. Association for Computational
+Linguistics. doi: 10.18653/v1/2023.findings-emnlp.
+749. URL https://aclanthology.org/2023.
+findings-emnlp.749.
+Charles Yu, Sullam Jeoung, Anish Kasi, Pengfei Yu, and
+Heng Ji. Unlearning bias in language models by par-
+titioning gradients. In Findings of the Association for
+Computational Linguistics: ACL 2023 , pages 6032–
+6048, 2023.
+Ronen Eldan and Mark Russinovich. Who’s harry potter?
+approximate unlearning in llms, 2023.
+Jiaao Chen and Diyi Yang. Unlearn what you want to
+forget: Efficient unlearning for llms. arXiv preprint
+arXiv:2310.20150, 2023.
+Martin Pawelczyk, Seth Neel, and Himabindu Lakkaraju.
+In-context unlearning: Language models as few shot un-
+learners. arXiv preprint arXiv:2310.07579, 2023.
+Damai Dai, Li Dong, Yaru Hao, Zhifang Sui, Baobao
+Chang, and Furu Wei. Knowledge neurons in pretrained
+transformers. arXiv preprint arXiv:2104.08696, 2021.
+Peng Wang, Ningyu Zhang, Xin Xie, Yunzhi Yao, Bozhong
+Tian, Mengru Wang, Zekun Xi, Siyuan Cheng, Kangwei
+Liu, Guozhou Zheng, and Huajun Chen. Easyedit: An
+easy-to-use knowledge editing framework for large lan-
+guage models, 2023b.
+12
+
+LLMs with Episodic Memory Control
+A. Baselines
+FT Fine-Tuning (FT) uses Adam optimization with early
+stopping, focusing on adjusting mlpproj weights in one
+layer to optimize the training loss.
+FT+L Constrained fine-tuning (FT+L), as in (Zhu et al.,
+2020), authors apply an L∞ norm constraint by clamping
+weights no to exceed ϵ range at each gradient step. They
+chose layer 0 andϵ = 5×10−4 for GPT-2, andϵ = 5×10−5
+for GPT-J.
+KN This is a method by (Dai et al., 2021) which selects
+neurons that are associated with knowledge expression via
+gradient-based attributions, and then modifies MLP at the
+rows corresponding to those neurons by adding scaled em-
+bedding vectors.
+KE Knowledge editor (KE) (De Cao et al., 2021) learn
+an LSTM sequence model that uses gradient information
+to predict rank-1 weight changes to the model. KE-CF /
+KE-ZsRE is additionally trained model on training set of
+CounterFact / ZsRE dataset.
+MEND Model Editor Networks with Gradient Decom-
+position (MEND) (Mitchell et al., 2021) learn a rank-1 de-
+composition of the negative log likelihood gradient with re-
+spect to some subset of parameters . Similarly, MEND-CF
+/ MEND-ZsRE is additionally trained model on training set
+of CounterFact / ZsRE dataset.
+ROME Rank-One Model Editing (ROME), proposed by
+(Meng et al., 2022a), treats MLP module as a key-value
+store. To add a new key-value pair, ROME applies a rank-
+one modification to the weights of the MLP, adding the new
+information directly.
+IKE In-context Knowledge Editing (IKE) (Zheng et al.,
+2023) defines three types of demonstration formatting tem-
+plates including copy, update, and retain, which guide
+model to edit knowledge facts by in-context learning (ICL).
+The parameters of the model are not updated.
+PROMPT Similar to IKE (Zheng et al., 2023) but simply
+prepends new fact to the LLM prompt. The parameters of
+the model are also not updated.
+MEMIT MEMIT aims direct model editing via fact trac-
+ing and followed by parameter editing. It is an expanded
+version of ROME, which enables the editing of large
+amounts of factual data through the updating of a sequence
+of MLP layers.
+SERAC SERAC is a retrieval-based editing algorithm
+which uses a retrieval-based component consisting of an
+external memory that contains an explicit cache of edits. In
+addition, an edit scope classifier and a counterfactual model
+are trained using these edits. If the new input is identified as
+within the scope, the output from the counterfactual model
+is returned. If not, the base model is used for generation.
+ICL To compare to In-Context Learning (ICL) as a base-
+line method in Table 4, we use a prompt which consists
+of N facts, half of which are marked with a prefix string
+(e.g. “[UNKNOWN]”), followed by K examples of ques-
+tions and answers (prior to a final query to the model), half
+of which correspond to facts marked with the prefix string,
+which replaces the answer, indicating that the fact should
+be treated as forgotten.
+In Table 1, we report the wall clock time for a single edit
+(averaged over 10 edits) on the CounterFact dataset for
+ROME (Meng et al., 2022a) and GRACE (Hartvigsen et al.,
+2022) that were computed using the EasyEdit (Wang et al.,
+2023b) framework with a single A100 (80G) GPU. Be-
+low we provide wall clock time of different existing editing
+methods, as reported by (Yao et al., 2023).
+Editor COUNTERFACT
+FT 35.94 s
+SERAC 5.31 s
+CaliNet 1.88 s
+T-Patcher 1864.74 s
+KE 2.20 s
+MEND 0.51 s
+KN 225.43 s
+ROME 147.2 s
+MEMIT 143.2 s
+Table 7. Wall clock time for each edit method for performing 10
+edits from CounterFact benchmark, as reported in (Yao et al.,
+2023).
+A.1. Prompt Example For Forgetting with ICL
+experiments
+Below, we show an example ICL prompt for N = 20 and
+K = 6, used for Llama2-13B in Table 4:
+Facts:
+Gaston Palewski writes in French
+The domain of work of Hermann Klaatsch is anatomy
+[UNKNOWN] 2 Minute Drill is to debut on ESPN
+[UNKNOWN] Immanuel Wallerstein works in the area of
+sociology
+[UNKNOWN] Nissan Skyline, created by Nissan
+Feng Fei-fei, a citizen of Taiwan
+Michie Mee works as actor
+13
+
+LLMs with Episodic Memory Control
+[UNKNOWN] Antonio Palomino’s life ended in Madrid
+[UNKNOWN] Film Forum is within Manhattan
+[UNKNOWN] Phoenix Sky Harbor International Airport
+is located in Phoenix
+Abraham & Straus formed in Brooklyn
+The domain of activity of Joseph Schumpeter is economics
+George Buza’s profession is an actor
+[UNKNOWN] Velayudham originated in India
+Sophie Calle, a native French
+In Nunavut, the language spoken is French
+[UNKNOWN] The Wide Country is to debut on NBC
+[UNKNOWN] The mother tongue of Porfiry Ivanov is
+Russian
+In Kiiminki, they understand Finnish
+[UNKNOWN] Pachomius the Great succumbed at Egypt
+Input: The domain of work of Hermann Klaatsch
+is
+Output: anatomy
+Input: 2 Minute Drill is to debut on
+Output: UNKNOWN
+Input: Immanuel Wallerstein works in the area of
+Output: UNKNOWN
+Input: Nissan Skyline, created by
+Output: UNKNOWN
+Input: Feng Fei-fei, a citizen of
+Output: Taiwan
+Input: Michie Mee works as
+Output: actor
+Input: Gaston Palewski writes in
+Output:
+B. Ablation experiments on CounterFact
+single fact editing
+In Table 8 we show that when Larimar has access to ad-
+ditional fact paraphrases, its paraphrase performance in-
+creases from 88.4 to 93.6. Note that in this setup the av-
+erage number of added paraphrased facts is one or two and
+we queried the model with paraphrased prompts unseen by
+the memory. Also, observe that the use of the scope de-
+tector for query detection is crucial for the model’s perfor-
+mance to properly handle the neighborhood prompts.
+In Table 9 and 10 we provide ablation results on Larimar
+by varying different learning parameters and architectural
+components of the model and observing performance on
+CounterFact dataset. In Table 9 the ablation results for
+GPT-2 Large based model are presented. Here we exam-
+ined three different training configurations:
+• C1: Episode length 6, observation noise 0.0001,
+trained for 2 epochs
+Editor Edit Success Paraphrase Neighborhood
+Larimar-6B w/ scope 99.6 88.4 80.4Larimar-6B w/ scope + 1 rephrase99.7 92.9 79.3Larimar-6B w/ scope + 2 rephrases99.8 93.6 79.2Larimar-6B w/o Scope 99.6 93.6 13.7Larimar-6B w/o Scope + 1 rephrase99.7 95.9 11.0Larimar-6B w/o Scope + 2 rephrases99.8 96.2 10.5
+Table 8. Single fact edit valuation on CounterFact dataset.
+Larimar-6B w/ Scope is the baseline which includes only a single
+fact in the memory and uses in-scope query detector. Larimar-6B
++ rephrase is the version which adds into the memory on average
+one or more additional paraphrased facts during test and queries
+the memory with an unseen rephrased prompt. Results without a
+scope detector (w/o Scope) are also reported.
+.
+Config Editor Metrics
+Edit Success Paraphrase Neighb
+S M S M S M
+Larimar 100.0 99.7 81.3 48.9 75.5 2.1C1 No Scope 100.0 99.8 81.9 48.66 28.5 -27.4No Memory 23.3 -4.4 26.5 -3.5 77.7 4.7
+Larimar 100.0 99.9 80.3 49.1 74.7 1.9C2 No Scope 100.0 99.9 80.3 51.2 24.5 -36.9No Memory 20.6 -4.9 24.5 -4.1 78.9 5.4
+Larimar 100.0 99.8 85.4 56.7 74.7 1.6C3 No Scope 100.0 99.9 87.7 57.2 15.1 -46.1No Memory 21.6 -4.8 25.4 -3.8 78.4 5.0
+Table 9. Ablation results for Larimar-1.3B using CounterFact
+dataset
+• C2: Episode length 20, observation noise 0.000001,
+trained for 4 epochs
+• C3: Episode length 16, observation noise 0.000001,
+trained for 2 epochs
+Note that the model reported in Table 12 in main paper is
+based on configuration C3. Moreover, we looked at three
+versions of the Larimar architecture: Original Larimar,
+Larimar without Scope detector and Larimar without mem-
+ory. As can be seen, configuration C3 had some edge in
+performance. The effect of removing scope detector is re-
+flected in drop of the neighborhood score. This is expected
+since now the model reroutes the prompts from the uncon-
+strained decoder to the memory-constrained one, where the
+memory influence makes it harder to cover prompts unre-
+lated to in-memory content. On the other hand, removing
+memory module results in significant decrease in edit suc-
+cess and paraphrasing, as now the model has no knowledge
+about introduced knowledge facts, at the same time its gen-
+eral language abilities are intact and performing well as re-
+flected in high neighborhood score.
+In Table 11 we show ablation results with different scope
+detectors (detects whether a given prompt is related or not
+to the facts written in memory). ESD (externally trained
+scope detector) shows overall good performance across all
+14
+
+LLMs with Episodic Memory Control
+Config Editor
+Metrics
+Edit Success Paraphrase Neighb
+S M S M S M
+Larimar 99.6 96.0 87.6 53.9 80.6 4.4
+C1 No Scope 99.6 96.1 94.6 55.5 15.7 -17.1
+No Memory 15.8 -6.8 18.6 -6.8 83.6 6.9
+Larimar 69.8 11.5 59.2 5.7 82.7 6.8
+C2 No Scope 70.8 11.6 64.4 6.4 62.7 4.2
+No Memory 15.2 -7.0 18.3 -6.3 83.2 6.9
+Larimar 99.6 98.9 88.8 59.1 80.3 3.6
+C3 No Scope 99.9 99.0 95.3 60.6 15.3 -22.1
+No Memory 15.0 -6.6 18.5 -6.2 83.6 6.5
+Larimar 91.0 69.7 78.9 34.7 81.6 5.9
+C4 No Scope 91.0 69.7 83.9 35.4 29.8 -4.2
+No Memory 15.4 -6.9 18.1 -6.0 83.2 6.6
+Larimar 99.9 98.9 88.7 59.9 80.1 3.7
+C5 No Scope 99.9 98.9 94.9 61.4 15.7 -22.8
+No Memory 14.3 -6.9 18.8 -6.3 83.5 6.8
+Table 10. Ablation results for Larimar-6B using CounterFact
+dataset
+three metrics (edit success, paraphrase and neighborhood).
+ISD (internal trained scope detector on train st of Counter-
+Fact dataset) shows some improvement in edit success and
+paraphrase while dropping the performance on neighbor-
+hood metric, which is expected as now it is less accurate in
+classifying the neighborhood prompts as out of scope.
+In Table 10 the ablation results for GPT-J based model rep-
+resent results for the following five training configurations:
+• C1: Episode length 5, no KL loss, trained for 5 epochs
+• C2: Episode length 16, noise level 1e-4, trained for 8
+epochs
+• C3: Episode length 16, noise level 1e-4, no KL loss,
+trained for 8 epochs
+• C4: Episode length 8, noise level 1e-4, trained for 8
+epochs
+• C5: Episode length 8, noise level 1e-4, no KL loss,
+trained for 8 epochs
+Note that the model reported in Table 2 in main paper is
+based on configuration C1. Similarly as before, we looked
+at architectural changes which included the removal of
+scope detector and memory block. We observed that con-
+figuration C2 performed the worst, while C1 had overall
+better performance. Moreover, the experiments again con-
+firmed the benefit of scope detector and the effect of mem-
+ory unit.
+C. ZsRE single fact editing experiments and
+ablations
+We evaluated Larimar on the ZsRE benchmark (Levy et al.,
+2017), a QA dataset for relation extraction through reading
+Editor
+Edit Success Paraphrase Neighborhood
+S M S M S M
+Larimar (ESD) 99.6 95.9 87.6 25.9 80.6 4.3
+Larimar(ISD-ep4) 99.6 96.6 94.6 55.5 15.7 -17.0
+Larimar(ISD-ep8) 99.6 94.9 86.6 46.9 45.7 -5.9
+Table 11. Ablation experiment on Larimar-6B using CounterFact
+dataset with different scope detectors: external vs internal (trained
+on counterfact data).
+Editor Edit Success Paraphrase Neighborhood
+GPT-2 XL 22.2 21.3 24.2
+FT 99.6 82.1 23.2
+FT+L 92.3 47.2 23.4
+KE 65.5 61.4 24.9
+KE-zsRE 92.4 90.0 23.8
+MEND 75.9 65.3 24.1
+MEND-zsRE 99.4 99.3 24.1
+ROME 99.8 88.1 24.2
+Larimar-1.3B 98.1 81.6 19.7
+GPT-J 26.4 25.8 27.0
+ROME 99.8 95.9 27.2
+Larimar-6B 94.5 70.4 25.1
+Larimar-6B + 2 rephrases 94.5 82.2 25.1
+Table 12. Single fact edit valuation on ZsRE dataset. Larimar
+closely matches or outperforms gradient based, locate-then-edit
+based, and ICL baselines with training-free memory-conditioned
+generation.
+comprehension. See Table 12 for details.
+The test-time augmentation of memory with additional
+paraphrases boosts generalization from 70.4% to 82.2%,
+when two rephrases written in memory. In absence of scope
+detector, the same approach of augmenting memory with
+two additional rephrases provide an additional 1-2% in-
+crease in generalization, whereas neighborhood specificity
+is affected significantly, irrespective of the dataset.
+D. Additional Counterfact Batch editing
+Results
+Figure 3 shows the generalization and neighborhood speci-
+ficity comparison of Larimar with three baselines, MEMIT,
+ROME, and MEND. The result indicates Larimar main-
+tains generalization performance of single fact editing up
+to a batch size of 512, for larger batches the performance
+drops. The neighborhood specificity of Larimar, thanks to
+zSRE results Edit Success Paraphrase Neighb
+Larimar (W/ Scope) + 1 rephrase91.8 77.9 25.1
+Larimar (W/ Scope) + 2 rephrase91.8 82.2 25.1
+Larimar (W/O Scope) + 1 rephrase92.1 79.4 8.6
+Larimar (W/O Scope) + 2 rephrase92.1 83.4 8.5
+Table 13. Knowledge editing generalization results with and with-
+out additional rephrases and scope detectors on zSRE.
+15
+
+LLMs with Episodic Memory Control
+Figure 3. Batch editing on CounterFact dataset. Baseline perfor-
+mances are taken from (Meng et al., 2023). Green: MEMIT, Or-
+ange: ROME, Magenta: MEND, Black: Larimar-6B.
+Figure 4. Batch editing on CounterFact dataset with different
+memory slot size K.
+the use of the scope detector, remains very high for all batch
+sizes.
+We use a memory of sizeK × C, where K=512 and C=768
+throughout the manuscript, unless otherwise stated. For
+the sequential editing experiments, where there were 1000
+facts to be stored in memory, K was set to 1000. Figure
+4 shows the edit performance change as a function of the
+number of updates with different memory sizes. Results
+suggest that for N = K = 512, rewrite accuracy is 99%.
+For K = N > 512, the rewrite accuracy is slightly lower
+94%, likely because Larimar was trained with K=512. For
+N > K , where K is smaller than 512, we find rewrite ac-
+curacy to be around 80% if N = 2 K and around 54% if
+N = 4K.
+E. Additional Experimental Details
+In several experiments, we compute both reading and writ-
+ing weights using a Gaussian filter, as follows. Given an
+encoding z to be written to memory, and reference mem-
+ory matrix M(ref), we define the writing weight element
+wk at memory slot k as
+wk(z|M(ref)) ∝ exp
+
+−
+||z − M(ref)
+k,: ||2
+2
+2ασ2(z|M(ref))
+
+, (7)
+where “∝” implies that we normalize the weight vectors
+such thatPK
+k=1 wk = 1, α is a parameter which controls
+the entropy or sparsity of the weights ( w becomes a one-
+hot vector, or multinomial distribution with zero entropy,
+as α → 0), and we choose the width function σ(z|M(ref))
+to be the distance from z to the nearest neighbor row in
+M(ref),
+σ(z|M(ref)) := min
+k
+||z − M(ref)
+k,: ||2. (8)
+Eq. (7) assigns a lower weight wk to memory locations k
+for which the distance ||z − M(ref)
+k,: ||2 is large compared to
+the nearest-neighbor distance σ(z|M(ref)).
+Sequential editing experiments.
+For the sequential editing experiments reported in Table 3
+and Figure 2 (b), we set K = 1000 and use a fixed ref-
+erence memory M(ref) (see section 3) to compute reading
+and writing weights.
+For Table 3, the reference memory is constructed by encod-
+ing the prompt for each of the 1000 edits, and placing it in
+one row of M(ref).
+For Figure 2 (b), the reference memory is constructed by
+encoding the first prompt for each of the 1000 unique facts
+(among the several rephrasings in the edit set which are
+written to memory) and placing it in a single row inM(ref).
+Thus, when querying memory with an encoded rephrased
+prompt z in Eq. (7), if z is closest to the row k in M(ref)
+corresponding to the same fact, the key vector element wk
+will be largest for this element, and suppressed for other
+memory locations. (We use α = 10 −3 to strongly sup-
+press more distant encodings in the reference memory. Em-
+pirically, we found that that the nearest-neighbor encoding
+picked out by Eq. (7) with small α is usually the encoded
+prompt for the same fact, with lower F1 scores occurring
+mainly in cases where the nearest-neighbor row in M(ref)
+corresponds to a different fact.) We found that comput-
+ing reading and writing weights as in (Pham et al., 2021),
+w = z(M(ref))†, was not as effective with rephrased facts
+(Figure 2 (b) and Table 14) unless the number of rephras-
+ings per fact was relatively large.
+When writing to memory, a trailing period is appended to
+the ground truth label, in order to reduce the likelihood of
+the model generating additional text. When evaluating the
+F1 score, we remove (in both target and predicted tokens)
+the token corresponding to a period (13). We also remove
+the token 198, which corresponds to the new line character
+‘\n’, when it is generated as the last token.
+In Figure 5, we compare different variants of Larimar, on
+the same task as shown in Figure 2 (b). Relative to the
+Gaussian convolution method of Eq. (7), computing read-
+ing and writing weights with the reference memory ma-
+trix pseudoinverse, w = z(M(ref))† performed well on a
+dataset of 511 ZsRE facts and ≈ 20 phrasings per fact,
+but significantly worse on a dataset of 1000 ZsRE with 10
+phrasings per fact. (We hypothesize that Eq. (7) is more ef-
+16
+
+LLMs with Episodic Memory Control
+0 500 1000 1500 2000 2500
+Edits
+0.0
+0.2
+0.4
+0.6
+0.8
+1.0Holdout (F1)
+Gaussian, 511 facts
+Gaussian, 1000 facts
+Pseudoinverse, 511 facts
+Pseudoinverse, 1000 facts
+Figure 5. Mean F1 score of Larimar, comparing different choices
+for computing reading and writing weights – the Gaussian convo-
+lution in Eq. (7) and the pseudoinverse method of (Pham et al.,
+2021) – on held-out sets of unseen rephrasings from ZsRE over a
+sequence of 3000 edits. (Black curves are shown in Figure 2 (b)
+in the main text.)
+fective at finding a nearby rephrase encoding for the same
+fact when there are only one or a few paraphrases available
+in the data.)
+In our fact forgetting experiments (Table 4), we used a sim-
+ple reference memory where each matrix element is sam-
+pled randomly, M(ref)
+ij ∼ N (0, 1). We found this choice to
+be less effective when querying with rephrased prompts –
+in which case the additional structure of M(ref) described
+above helps to locate the nearby encoding of a different
+phrasing of the same fact – but to be sufficient when query-
+ing with the same prompts used when writing to memory
+(as in Table 4). In this case we compute the writing weight
+using the encoding of the prompt of the fact written to
+memory, W = Zprompt(M(ref))† (instead of Eq. (7)), and
+compute the reading weight in the same way, with the read-
+ing prompt differing from the writing prompt in rephrasing
+experiments.
+Lastly, in our batch editing experiment (Figure 2), we com-
+puted writing weights using the encoded prompt, W =
+Zprompt(M(ref))†, and computed both writing and read-
+ing weights with M(ref) set to the memory matrix obtained
+from Larimar’s training (although we found a Gaussian
+random matrix to yield comparable results).
+Throughout these experiments, we use σw = 0 and ξ = 0.
+F. Generalization via Rephrase-Augmented
+Memory
+We also evaluate Larimar-1.3B on generalization to unseen
+rephrasings, by writing a variable number of seen rephrases
+of the same fact to memory. After writing Nreph rephras-
+(Nf act, Nreph) Pseudoinverse Gaussian
+(20, 10) 0.94 0.90
+(40, 5) 0.84 0.84
+(100, 2) 0.66 0.78
+(200, 1) 0.33 0.69
+(1, 1) 0.63 0.68
+Table 14. Recall after writing Nreph rephrasings for each of
+Nf act ZsRE facts to Larimar-1.3B memory, and querying with
+unseen phrasings, using (i) w = z(M(ref) )† (‘pseudoinverse’) or
+(ii) Eq. (7), ‘Gaussian.’
+ings for each of Nf act facts to memory, we estimate recall
+by querying the model with Nreph unseen rephrasings. (As
+in the sequential editing experiment with rephrase queries,
+we use a reference memory matrix constructed from the
+prompt encodings for the facts written to memory.) In Ta-
+ble 14, we show average recall of the ground-truth answer
+for samples from the ZsRE validation set, revealing gen-
+eralization to unseen rephrases. Naturally, for facts with
+more rephrases in memory, recall is higher. We furthermore
+compare the Gaussian convolution method of Eq. (7) to
+computing reading and writing weights with the reference
+memory matrix pseudoinverse, w = z(M(ref))†. As in
+Figure 5, Eq. (7) leads to better recall with fewer rephras-
+ings per fact, but falls short when there are many rephras-
+ings per fact.
+G. Generation Robustness
+We assess Larimar’s robustness to sampling noise of the
+reading weights (σw) in terms of edit success and perplex-
+ity. To measure edit success, we use 2000 cases from the
+CounterFact dataset. For each case, the encoding of the
+prompt is concatenated with the ’new target’ to form an
+episode, which is written to memory. Next we sample the
+weight vector w ∼ N( ¯w, σw), w ∈ RK and take z = wM
+to be the read-out vector, which is decoded along with
+the prompt. We then report the edit success. To measure
+perplexity, we consider 1000 samples from the Wikipedia
+dataset. For each sentence, we write it into Larimar mem-
+ory, and take the first 10 characters of the sentence as our
+prompt. We then perform generation as above. We repeat
+these steps for each of the 1000 sentences and then this text
+is fed into GPT2 large model to compute perplexity.
+In Figure 6, we report the perplexity and rewrite success
+metrics as a function of σw, averaged over 3 independent
+runs. Overall the results indicate that Larimar is fairly ro-
+bust to increased noise variance up to a range.
+17
+
+LLMs with Episodic Memory Control
+Figure 6. Generation perplexity and single fact edit success as
+a function of varying magnitude of σw for Larimar-6B. (Re-
+sults show that our Zreadout is robust to noise in the address-
+ing/memory matrix and also leads to the correct response from
+the decoders)
+18

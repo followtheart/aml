@@ -1,14 +1,17 @@
 """Embedding abstraction over LiteLLM with a deterministic offline fallback."""
 import hashlib
+import logging
 from typing import List
 
 import numpy as np
 
-from . import config
+from . import config, metrics
 
 
-async def embed(texts: List[str]) -> np.ndarray:
+async def embed(texts: List[str], stage: str = "embedding") -> np.ndarray:
     if config.FAKE:
+        metrics.log_fake(kind="embedding", stage=stage, model="fake",
+                         input_count=len(texts))
         return np.stack([_hash_embed(t) for t in texts])
     import litellm
     kwargs = {}
@@ -17,8 +20,14 @@ async def embed(texts: List[str]) -> np.ndarray:
     if config.EMBED_API_KEY:
         kwargs["api_key"] = config.EMBED_API_KEY
     try:
-        resp = await litellm.aembedding(model=config.EMBED_MODEL, input=texts,
-                                        timeout=60, num_retries=1, **kwargs)
+        async def _call(_attempt):
+            return await litellm.aembedding(
+                model=config.EMBED_MODEL, input=texts,
+                timeout=60, num_retries=0, **kwargs)
+
+        resp = await metrics.measured_call(
+            kind="embedding", stage=stage, model=config.EMBED_MODEL,
+            call=_call, attempts=2, input_count=len(texts))
         vecs = np.array([d["embedding"] for d in resp["data"]],
                         dtype=np.float32)
         return _fit_dim(vecs)
@@ -26,7 +35,6 @@ async def embed(texts: List[str]) -> np.ndarray:
         # Credential/network failure: degrade to hash embeddings so writes
         # never hard-fail. Vector space is then hash-based until restart —
         # acceptable for dev; fix credentials and rebuild for real runs.
-        import logging
         logging.getLogger("aml.embed").warning(
             "embedding call failed (%s); falling back to hash embedding", e)
         return np.stack([_hash_embed(t) for t in texts])

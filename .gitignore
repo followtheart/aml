@@ -12,13 +12,7 @@ memory_system/memory.db
 memory_system/.env
 
 # Large third-party artifacts (re-generable, not code)
-papers/*.pdf
-papers/text/
-download_report.json
 
-# Benchmark datasets (download via README instructions / convert script)
-memory_system/data/locomo10.json
-memory_system/data/locomo_eval.json
 
 # OS/editor
 .DS_Store

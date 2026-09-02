@@ -71,7 +71,8 @@ async def _extract(st: store.Store, req: schemas.AddRequest) -> Dict:
                 '"event_time":null,"sensitivity":"normal"}],'
                 '"triples":[{"subject":"...","relation":"...",'
                 '"object":"..."}]}',
-                schema=llm.STRUCTURED_SCHEMAS["extraction"])
+                schema=llm.STRUCTURED_SCHEMAS["extraction"],
+                stage=f"add.extract.batch_{start // batch_size + 1}")
             if not isinstance(data, dict):
                 raise ValueError("extraction result is not a JSON object")
             raw_facts = data.get("facts") or []
@@ -131,7 +132,8 @@ async def _govern_one(st: store.Store, user_id: str, fact: Dict,
                 prompt,
                 '{"operation":"ADD|UPDATE|SUPERSEDE|NOOP","target_id":null,'
                 '"merged_content":null,"reason":"..."}',
-                schema=llm.STRUCTURED_SCHEMAS["governance"])
+                schema=llm.STRUCTURED_SCHEMAS["governance"],
+                stage="add.governance")
         except Exception:
             op = {"operation": "ADD", "target_id": None,
                   "merged_content": None}
@@ -175,7 +177,8 @@ async def _update_summary(st: store.Store, req: schemas.AddRequest):
         or "(empty)",
         chunk_messages=_format_messages(req.messages))
     try:
-        summary = (await llm.complete(prompt)).strip()
+        summary = (await llm.complete(
+            prompt, stage="add.summary")).strip()
         if summary:
             st.set_summary(req.user_id, req.session_id, summary)
     except Exception as e:
@@ -193,12 +196,14 @@ async def run_add(st: store.Store, req: schemas.AddRequest) -> None:
 
     if not facts:
         # fallback: store raw chunk as episode AMU (recall floor)
-        vec = (await embed([_format_messages(req.messages)]))[0]
+        vec = (await embed([_format_messages(req.messages)],
+                           stage="add.embed_episode"))[0]
         st.insert_amu(user_id=req.user_id, session_id=req.session_id,
                       content=_format_messages(req.messages),
                       type="episode", embedding=vec)
     else:
-        vecs = await embed([_embed_text(f) for f in facts])
+        vecs = await embed([_embed_text(f) for f in facts],
+                           stage="add.embed_facts")
         # governance sequentially per fact (shared store), extraction parallel
         results = []
         for f, v in zip(facts, vecs):

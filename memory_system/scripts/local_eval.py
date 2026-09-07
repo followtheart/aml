@@ -28,10 +28,12 @@ import sys
 import tempfile
 import time
 from collections import defaultdict
+from pathlib import Path
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from app import add_pipeline, prompts, schemas, search_pipeline, store, llm
+from app import config, eval_data, eval_scoring
 
 
 def parse_args():
@@ -39,6 +41,13 @@ def parse_args():
     p.add_argument("--data", required=True)
     p.add_argument("--limit", type=int, default=0, help="max QA pairs")
     p.add_argument("--convs", type=int, default=0, help="max conversations")
+    p.add_argument("--dataset", choices=eval_data.DATASETS, default="normalized")
+    p.add_argument("--history-dir", help="PersonaMem/ScriptMem source histories")
+    p.add_argument("--size", choices=["32k", "128k"], default="32k")
+    p.add_argument("--output", help="Write per-question results as JSONL")
+    p.add_argument("--inspect", action="store_true", help="Validate/count only; no model calls")
+    p.add_argument("--chunk-messages", type=int, default=20)
+    p.add_argument("--chunk-words", type=int, default=2000)
     p.add_argument("--no-graph", action="store_true")
     p.add_argument("--no-governance", action="store_true")
     p.add_argument("--no-rerank", action="store_true")
@@ -134,17 +143,7 @@ def build_plan(data, args):
     This prevents a small global --limit from needlessly ingesting every
     later conversation after the requested QA count has already been met.
     """
-    remaining = args.limit
-    plan = []
-    for conv in data[: args.convs or None]:
-        if args.limit and remaining <= 0:
-            break
-        qas = list(conv.get("qa", []))
-        if args.limit:
-            qas = qas[:remaining]
-            remaining -= len(qas)
-        plan.append((conv, qas))
-    return plan
+    return list(eval_data.iter_plan(data, args.limit, args.convs))
 
 
 class Ablate:
@@ -171,7 +170,8 @@ def _looks_graph(route):  # heuristic: graph route items lack _score/_fused
 
 
 async def _rerank_passthrough(req, plan, fused):
-    return fused[: config_top()]
+    # run_search's abstention check requires a positive final score.
+    return [dict(c, _final=c.get("_fused", 0)) for c in fused[:config_top()]]
 
 
 def config_top():
@@ -224,53 +224,88 @@ async def main():
         datefmt="%H:%M:%S")
     logging.getLogger("httpx").setLevel(logging.WARNING)
     apply_ablations(args)
-    data = json.load(open(args.data, encoding="utf-8"))
-    plan = build_plan(data, args)
-    total_steps = sum(len(conv["sessions"]) + 2 * len(qas)
-                      for conv, qas in plan)
+    if args.chunk_messages < 1 or args.chunk_words < 1:
+        raise ValueError("Chunk limits must be positive")
+    def selected():
+        data = eval_data.convert_records(args.data, args.dataset, args.history_dir, args.size)
+        return eval_data.iter_plan(data, args.limit, args.convs)
+
+    # Two streaming passes: preflight everything selected before paid calls,
+    # then execute without retaining the complete corpus in memory.
+    conv_count = total_steps = qa_count = add_count = 0
+    for conv, qas in selected():
+        conv_count += 1
+        qa_count += len(qas)
+        add_count += sum(1 for _ in eval_data.ingestion_chunks(
+            conv, args.chunk_messages, args.chunk_words))
+    total_steps = add_count + 2 * qa_count
+    print(f"protocol={eval_scoring.PROTOCOL} fake={config.FAKE} "
+          f"conversations={conv_count} add_chunks={add_count} qa={qa_count}")
+    if args.inspect:
+        return
+    if args.output and Path(args.output).resolve() == Path(args.data).resolve():
+        raise ValueError("--output must not overwrite input data")
     progress = Progress(total_steps, enabled=not args.no_progress)
 
     tmp = tempfile.NamedTemporaryFile(suffix=".db", delete=False)
     tmp.close()
     st = store.Store(tmp.name)
 
-    n_qa, n_correct = 0, 0
+    n_qa, score_sum = 0, 0.0
     per_cat = defaultdict(lambda: [0, 0])
+    output = None
 
     try:
-        for ci, (conv, qas) in enumerate(plan, 1):
+        if args.output:
+            Path(args.output).parent.mkdir(parents=True, exist_ok=True)
+            output = open(args.output, "w", encoding="utf-8")
+        for ci, (conv, qas) in enumerate(selected(), 1):
             cid = conv["conversation_id"]
-            uid = f"local:{cid}"
-            session_count = len(conv["sessions"])
-            for si, session in enumerate(conv["sessions"], 1):
+            dataset = conv.get("dataset", args.dataset)
+            uid = f"local:{dataset}:{cid}"
+            for sid, chunk_id, session in eval_data.ingestion_chunks(
+                    conv, args.chunk_messages, args.chunk_words):
                 msgs = [schemas.Message(**m) for m in session]
                 req = schemas.AddRequest(
-                    request_id=f"local:{cid}:chunk-{si - 1}",
+                    request_id=f"{uid}:session:{sid}:chunk:{chunk_id}",
                     messages=msgs, user_id=uid,
-                    session_id=f"local:{cid}:s{si - 1}")
+                    session_id=f"{uid}:session:{sid}")
                 await progress.run(
                     add_pipeline.run_add(st, req),
-                    f"Add conv {ci}/{len(plan)} session {si}/{session_count}")
+                    f"Add conv {ci}/{conv_count} session {sid} chunk {chunk_id}")
             for qi, qa in enumerate(qas, 1):
                 resp = await progress.run(
                     search_pipeline.run_search(
                         st, schemas.SearchRequest(query=qa["question"],
+                                                  options=qa.get("options"),
                                                   user_id=uid, top_k=100)),
-                    f"Search conv {ci}/{len(plan)} QA {qi}/{len(qas)}")
-                pred, correct = await progress.run(
-                    answer_and_judge(
-                        qa["question"], qa["answer"],
+                    f"Search conv {ci}/{conv_count} QA {qi}/{len(qas)}")
+                pred, score, diagnostics = await progress.run(
+                    eval_scoring.evaluate(
+                        qa,
                         [d.dict() for d in resp.data]),
-                    f"Answer/Judge conv {ci}/{len(plan)} QA {qi}/{len(qas)}")
+                    f"Answer/Judge conv {ci}/{conv_count} QA {qi}/{len(qas)}")
                 n_qa += 1
-                n_correct += int(correct)
-                cat = qa.get("category", "unknown")
-                per_cat[cat][0] += int(correct)
+                score_sum += score
+                cat = f"{dataset}/{qa.get('category', 'unknown')}"
+                per_cat[cat][0] += score
                 per_cat[cat][1] += 1
+                if output:
+                    result = {"dataset": dataset, "conversation_id": cid,
+                              "qa_id": qa.get("id", str(qi - 1)), "prediction": pred,
+                              "predicted_answer": pred,
+                              "score": score, "scoring": qa.get("scoring", "binary"),
+                              "category": qa.get("category", "unknown"),
+                              "protocol": eval_scoring.PROTOCOL, "fake": config.FAKE,
+                              "model": config.LLM_MODEL, **diagnostics}
+                    output.write(json.dumps(result, ensure_ascii=False) + "\n")
+                    output.flush()
                 progress.write(
-                    f"[{'OK' if correct else 'XX'}] {cat}: "
+                    f"[score={score:.2f}] {cat}: "
                     f"{qa['question'][:60]} -> {pred[:60]}")
     finally:
+        if output:
+            output.close()
         progress.finish()
         st.conn.close()
         try:
@@ -287,7 +322,9 @@ async def main():
     for cat, (c, t) in sorted(per_cat.items()):
         print(f"  {cat:20s} {c}/{t} = {c/t:.2%}")
     if n_qa:
-        print(f"  {'OVERALL':20s} {n_correct}/{n_qa} = {n_correct/n_qa:.2%}")
+        print(f"  {'MEAN SCORE':20s} {score_sum:.2f}/{n_qa} = {score_sum/n_qa:.2%}")
+    print("Local proxy results; not official AML leaderboard scores."
+          + (" FAKE mode: plumbing only, scores are meaningless." if config.FAKE else ""))
 
 
 if __name__ == "__main__":

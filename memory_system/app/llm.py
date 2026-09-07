@@ -313,6 +313,13 @@ class FakeLLM:
     """
 
     def complete(self, prompt: str) -> str:
+        if prompt.startswith("Judge whether the proposed answer correctly conveys"):
+            return json.dumps({"label": "WRONG"})
+        if prompt.startswith("Evaluate the response against each rubric independently."):
+            # Plumbing-only rubric response; fake scores have no quality meaning.
+            payload = json.loads(prompt[prompt.index("{"):])
+            return json.dumps({"scores": [{"index": r["index"], "score": 0.0}
+                                           for r in payload["rubrics"]]})
         if "memory extraction module" in prompt:
             return json.dumps(self._fake_extract(prompt))
         if "memory governance agent" in prompt:

@@ -28,6 +28,19 @@ data/
 
 ## 快速开始
 
+文本数据集现已支持 **LoCoMo-Refined、LongMemEval-S、BEAM-100K、CLBench、PersonaMem-v2**，
+并提供 ScriptMem/Refined 授权数据导入入口。下载、转换、评分差异及命令见
+[DATASETS.md](DATASETS.md)。ScriptMem 原始剧本仍需另行提供；LoCoMo-Refined 已从公开仓库下载。
+
+```powershell
+python -m pip install -r requirements.txt -r requirements-eval.txt
+python scripts/download_datasets.py all
+python scripts/local_eval.py --data data/prepared/longmemeval-s.jsonl --inspect
+```
+
+`data/prepared/` 由 `prepare_dataset.py` 生成（本次已生成四套公开数据，完整转换
+命令见上方文档）。本地结果为代理评分，不代表 AML 官方榜单分数。
+
 启动时会自动读取 `memory_system/.env`（也支持当前目录下的
 `.env`），已存在的系统环境变量优先，不会被文件覆盖。
 

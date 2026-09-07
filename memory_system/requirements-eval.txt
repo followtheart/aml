@@ -1,0 +1,3 @@
+# Optional local dataset import dependencies; API server does not need these.
+ijson>=3.3
+pyarrow>=18

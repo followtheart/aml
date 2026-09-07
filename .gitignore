@@ -12,6 +12,10 @@ memory_system/memory.db
 memory_system/.env
 
 # Large third-party artifacts (re-generable, not code)
+memory_system/data/raw/
+memory_system/data/prepared/
+memory_system/data/references/
+memory_system/data/results/
 
 
 # OS/editor

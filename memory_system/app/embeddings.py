@@ -1,6 +1,5 @@
 """Embedding abstraction over LiteLLM with a deterministic offline fallback."""
 import hashlib
-import logging
 from typing import List
 
 import numpy as np
@@ -19,25 +18,21 @@ async def embed(texts: List[str], stage: str = "embedding") -> np.ndarray:
         kwargs["api_base"] = config.EMBED_API_BASE
     if config.EMBED_API_KEY:
         kwargs["api_key"] = config.EMBED_API_KEY
-    try:
-        async def _call(_attempt):
-            return await litellm.aembedding(
-                model=config.EMBED_MODEL, input=texts,
-                timeout=60, num_retries=0, **kwargs)
+    async def _call(_attempt):
+        return await litellm.aembedding(
+            model=config.EMBED_MODEL, input=texts,
+            timeout=60, num_retries=0, **kwargs)
 
-        resp = await metrics.measured_call(
-            kind="embedding", stage=stage, model=config.EMBED_MODEL,
-            call=_call, attempts=2, input_count=len(texts))
-        vecs = np.array([d["embedding"] for d in resp["data"]],
-                        dtype=np.float32)
-        return _fit_dim(vecs)
-    except Exception as e:
-        # Credential/network failure: degrade to hash embeddings so writes
-        # never hard-fail. Vector space is then hash-based until restart —
-        # acceptable for dev; fix credentials and rebuild for real runs.
-        logging.getLogger("aml.embed").warning(
-            "embedding call failed (%s); falling back to hash embedding", e)
-        return np.stack([_hash_embed(t) for t in texts])
+    # A real provider failure must fail Add/Search. Hash vectors are only used
+    # in explicit AML_FAKE mode and can never contaminate the real vector space.
+    resp = await metrics.measured_call(
+        kind="embedding", stage=stage, model=config.EMBED_MODEL,
+        call=_call, attempts=2, input_count=len(texts))
+    vecs = np.array([d["embedding"] for d in resp["data"]],
+                    dtype=np.float32)
+    if len(vecs) != len(texts):
+        raise ValueError("Embedding provider returned the wrong number of vectors")
+    return _fit_dim(vecs)
 
 
 def _fit_dim(vecs: np.ndarray) -> np.ndarray:

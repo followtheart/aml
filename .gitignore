@@ -23,3 +23,6 @@ memory_system/data/results/
 Thumbs.db
 .idea/
 .vscode/
+
+# Full-content local memory debug logs
+memory_system/logs/

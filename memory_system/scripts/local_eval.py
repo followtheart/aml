@@ -170,12 +170,8 @@ def _looks_graph(route):  # heuristic: graph route items lack _score/_fused
 
 
 async def _rerank_passthrough(req, plan, fused):
-    # run_search's abstention check requires a positive final score.
-    return [dict(c, _final=c.get("_fused", 0)) for c in fused[:config_top()]]
-
-
-def config_top():
-    return 40
+    # Preserve the requested result capacity during the no-rerank ablation.
+    return [dict(c, _final=c.get("_fused", 0)) for c in fused[:req.top_k]]
 
 
 def apply_ablations(args):
@@ -278,7 +274,8 @@ async def main():
                     search_pipeline.run_search(
                         st, schemas.SearchRequest(query=qa["question"],
                                                   options=qa.get("options"),
-                                                  user_id=uid, top_k=100)),
+                                                  user_id=uid, top_k=100,
+                                                  reference_time=qa.get("question_date"))),
                     f"Search conv {ci}/{conv_count} QA {qi}/{len(qas)}")
                 pred, score, diagnostics = await progress.run(
                     eval_scoring.evaluate(

@@ -7,7 +7,9 @@
 You are a query understanding module for a memory retrieval system. You do
 NOT answer the question. You only analyze it to plan retrieval.
 
-The current time is {current_time}.
+The question's reference time is {current_time}. Resolve relative dates against
+this value. It is the evaluation question date when one was supplied, otherwise
+the current service time.
 
 Question:
 {query}
@@ -18,6 +20,7 @@ Answer options (may be empty):
 Analyze and return ONLY a JSON object:
 {{
   "intent": "fact|multi_hop|temporal|preference|rule|abstention_check",
+  "include_history": false,
   "time_scope": {{
     "from": "ISO-8601 or null",
     "to": "ISO-8601 or null",
@@ -31,9 +34,13 @@ Analyze and return ONLY a JSON object:
 }}
 
 Rules:
-- Resolve all relative time expressions against the current time.
+- Resolve all relative time expressions against the question reference time.
 - For temporal questions ("when", "before/after", "most recent"), always
   fill time_scope.
 - For multi-hop questions, decompose into atomic sub-questions that each
   retrieve one hop of evidence.
 - Never output an answer to the question itself.
+
+- Set include_history=true for questions about former states, past dates, or
+  changes over time, even without an exact date. For current-state questions
+  (now, current, latest), set it to false.

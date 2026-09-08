@@ -36,3 +36,9 @@ Call the provided emit_json_result function with the extracted facts and
 triples. Fill every required field from the NEW messages. Never copy schema
 descriptions or placeholder text into a fact. If there is nothing worth
 remembering, use empty facts and triples arrays.
+
+Each NEW message is prefixed with its zero-based index in square brackets.
+For each fact, source_message_indices must list the NEW message indices that
+support it. For each triple, fact_index must be the zero-based position in
+this response's facts array of the fact that supports that entire triple.
+Do not emit triples without a supporting fact. Indices are local to this batch.

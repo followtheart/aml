@@ -1,5 +1,5 @@
 # PROMPT 05 — 相关性过滤与重排打分（Search 管线 §5.3）
-# 调用：Search 侧，RRF 融合后一次（批量打分 top-40 → 过滤 → top-30 重排分）
+# 调用：Search 侧，RRF 融合后分批评分全部候选
 # 模型 gpt-4o-mini，temperature=0
 # 占位符：{query} {time_scope} {candidates}
 # 来源：Memory-R1（Answer Agent 预筛选）+ structural-memory（rerank 增益）
@@ -25,7 +25,10 @@ Scoring rules:
 - A memory that helps resolve a multi-hop step counts as relevant even if it
   does not mention the final answer.
 - For temporal questions, prefer memories whose time range matches the scope.
-- When two memories conflict, the more recent valid one scores higher.
+- When two memories conflict, prefer the state valid at the requested time.
+  For historical questions, an expired memory may be the correct evidence.
+  For current-state questions, prefer the current valid state.
+- Session summaries are derived context, not an independent authoritative fact.
 - Memories that merely share keywords but do not inform the answer score low.
 
 Return ONLY a JSON object. The scores array must use the same order as the

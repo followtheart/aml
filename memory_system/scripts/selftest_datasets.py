@@ -261,6 +261,8 @@ class DatasetTests(unittest.TestCase):
             self.assertEqual(searches[0].user_id, adds[0].user_id)
             self.assertEqual(searches[0].options, c["qa"][0]["options"])
             self.assertEqual(searches[0].query, c["qa"][0]["question"])
+            self.assertEqual(searches[0].reference_time,
+                             c["qa"][0].get("question_date"))
             result = json.loads(out.read_text())
             self.assertEqual(result["score"], 1)
             self.assertTrue(result["fake"])

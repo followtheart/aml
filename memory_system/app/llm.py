@@ -25,6 +25,8 @@ STRUCTURED_SCHEMAS: Dict[str, dict] = {
                 "items": {
                     "type": "object",
                     "properties": {
+                        "source_message_indices": {"type": "array",
+                            "items": {"type": "integer"}, "minItems": 1},
                         "content": {
                             "type": "string",
                             "description": (
@@ -48,7 +50,7 @@ STRUCTURED_SCHEMAS: Dict[str, dict] = {
                         "sensitivity": {"type": "string",
                                         "enum": ["normal", "sensitive"]},
                     },
-                    "required": ["content", "retrieval_key", "type",
+                    "required": ["source_message_indices", "content", "retrieval_key", "type",
                                  "entities", "keywords", "event_time",
                                  "sensitivity"],
                 },
@@ -58,11 +60,12 @@ STRUCTURED_SCHEMAS: Dict[str, dict] = {
                 "items": {
                     "type": "object",
                     "properties": {
+                        "fact_index": {"type": "integer"},
                         "subject": {"type": "string"},
                         "relation": {"type": "string"},
                         "object": {"type": "string"},
                     },
-                    "required": ["subject", "relation", "object"],
+                    "required": ["fact_index", "subject", "relation", "object"],
                 },
             },
         },
@@ -83,6 +86,7 @@ STRUCTURED_SCHEMAS: Dict[str, dict] = {
         "type": "object",
         "properties": {
             "intent": {"type": "string"},
+            "include_history": {"type": "boolean"},
             "time_scope": {
                 "type": ["object", "null"],
                 "properties": {
@@ -97,7 +101,7 @@ STRUCTURED_SCHEMAS: Dict[str, dict] = {
             "expanded_queries": {"type": "array",
                                  "items": {"type": "string"}},
         },
-        "required": ["intent", "time_scope", "entities", "sub_queries",
+        "required": ["intent", "include_history", "time_scope", "entities", "sub_queries",
                      "expanded_queries"],
     },
     "rerank": {
@@ -350,6 +354,10 @@ class FakeLLM:
             line = line.strip()
             if not line or ":" not in line:
                 continue
+            marker = re.match(r"\[(\d+)\] (.*)", line)
+            source_index = int(marker[1]) if marker else len(facts)
+            if marker:
+                line = marker[2]
             speaker, content = line.split(":", 1)
             content = content.strip()
             if not content:
@@ -357,6 +365,7 @@ class FakeLLM:
             ents = [w.strip(".,!?\"'") for w in content.split()
                     if w[:1].isupper() and len(w) > 2][:4]
             facts.append({
+                "source_message_indices": [source_index],
                 "content": f"{speaker.strip()}: {content}",
                 "retrieval_key": content[:80],
                 "type": "fact",
@@ -366,7 +375,7 @@ class FakeLLM:
                 "sensitivity": "normal",
             })
             for e in ents:
-                triples.append({"subject": speaker.strip(),
+                triples.append({"fact_index": len(facts) - 1, "subject": speaker.strip(),
                                 "relation": "mentioned", "object": e})
         return {"facts": facts, "triples": triples}
 

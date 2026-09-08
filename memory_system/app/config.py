@@ -19,11 +19,15 @@ AML_EMBED_MODEL : litellm embedding model. Default "text-embedding-3-small".
                   SiliconFlow example: siliconflow/BAAI/bge-m3
                   (or openai/<model> + AML_EMBED_API_BASE).
 AML_EMBED_API_BASE / AML_EMBED_API_KEY : same override for embeddings.
+AML_EMBED_DIM / AML_EMBEDDING_SPACE : stored vector dimension and explicit
+                  compatibility-space label. Changing either requires re-embedding.
 AML_API_KEY     : Bearer token required on /add and /search. Empty = no auth
                   (only acceptable for local smoke).
 AML_DB_PATH     : SQLite file path. Default ./memory.db
 AML_FAKE        : "1" forces offline FakeLLM/FakeEmbedding (no network, for
                   plumbing tests and CI).
+AML_RERANK_MAX_CANDIDATES / AML_SEARCH_MIN_RELEVANCE : bounded rerank cost
+                  and the minimum accepted relevance score.
 """
 import os
 from pathlib import Path
@@ -76,8 +80,34 @@ LLM_MAX_TOKENS = 1200   # caps runaway repetition from small models
 LLM_JSON_MAX_TOKENS = int(os.environ.get("AML_LLM_JSON_MAX_TOKENS", "2048"))
 EXTRACT_BATCH_MESSAGES = max(
     1, int(os.environ.get("AML_EXTRACT_BATCH_MESSAGES", "6")))
-EMBED_DIM = 256          # local/fake dim; litellm embeddings are truncated/padded to this
+EMBED_DIM = max(32, int(os.environ.get("AML_EMBED_DIM", "256")))
+# Stored with every vector so incompatible providers/fallbacks are never mixed.
+EMBEDDING_SPACE = os.environ.get(
+    "AML_EMBEDDING_SPACE",
+    f"{'fake-hash' if FAKE else EMBED_MODEL}:float32:{EMBED_DIM}")
 GOVERNANCE_NEIGHBORS = 5
 RECALL_PER_ROUTE = 100
 RERANK_CANDIDATES = 40
 RERANK_SCORED = 30
+RERANK_MAX_CANDIDATES = max(
+    100, int(os.environ.get("AML_RERANK_MAX_CANDIDATES", "200")))
+SEARCH_MIN_RELEVANCE = float(os.environ.get("AML_SEARCH_MIN_RELEVANCE", "0.3"))
+
+# Full stored content for local debugging; empty path disables the JSONL log.
+MEMORY_DEBUG_LOG = os.environ.get(
+    "AML_MEMORY_DEBUG_LOG",
+    str(Path(__file__).resolve().parents[1] / "logs" / "memory-debug.jsonl"))
+
+SEARCH_DEBUG_LOG = os.environ.get(
+    "AML_SEARCH_DEBUG_LOG",
+    str(Path(__file__).resolve().parents[1] / "logs" / "search-debug.jsonl"))
+
+# Source evidence returned to the answer model. Full evidence remains in SQLite
+# and the debug log; these limits prevent top_k=100 from producing megabytes.
+SEARCH_SOURCE_MESSAGES_PER_ITEM = max(
+    0, int(os.environ.get("AML_SEARCH_SOURCE_MESSAGES_PER_ITEM", "3")))
+SEARCH_SOURCE_REFS_PER_ITEM = max(
+    SEARCH_SOURCE_MESSAGES_PER_ITEM,
+    int(os.environ.get("AML_SEARCH_SOURCE_REFS_PER_ITEM", "20")))
+SEARCH_SOURCE_CONTEXT_CHARS = max(
+    0, int(os.environ.get("AML_SEARCH_SOURCE_CONTEXT_CHARS", "12000")))

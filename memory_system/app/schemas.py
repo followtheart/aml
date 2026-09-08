@@ -28,6 +28,9 @@ class SearchRequest(BaseModel):
     options: Optional[List[str]] = None
     user_id: str = Field(min_length=1)
     top_k: int = Field(default=100, ge=1, le=100)
+    include_history: Optional[bool] = None
+    # ISO-8601 question/evaluation time used to resolve relative expressions.
+    reference_time: Optional[str] = None
 
 
 class SearchItem(BaseModel):
@@ -35,6 +38,9 @@ class SearchItem(BaseModel):
     content: str
     score: Optional[float] = None
     created_at: Optional[str] = None
+    memory_type: str = "fact"
+    sources: List[dict] = Field(default_factory=list)
+    source_count: int = 0
 
 
 class SearchResponse(BaseModel):

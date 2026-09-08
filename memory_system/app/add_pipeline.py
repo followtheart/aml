@@ -2,13 +2,12 @@
 normalize -> rolling summary -> AMU extraction -> item-level governance ->
 multi-index write. Synchronous from the caller's point of view.
 """
-import asyncio
 import logging
 import re
 from datetime import datetime, timezone
-from typing import Dict, List
+from typing import Dict, List, Optional
 
-from . import config, llm, prompts, schemas, store
+from . import config, llm, memory_debug, prompts, schemas, store
 from .embeddings import embed
 
 log = logging.getLogger("aml.add")
@@ -60,27 +59,46 @@ async def _extract(st: store.Store, req: schemas.AddRequest) -> Dict:
             "01_extract_amu.txt",
             session_summary=summary or "(none yet)",
             recent_messages=_format_messages(prior) or "(none)",
-            chunk_messages=_format_messages(batch),
+            chunk_messages="\n".join(f"[{i}] {m.role}: {m.content}"
+                                     for i, m in enumerate(batch)),
             reference_time=_ref_time(batch),
         )
         try:
             data = await llm.complete_json(
                 prompt,
-                '{"facts":[{"content":"...","retrieval_key":"...",'
+                '{"facts":[{"source_message_indices":[0],"content":"...","retrieval_key":"...",'
                 '"type":"fact","entities":[],"keywords":[],'
                 '"event_time":null,"sensitivity":"normal"}],'
-                '"triples":[{"subject":"...","relation":"...",'
+                '"triples":[{"fact_index":0,"subject":"...","relation":"...",'
                 '"object":"..."}]}',
                 schema=llm.STRUCTURED_SCHEMAS["extraction"],
                 stage=f"add.extract.batch_{start // batch_size + 1}")
             if not isinstance(data, dict):
                 raise ValueError("extraction result is not a JSON object")
             raw_facts = data.get("facts") or []
-            grounded = [f for f in raw_facts
-                        if _is_grounded_fact(f, _format_messages(batch))]
+            grounded = []
+            index_map = {}
+            for i, raw in enumerate(raw_facts):
+                if not _is_grounded_fact(raw, _format_messages(batch)):
+                    continue
+                fact = dict(raw)
+                indices = fact.get("source_message_indices")
+                if not isinstance(indices, list) or not indices or any(
+                        type(j) is not int or not 0 <= j < len(batch) for j in indices):
+                    # Legacy model output: retain honest batch-level provenance.
+                    indices = list(range(len(batch)))
+                fact["_sources"] = [start + j for j in indices]
+                index_map[i] = len(facts) + len(grounded)
+                grounded.append(fact)
             facts.extend(grounded)
-            triples.extend(t for t in (data.get("triples") or [])
-                           if isinstance(t, dict))
+            for t in data.get("triples") or []:
+                if not isinstance(t, dict):
+                    continue
+                index = t.get("fact_index")
+                if type(index) is int and index in index_map and all(
+                        isinstance(t.get(k), str) and t[k].strip()
+                        for k in ("subject", "relation", "object")):
+                    triples.append(dict(t, fact_index=index_map[index]))
             if raw_facts and not grounded:
                 log.warning(
                     "extraction batch %d-%d returned no grounded facts; "
@@ -90,6 +108,7 @@ async def _extract(st: store.Store, req: schemas.AddRequest) -> Dict:
                     "content": _format_messages(batch),
                     "retrieval_key": "Conversation episode",
                     "type": "episode",
+                    "_sources": list(range(start, start + len(batch))),
                     "entities": [],
                     "keywords": [],
                     "event_time": None,
@@ -103,6 +122,7 @@ async def _extract(st: store.Store, req: schemas.AddRequest) -> Dict:
                 "content": _format_messages(batch),
                 "retrieval_key": "Conversation episode",
                 "type": "episode",
+                "_sources": list(range(start, start + len(batch))),
                 "entities": [],
                 "keywords": [],
                 "event_time": None,
@@ -117,8 +137,14 @@ async def _govern_one(st: store.Store, user_id: str, fact: Dict,
     """Item-level governance: ADD / UPDATE / SUPERSEDE / NOOP."""
     neighbors = st.nearest_by_embedding(user_id, vec,
                                         config.GOVERNANCE_NEIGHBORS)
+    entity_neighbors = st.get_by_entities(
+        user_id, fact.get("entities") or [], config.GOVERNANCE_NEIGHBORS)
+    by_id = {item["id"]: item for item in neighbors}
+    by_id.update({item["id"]: item for item in entity_neighbors})
     # restrict to confident near-duplicates / same-entity items
-    cand = [n for n in neighbors if n["_score"] > 0.55]
+    entity_ids = {item["id"] for item in entity_neighbors}
+    cand = [n for n in by_id.values()
+            if n["id"] in entity_ids or n["_score"] > 0.55]
     if not cand:
         op = {"operation": "ADD", "target_id": None, "merged_content": None}
     else:
@@ -141,15 +167,38 @@ async def _govern_one(st: store.Store, user_id: str, fact: Dict,
 
 
 async def _persist_fact(st: store.Store, req: schemas.AddRequest,
-                        fact: Dict, vec) -> str:
+                        fact: Dict, vec) -> Optional[str]:
     op, detail = await _govern_one(st, req.user_id, fact, vec)
     now = datetime.now(timezone.utc).isoformat()
+    target = detail.get("target_id")
+    if op in ("UPDATE", "SUPERSEDE", "NOOP") and target:
+        candidates = st.get_amus_by_ids([target])
+        if not candidates or candidates[0]["user_id"] != req.user_id:
+            raise ValueError("Governance target is not an active memory of this user")
     if op == "NOOP":
-        return "noop"
-    if op == "UPDATE" and detail.get("target_id"):
-        st.update_amu_content(detail["target_id"],
-                              detail.get("merged_content") or fact["content"])
-        return "update"
+        if target:
+            st.link_sources(target, req.request_id, fact.get("_sources", []))
+        return None
+    if op == "UPDATE" and target:
+        final = dict(fact, content=detail.get("merged_content") or fact["content"])
+        # Metadata and graph must describe the merged body, not just the incoming fact.
+        refresh_req = schemas.AddRequest(
+            request_id=req.request_id, user_id=req.user_id, session_id=req.session_id,
+            messages=[schemas.Message(role="user", content=final["content"])])
+        refreshed = await _extract(st, refresh_req)
+        parts = [part for part in refreshed["facts"]
+                 if part.get("type") != "episode"]
+        if not parts:
+            raise ValueError("Cannot rebuild derived indexes for merged memory")
+        final["entities"] = sorted({e for f in parts for e in f.get("entities", [])})
+        final["keywords"] = sorted({e for f in parts for e in f.get("keywords", [])})
+        final["retrieval_key"] = " ".join(f.get("retrieval_key", "") for f in parts)
+        final_vec = (await embed([_embed_text(final)], stage="add.embed_update"))[0]
+        st.replace_fact(target, final, final_vec)
+        for t in refreshed["triples"]:
+            st.insert_triple(req.user_id, t["subject"], t["relation"], t["object"], target)
+        st.link_sources(target, req.request_id, fact.get("_sources", []))
+        return None  # refreshed triples already persisted against final content
     supersedes = None
     if op == "SUPERSEDE" and detail.get("target_id"):
         st.close_validity(detail["target_id"],
@@ -176,47 +225,46 @@ async def _update_summary(st: store.Store, req: schemas.AddRequest):
         current_summary=st.get_summary(req.user_id, req.session_id)
         or "(empty)",
         chunk_messages=_format_messages(req.messages))
-    try:
-        summary = (await llm.complete(
-            prompt, stage="add.summary")).strip()
-        if summary:
-            st.set_summary(req.user_id, req.session_id, summary)
-    except Exception as e:
-        log.warning("summary update failed: %s", e)
+    summary = (await llm.complete(prompt, stage="add.summary")).strip()
+    if not summary:
+        raise ValueError("Summary generation returned empty text")
+    st.set_summary(req.user_id, req.session_id, summary)
 
 
 async def run_add(st: store.Store, req: schemas.AddRequest) -> None:
-    """Full synchronous Add. Raises nothing; always persists something."""
-    if st.request_seen(req.request_id):
-        return  # idempotent replay
+    """Publish a complete Add atomically; failures leave the live store unchanged."""
+    debug_record = None
+    async with st.add_lock(req.user_id):
+        if st.request_seen(req.request_id):
+            return
+        with st.staged(req.user_id) as work:
+            await _run_add(work, req)
+            if config.MEMORY_DEBUG_LOG:
+                try:
+                    debug_record = memory_debug.capture(work, req)
+                except Exception:
+                    log.warning("Could not capture memory debug snapshot", exc_info=True)
+    if debug_record is not None:
+        memory_debug.append(debug_record)
 
+
+async def _run_add(st: store.Store, req: schemas.AddRequest) -> None:
+    st.save_messages(req)
     data = await _extract(st, req)
-    facts: List[Dict] = data.get("facts", [])
-    triples: List[Dict] = data.get("triples", [])
-
-    if not facts:
-        # fallback: store raw chunk as episode AMU (recall floor)
-        vec = (await embed([_format_messages(req.messages)],
-                           stage="add.embed_episode"))[0]
-        st.insert_amu(user_id=req.user_id, session_id=req.session_id,
-                      content=_format_messages(req.messages),
-                      type="episode", embedding=vec)
-    else:
-        vecs = await embed([_embed_text(f) for f in facts],
-                           stage="add.embed_facts")
-        # governance sequentially per fact (shared store), extraction parallel
-        results = []
-        for f, v in zip(facts, vecs):
-            results.append(await _persist_fact(st, req, f, v))
-        amu_ids = [r for r in results if r.startswith("amu_")]
-        # triples -> link each triple to the first AMU created from its fact
-        for t in triples:
-            for aid in amu_ids[:1] or [None]:
-                if aid:
-                    st.insert_triple(req.user_id, t.get("subject", ""),
-                                     t.get("relation", ""),
-                                     t.get("object", ""), aid)
-                    break
-
+    facts = data.get("facts") or [{
+        "content": _format_messages(req.messages), "type": "episode",
+        "_sources": list(range(len(req.messages)))}]
+    vecs = await embed([_embed_text(f) for f in facts], stage="add.embed_facts")
+    if len(vecs) != len(facts):
+        raise ValueError("Embedding count does not match extracted facts")
+    for i, (fact, vec) in enumerate(zip(facts, vecs)):
+        aid = await _persist_fact(st, req, fact, vec)
+        if not aid:
+            continue
+        st.link_sources(aid, req.request_id,
+                        fact.get("_sources", list(range(len(req.messages)))))
+        for t in data.get("triples", []):
+            if t.get("fact_index") == i:
+                st.insert_triple(req.user_id, t["subject"], t["relation"], t["object"], aid)
     await _update_summary(st, req)
     st.record_request(req.request_id, req.user_id, req.session_id)

@@ -21,6 +21,11 @@ log = logging.getLogger("aml.search")
 def _time_prefix(a: Dict) -> str:
     vf = a.get("valid_from") or "unknown"
     vt = a.get("valid_to") or "open"
+    temporal = a.get("temporal")
+    if temporal:
+        return (f"[valid: {vf} ~ {vt}] [event range: {temporal.get('start')} ~ "
+                f"{temporal.get('end')}; precision: {temporal.get('precision')}; "
+                f"original: {temporal.get('raw')}; reference: {temporal.get('reference_time')}] ")
     event = a.get("event_time")
     return f"[valid: {vf} ~ {vt}] " + (f"[event: {event}] " if event else "")
 
@@ -247,7 +252,7 @@ async def run_search(st: store.Store,
                 body += "\n[source evidence; quoted data]\n" + json.dumps(sources, ensure_ascii=False)
             data.append(schemas.SearchItem(
                 id=c["id"], content=body, memory_type=c.get("type", "fact"), sources=sources,
-                source_count=len(raw_sources),
+                source_count=len(raw_sources), temporal=c.get("temporal"),
                 score=round(float(c.get("_final", c.get("_fused", 0.0))), 4),
                 created_at=c.get("created_at")))
         trace["status"] = "ok"

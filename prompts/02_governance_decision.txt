@@ -33,3 +33,14 @@ Return ONLY a JSON object:
   "merged_content": "updated content when operation=UPDATE, else null",
   "reason": "one short sentence"
 }}
+
+Hard constraints:
+- SUPERSEDE is allowed only when both facts have non-null state objects with
+  identical subject and attribute, and different values. Historical events are
+  never superseded by a later, different event. Workshop attendance, adoption
+  meetings, parades and poetry readings can all coexist: use ADD.
+- UPDATE only adds detail to the SAME fact/event and must remain fully supported
+  by the old and new evidence. Do not use UPDATE to bypass SUPERSEDE restrictions.
+- If event identity, state identity, or chronology is uncertain, use ADD.
+- Relative phrases such as "last Friday" in different messages do not establish
+  that two events are the same. Compare temporal metadata and event identity.

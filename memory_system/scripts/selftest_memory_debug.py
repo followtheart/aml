@@ -67,12 +67,22 @@ class DebugLogTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(memory['embedding']['values'], self.st.get_amus('u')[0]['embedding'].tolist())
 
     async def test_supersede_logs_closed_predecessor(self):
-        await add.run_add(self.st, self.req)
-        aid = self.st.get_amus('u')[0]['id']
-        self.req.request_id = 'debug-2'
-        with patch.object(add, '_govern_one', AsyncMock(return_value=(
-                'SUPERSEDE', {'target_id': aid}))):
+        original = add._extract
+        async def state_extract(st, req):
+            data = await original(st, req)
+            for fact in data['facts']:
+                fact['state'] = dict(subject='Alice', attribute='primary_residence',
+                                     value='Berlin' if 'Berlin' in fact['content'] else 'Paris')
+            return data
+        with patch.object(add, '_extract', state_extract):
             await add.run_add(self.st, self.req)
+            aid = self.st.get_amus('u')[0]['id']
+            self.req.request_id = 'debug-2'
+            self.req.messages[0].content = 'Alice lives in Berlin.'
+            self.req.messages[0].timestamp = 124
+            with patch.object(add, '_govern_one', AsyncMock(return_value=(
+                    'SUPERSEDE', {'target_id': aid}))):
+                await add.run_add(self.st, self.req)
         memories = {m['id']: m for m in self.records()[1]['memories']}
         self.assertEqual(len(memories), 2)
         self.assertIsNotNone(memories[aid]['valid_to'])

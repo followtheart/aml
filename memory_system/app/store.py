@@ -21,7 +21,7 @@ from typing import Dict, List, Optional
 
 import numpy as np
 
-from . import config, graph
+from . import config, graph, integrity
 
 _LOCK = threading.RLock()
 
@@ -36,6 +36,9 @@ CREATE TABLE IF NOT EXISTS amu (
   entities TEXT NOT NULL DEFAULT '[]',
   keywords TEXT NOT NULL DEFAULT '[]',
   event_time TEXT,
+  temporal TEXT,
+  state TEXT,
+  evidence TEXT,
   valid_from TEXT,
   valid_to TEXT,
   supersedes TEXT,
@@ -126,6 +129,9 @@ class Store:
             columns = {r["name"] for r in self.conn.execute("PRAGMA table_info(amu)")}
             if "embedding_space" not in columns:
                 self.conn.execute("ALTER TABLE amu ADD COLUMN embedding_space TEXT")
+            for column in ("temporal", "state", "evidence"):
+                if column not in columns:
+                    self.conn.execute(f"ALTER TABLE amu ADD COLUMN {column} TEXT")
             self.conn.executescript(FTS_SCHEMA)
             self.conn.executescript(SOURCE_SCHEMA)
             self.conn.commit()
@@ -219,6 +225,14 @@ class Store:
         self.conn.commit()
 
     def link_sources(self, amu_id, request_id, indices):
+        owner = self.conn.execute("SELECT user_id FROM amu WHERE id=?", (amu_id,)).fetchone()
+        if owner is None:
+            raise ValueError("Missing source target")
+        for i in indices:
+            source = self.conn.execute("SELECT user_id FROM source_messages WHERE request_id=? AND message_index=?",
+                                       (request_id, i)).fetchone()
+            if source is None or source[0] != owner[0]:
+                raise ValueError("Missing or cross-user source evidence")
         for i in indices:
             self._write("INSERT OR IGNORE INTO amu_sources VALUES (?,?,?)",
                         (amu_id, request_id, i))
@@ -235,6 +249,7 @@ class Store:
 
     def replace_fact(self, amu_id, fact, embedding):
         """Replace derived representations together; caller supplies final-text vector."""
+        integrity.validate_interval((fact.get("temporal") or {}).get("start"), (fact.get("temporal") or {}).get("end"))
         self._write("UPDATE amu SET content=?,retrieval_key=?,type=?,entities=?,"
                     "keywords=?,event_time=?,sensitivity=?,embedding=?,"
                     "embedding_space=? WHERE id=?",
@@ -244,6 +259,7 @@ class Store:
                      fact.get("sensitivity", "normal"),
                      embedding.astype(np.float32).tobytes(), config.EMBEDDING_SPACE,
                      amu_id))
+        self.set_metadata(amu_id, fact)
         self._write("UPDATE amu_fts SET content=?,retrieval_key=? WHERE amu_id=?",
                     (fact["content"], fact.get("retrieval_key", ""), amu_id))
         self._write("DELETE FROM triples WHERE amu_id=?", (amu_id,))
@@ -278,7 +294,10 @@ class Store:
                    type="fact", entities=None, keywords=None, event_time=None,
                    valid_from=None, valid_to=None, supersedes=None,
                    confidence=0.9, sensitivity="normal",
-                   embedding: Optional[np.ndarray] = None) -> str:
+                   embedding: Optional[np.ndarray] = None,
+                   temporal=None, state=None, evidence=None) -> str:
+        integrity.validate_interval(valid_from, valid_to)
+        integrity.validate_interval((temporal or {}).get("start"), (temporal or {}).get("end"))
         amu_id = f"amu_{uuid.uuid4().hex[:16]}"
         blob = (embedding.astype(np.float32).tobytes()
                 if embedding is not None else None)
@@ -298,16 +317,25 @@ class Store:
                 "INSERT INTO amu_fts (amu_id,user_id,content,retrieval_key)"
                 " VALUES (?,?,?,?)",
                 (amu_id, user_id, content, retrieval_key))
+            self.set_metadata(amu_id, dict(temporal=temporal, state=state, evidence=evidence))
             self._touch_user(user_id)
             self.conn.commit()
         return amu_id
+
+    def set_metadata(self, amu_id, fact):
+        temporal = fact.get("temporal") or {}
+        integrity.validate_interval(temporal.get("start"), temporal.get("end"))
+        self._write("UPDATE amu SET temporal=?,state=?,evidence=? WHERE id=?",
+                    (json.dumps(fact["temporal"]) if fact.get("temporal") is not None else None,
+                     json.dumps(fact["state"]) if fact.get("state") is not None else None,
+                     json.dumps(fact.get("evidence") or [], ensure_ascii=False), amu_id))
 
     def update_amu_content(self, amu_id: str, content: str,
                            confidence: Optional[float] = None):
         with _LOCK:
             self._write(
                 "UPDATE amu SET content=?, embedding=NULL, embedding_space=NULL, retrieval_key='', "
-                "entities='[]', keywords='[]', confidence=COALESCE(?,confidence)"
+                "entities='[]', keywords='[]', temporal=NULL, state=NULL, evidence=NULL, confidence=COALESCE(?,confidence)"
                 " WHERE id=?",
                 (content, confidence, amu_id))
             self._write(
@@ -321,6 +349,12 @@ class Store:
 
     def close_validity(self, amu_id: str, valid_to: str):
         with _LOCK:
+            current = self.conn.execute("SELECT valid_from,valid_to FROM amu WHERE id=?", (amu_id,)).fetchone()
+            if current is None or current["valid_to"] is not None:
+                raise ValueError("Cannot close a missing or already closed memory")
+            integrity.validate_interval(current["valid_from"], valid_to)
+            if not valid_to:
+                raise ValueError("Closing validity requires an end time")
             self._write("UPDATE amu SET valid_to=? WHERE id=?",
                               (valid_to, amu_id))
             row = self.conn.execute("SELECT user_id FROM amu WHERE id=?", (amu_id,)).fetchone()
@@ -438,15 +472,22 @@ class Store:
         end = (time_scope or {}).get("to")
         if not start and not end:
             return []
+        if end and len(end) == 10:
+            end = integrity.resolve_time(end, None).get("end") or end
         start = start or "0000-01-01T00:00:00Z"
         end = end or "9999-12-31T23:59:59Z"
         with _LOCK:
             rows = self.conn.execute(
                 "SELECT * FROM amu WHERE user_id=? AND "
-                "((event_time IS NOT NULL AND event_time>=? AND event_time<=?) OR "
-                "(COALESCE(valid_from,'0000')<=? AND COALESCE(valid_to,'9999')>=?)) "
+                "((json_extract(temporal,'$.start') IS NOT NULL AND "
+                "julianday(json_extract(temporal,'$.start'))<=julianday(?) AND "
+                "julianday(json_extract(temporal,'$.end'))>=julianday(?)) OR "
+                "(temporal IS NULL AND event_time IS NOT NULL AND julianday(event_time)>=julianday(?) AND julianday(event_time)<=julianday(?)) OR "
+                "(state IS NOT NULL AND state!='null' AND julianday(valid_from)<=julianday(?) AND "
+                "(valid_to IS NULL OR julianday(valid_to)>=julianday(?))) OR "
+                "(temporal IS NULL AND event_time IS NULL AND COALESCE(valid_from,'0000')<=? AND COALESCE(valid_to,'9999')>=?)) "
                 "ORDER BY COALESCE(event_time,valid_from,created_at) DESC LIMIT ?",
-                (user_id, start, end, end, start, k)).fetchall()
+                (user_id, end, start, start, end, end, start, end, start, k)).fetchall()
         out = [self._row_to_dict(r) for r in rows]
         for item in out:
             item["_score"] = 1.0
@@ -559,6 +600,8 @@ class Store:
         d = dict(r)
         d["entities"] = json.loads(d.get("entities") or "[]")
         d["keywords"] = json.loads(d.get("keywords") or "[]")
+        for key in ("temporal", "state", "evidence"):
+            d[key] = json.loads(d.get(key) or ("[]" if key == "evidence" else "null"))
         if d.get("embedding") is not None:
             d["embedding"] = np.frombuffer(d["embedding"], dtype=np.float32)
         return d

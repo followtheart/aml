@@ -17,60 +17,6 @@ class LLMError(RuntimeError):
 
 
 STRUCTURED_SCHEMAS: Dict[str, dict] = {
-    "extraction": {
-        "type": "object",
-        "properties": {
-            "facts": {
-                "type": "array",
-                "items": {
-                    "type": "object",
-                    "properties": {
-                        "source_message_indices": {"type": "array",
-                            "items": {"type": "integer"}, "minItems": 1},
-                        "content": {
-                            "type": "string",
-                            "description": (
-                                "A grounded, self-contained fact extracted "
-                                "from the new messages; never placeholder text."),
-                        },
-                        "retrieval_key": {
-                            "type": "string",
-                            "description": "A question that this fact answers.",
-                        },
-                        "type": {
-                            "type": "string",
-                            "enum": ["fact", "preference", "rule",
-                                     "workflow", "event", "profile"],
-                        },
-                        "entities": {"type": "array",
-                                     "items": {"type": "string"}},
-                        "keywords": {"type": "array",
-                                     "items": {"type": "string"}},
-                        "event_time": {"type": ["string", "null"]},
-                        "sensitivity": {"type": "string",
-                                        "enum": ["normal", "sensitive"]},
-                    },
-                    "required": ["source_message_indices", "content", "retrieval_key", "type",
-                                 "entities", "keywords", "event_time",
-                                 "sensitivity"],
-                },
-            },
-            "triples": {
-                "type": "array",
-                "items": {
-                    "type": "object",
-                    "properties": {
-                        "fact_index": {"type": "integer"},
-                        "subject": {"type": "string"},
-                        "relation": {"type": "string"},
-                        "object": {"type": "string"},
-                    },
-                    "required": ["fact_index", "subject", "relation", "object"],
-                },
-            },
-        },
-        "required": ["facts", "triples"],
-    },
     "governance": {
         "type": "object",
         "properties": {
@@ -130,6 +76,34 @@ STRUCTURED_SCHEMAS: Dict[str, dict] = {
         "required": ["label"],
     },
 }
+
+
+# Evidence and triples belong to their fact; no model-generated cross-array IDs.
+def _object(properties):
+    return {"type": "object", "properties": properties, "required": list(properties)}
+
+
+_TEXT = {"type": "string"}
+_TRIPLE = _object({"subject": _TEXT, "relation": _TEXT, "object": _TEXT})
+_EVIDENCE = _object({"message_index": {"type": "integer"}, "quote": _TEXT})
+_STATE = _object({"subject": _TEXT, "attribute": _TEXT, "value": _TEXT})
+_STATE["type"] = ["object", "null"]
+STRUCTURED_SCHEMAS["extraction"] = _object({
+    "facts": {"type": "array", "items": _object({
+        "content": _TEXT, "retrieval_key": _TEXT,
+        "type": {"type": "string", "enum": ["fact", "preference", "rule", "workflow", "event", "profile"]},
+        "entities": {"type": "array", "items": _TEXT},
+        "keywords": {"type": "array", "items": _TEXT},
+        "time_expression": {"type": ["string", "null"]},
+        "state": _STATE,
+        "evidence": {"type": "array", "items": _EVIDENCE, "minItems": 1},
+        "triples": {"type": "array", "items": _TRIPLE},
+        "sensitivity": {"type": "string", "enum": ["normal", "sensitive"]},
+    })}
+})
+STRUCTURED_SCHEMAS["evidence_check"] = _object({
+    "valid": {"type": "boolean"}, "reason": _TEXT
+})
 
 
 def _fake_available() -> bool:
@@ -365,7 +339,8 @@ class FakeLLM:
             ents = [w.strip(".,!?\"'") for w in content.split()
                     if w[:1].isupper() and len(w) > 2][:4]
             facts.append({
-                "source_message_indices": [source_index],
+                "evidence": [{"message_index": source_index, "quote": content}],
+                "state": None, "time_expression": None, "triples": [],
                 "content": f"{speaker.strip()}: {content}",
                 "retrieval_key": content[:80],
                 "type": "fact",
@@ -375,9 +350,9 @@ class FakeLLM:
                 "sensitivity": "normal",
             })
             for e in ents:
-                triples.append({"fact_index": len(facts) - 1, "subject": speaker.strip(),
+                facts[-1]["triples"].append({"subject": speaker.strip(),
                                 "relation": "mentioned", "object": e})
-        return {"facts": facts, "triples": triples}
+        return {"facts": facts}
 
     def _fake_query(self, prompt: str):
         q = ""

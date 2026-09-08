@@ -41,6 +41,7 @@ class SearchItem(BaseModel):
     memory_type: str = "fact"
     sources: List[dict] = Field(default_factory=list)
     source_count: int = 0
+    temporal: Optional[dict] = None
 
 
 class SearchResponse(BaseModel):

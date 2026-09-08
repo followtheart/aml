@@ -198,17 +198,16 @@ class IntegrityTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(self.st.sources_for_amu(target)), 2)
         self.assertEqual(graph, self.st.triples_for_user('u'))
 
-    async def test_filtered_fact_does_not_shift_triple_evidence(self):
-        data = {'facts': [{'content': 'zzzz not grounded'},
-                          {'content': 'Alice lives in Paris.', 'source_message_indices': [0]}],
-                'triples': [{'subject': 'Alice', 'relation': 'lives_in', 'object': 'Paris', 'fact_index': 1},
-                            {'subject': 'bad', 'relation': 'bad', 'object': 'bad', 'fact_index': 0},
-                            {'subject': 'bad', 'relation': 'bad', 'object': 'bad'}]}
+    async def test_nested_triples_stay_with_their_fact(self):
+        data = {'facts': [{'content': 'Alice lives in Paris.',
+                          'evidence': [{'message_index': 0, 'quote': 'Alice lives in Paris.'}],
+                          'triples': [{'subject': 'Alice', 'relation': 'lives_in', 'object': 'Paris'}]}],
+                'triples': [{'subject': 'bad', 'relation': 'bad', 'object': 'bad', 'fact_index': 0}]}
         with patch.object(llm, 'complete_json', AsyncMock(return_value=data)):
             extracted = await add._extract(self.st, request())
         self.assertEqual(len(extracted['facts']), 1)
-        self.assertEqual(len(extracted['triples']), 1)
-        self.assertEqual(extracted['triples'][0]['fact_index'], 0)
+        self.assertNotIn('triples', extracted)
+        self.assertEqual(extracted['facts'][0]['triples'][0]['object'], 'Paris')
 
     async def test_batch_indices_are_request_relative(self):
         req = request()
@@ -239,8 +238,10 @@ class IntegrityTests(unittest.IsolatedAsyncioTestCase):
         with tempfile.TemporaryDirectory() as tmp:
             path = str(Path(tmp) / 'old.db')
             conn = sqlite3.connect(path)
-            conn.executescript(store.SCHEMA.replace(
-                "  embedding_space TEXT,\n", ""))
+            legacy_schema = store.SCHEMA
+            for column in ("embedding_space", "temporal", "state", "evidence"):
+                legacy_schema = legacy_schema.replace(f"  {column} TEXT,\n", "")
+            conn.executescript(legacy_schema)
             conn.executescript(store.FTS_SCHEMA)
             conn.execute("INSERT INTO sessions VALUES ('u','s','old summary')")
             conn.commit()
@@ -249,7 +250,7 @@ class IntegrityTests(unittest.IsolatedAsyncioTestCase):
             try:
                 columns = {row['name'] for row in upgraded.conn.execute(
                     'PRAGMA table_info(amu)')}
-                self.assertIn('embedding_space', columns)
+                self.assertTrue({"embedding_space", "temporal", "state", "evidence"} <= columns)
                 self.assertEqual(upgraded.get_summary('u', 's'), 'old summary')
                 upgraded.save_messages(request())
                 self.assertEqual(upgraded.conn.execute(

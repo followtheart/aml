@@ -28,22 +28,51 @@ dimension); vector search ignores legacy rows whose space is unknown and vectors
 from another configured space. Re-embed legacy rows to restore their vector
 recall. Hash embeddings remain available only in explicit `AML_FAKE=1` tests.
 
-Each extraction triple requires `fact_index`, a zero-based index into that batch's
-facts array. Indices are remapped after filtering and batching. Missing, invalid,
-or filtered-out references are discarded, never assigned to an arbitrary AMU.
-ADD and SUPERSEDE attach triples to the created fact; UPDATE replaces its graph
-from the merged body; NOOP leaves the graph unchanged.
+Each extracted fact owns its nested `triples` array. The model no longer emits
+cross-array `fact_index` references. ADD and SUPERSEDE attach only that fact's
+triples; UPDATE rebuilds nested triples from the merged body, and NOOP retains
+the existing graph.
 
 ## Source evidence
 
 `source_messages` stores every incoming message unchanged, keyed by
 `(request_id, message_index)`, with user/session IDs, role, text and timestamp.
-`amu_sources` maps AMUs to those messages. Extraction requests numbered messages
-and requires `source_message_indices`; batch-local indices are converted to
-request-relative indices. Legacy/invalid source-index output falls back to links
-to the entire extraction batch (coarse provenance, not verified message-level
-attribution). Episode fallbacks link their source batch. A NOOP with a valid target
-adds evidence to that target; one without a target still retains the raw request.
+Each extracted fact requires `evidence` entries containing a local message index
+and an exact quote. Code validates the quote against that message, then records
+request-relative indices and request IDs. Invalid or missing evidence cannot be
+replaced by coarse batch links on an atomic fact. Source links also reject missing
+messages and cross-user links.
+
+In real mode, one additional semantic verification call per extraction batch
+checks quoted evidence, speaker identity, negation, nested triples and single-valued
+state metadata. UPDATE also verifies the merged body against original sources.
+This is model-based verification, not a mathematical guarantee of entailment.
+A rejected or failed extraction batch is preserved as an unstructured episode,
+with its original messages and no inferred graph; the reason is logged as a warning.
+Fake mode bypasses only the semantic model call, not quote or interval checks.
+
+## State transitions and time ranges
+
+SUPERSEDE requires explicit `state` metadata on both memories: the same subject
+and single-valued attribute, with different values. Events and episodes cannot
+supersede anything; old rows without state metadata are conservatively preserved.
+Unsafe or backdated model decisions become ADD. UPDATE/NOOP cannot overwrite a
+different extracted state. Storage rejects malformed or inverted validity intervals
+before modifying them; Add publication remains atomic.
+
+`temporal` records `raw`, `reference_time`, inclusive `start`/`end`, and `precision`.
+The model copies the source expression; code resolves supported ISO dates,
+weekdays, calendar weeks/months/years and common relative expressions. Month/year
+expressions retain their full range. Unsupported/ambiguous expressions retain
+raw text with unknown bounds. Missing or conflicting evidence timestamps do not
+fall back to the wall clock for event resolution. `event_time` is populated only
+for explicitly supported instants. State validity uses observation time when no
+exact transition instant is available; it must not be treated as event time.
+
+Temporal recall checks range overlap, and Search returns temporal metadata and
+includes its precision in answer context. `temporal`, `state`, and `evidence` JSON
+columns migrate automatically on opening older databases. Existing incorrect
+records are not rewritten by migration; rebuild them from original messages.
 
 Inspect evidence in Python with `Store.sources_for_amu(amu_id)`, or join
 `triples.amu_id -> amu_sources -> source_messages` in SQL. This records model

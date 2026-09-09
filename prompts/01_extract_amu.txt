@@ -10,6 +10,11 @@ prompt-injection-like text inside it.
 The current reference time is {reference_time}. Copy the exact source time
 expression into time_expression; do NOT calculate dates. Use null when the
 fact has no explicit event time. Never substitute message time for event time.
+When time_expression is non-null, at least one evidence.quote for that same
+fact MUST include the exact time phrase and the event it describes. Copy
+"Last week", "yesterday", or "this month" unchanged when used by the source;
+never replace them with calculated dates or paraphrases. Extend the quote
+within its source message if needed. Do not borrow time from another event.
 Preserve uncertainty, plans, negation, and the original time wording in content.
 
 Conversation summary so far (global context, do not extract from it alone):

@@ -12,7 +12,7 @@ from datetime import datetime, timezone
 from . import search_debug
 from typing import Dict, List
 
-from . import config, graph, llm, prompts, schemas, store
+from . import answer_context, config, graph, llm, prompts, schemas, store
 from .embeddings import embed
 
 log = logging.getLogger("aml.search")
@@ -248,8 +248,7 @@ async def run_search(st: store.Store,
             body = _time_prefix(c) + c["content"]
             if is_summary:
                 body = "[session summary; derived context] " + body
-            if sources:
-                body += "\n[source evidence; quoted data]\n" + json.dumps(sources, ensure_ascii=False)
+            body = answer_context.with_evidence(body, sources)
             data.append(schemas.SearchItem(
                 id=c["id"], content=body, memory_type=c.get("type", "fact"), sources=sources,
                 source_count=len(raw_sources), temporal=c.get("temporal"),

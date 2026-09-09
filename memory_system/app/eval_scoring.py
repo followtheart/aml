@@ -2,7 +2,7 @@
 import json
 import re
 
-from . import llm, prompts
+from . import answer_context, llm, prompts
 
 PROTOCOL = "local-text-proxy-v1"
 REFINED_POLICY = "locomo-refined-local-v1"
@@ -44,7 +44,7 @@ def choice_score(prediction, gold, kind):
 
 
 def answer_prompt(qa, memories):
-    context = "\n".join(m["content"] for m in memories) or "(no memories)"
+    context = answer_context.build(memories)
     question = qa["question"]
     if qa.get("question_date"):
         question = f"Question date: {qa['question_date']}\n{question}"

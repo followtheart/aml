@@ -76,6 +76,16 @@ API_KEY = os.environ.get("AML_API_KEY", "")
 DB_PATH = os.environ.get("AML_DB_PATH", os.path.join(os.path.dirname(__file__), "..", "memory.db"))
 FAKE = os.environ.get("AML_FAKE", "") == "1"
 LLM_TEMPERATURE = 0.0
+# Additional retries for HTTP 429, independent of parsing/other error retries.
+RATE_LIMIT_RETRIES = max(0, int(os.environ.get("AML_RATE_LIMIT_RETRIES", "6")))
+RATE_LIMIT_BACKOFF_SECONDS = max(
+    1.0, float(os.environ.get("AML_RATE_LIMIT_BACKOFF_SECONDS", "15")))
+RATE_LIMIT_MAX_BACKOFF_SECONDS = max(
+    RATE_LIMIT_BACKOFF_SECONDS,
+    float(os.environ.get("AML_RATE_LIMIT_MAX_BACKOFF_SECONDS", "120")))
+# Local soft thresholds; set to the account's limits with suitable headroom.
+PROVIDER_SOFT_TPM = max(0, int(os.environ.get("AML_PROVIDER_SOFT_TPM", "60000")))
+PROVIDER_RPM = max(0, int(os.environ.get("AML_PROVIDER_RPM", "30")))
 LLM_MAX_TOKENS = 1200   # caps runaway repetition from small models
 LLM_JSON_MAX_TOKENS = int(os.environ.get("AML_LLM_JSON_MAX_TOKENS", "2048"))
 EXTRACT_BATCH_MESSAGES = max(
@@ -111,3 +121,10 @@ SEARCH_SOURCE_REFS_PER_ITEM = max(
     int(os.environ.get("AML_SEARCH_SOURCE_REFS_PER_ITEM", "20")))
 SEARCH_SOURCE_CONTEXT_CHARS = max(
     0, int(os.environ.get("AML_SEARCH_SOURCE_CONTEXT_CHARS", "12000")))
+
+# Answer memory budget includes all memory types and their rendered evidence.
+# These are character limits, not estimates of a provider-specific token count.
+ANSWER_CONTEXT_MAX_CHARS = max(
+    256, int(os.environ.get("AML_ANSWER_CONTEXT_MAX_CHARS", "24000")))
+ANSWER_CONTEXT_ITEM_MAX_CHARS = max(
+    256, int(os.environ.get("AML_ANSWER_CONTEXT_ITEM_MAX_CHARS", "2400")))

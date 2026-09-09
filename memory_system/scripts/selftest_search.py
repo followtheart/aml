@@ -156,6 +156,7 @@ class SearchTests(unittest.IsolatedAsyncioTestCase):
         result = await self.run_search(self.req())
         self.assertIn('Evidence text', result.data[0].content)
         self.assertEqual(result.data[0].sources[0]['request_id'], 'r')
+        self.assertNotIn('request_id', result.data[0].content)
         result = await self.run_search(schemas.SearchRequest(user_id='other', query='Alice work'))
         self.assertEqual(result.data, [])
 
@@ -218,6 +219,7 @@ class SearchTests(unittest.IsolatedAsyncioTestCase):
         result = await self.run_search(self.req(top_k=2))
         bodies = '\n'.join(item.content for item in result.data)
         self.assertEqual(bodies.count('shared source evidence'), 1)
+        self.assertNotIn('content_omitted', bodies)
         self.assertTrue(any(source.get('content_omitted') == 'duplicate'
                             for item in result.data for source in item.sources))
 

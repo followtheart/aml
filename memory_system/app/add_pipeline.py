@@ -68,6 +68,54 @@ async def _verify_semantics(facts, messages):
         raise ValueError("Semantic evidence check rejected extraction: " + str(check.get("reason")))
 
 
+def _validate_fact(raw, batch, start, req):
+    if not _is_grounded_fact(raw, _format_messages(batch)):
+        raise ValueError("Ungrounded extraction result")
+    fact = dict(raw)
+    indices = integrity.verify_quotes(fact, batch)
+    fact["_sources"] = [start + j for j in indices]
+    expression = fact.get("time_expression")
+    if expression:
+        if not isinstance(expression, str):
+            raise ValueError("Time expression must be text or null")
+        # Expand only an already verified quote's own message. Never borrow
+        # time from another message or infer a date to make validation pass.
+        if not any(expression.casefold() in e["quote"].casefold()
+                   for e in fact["evidence"]):
+            evidence = [dict(e) for e in fact["evidence"]]
+            for entry in evidence:
+                source = batch[entry["message_index"]].content
+                if expression.casefold() in source.casefold():
+                    entry["quote"] = source
+                    break
+            else:
+                raise ValueError("Time expression is not present in cited source messages")
+            fact["evidence"] = evidence
+    refs = {batch[j].timestamp for j in indices if batch[j].timestamp is not None}
+    reference = (datetime.fromtimestamp(next(iter(refs)) / 1000,
+                 tz=timezone.utc).isoformat() if len(refs) == 1 else None)
+    fact["temporal"] = integrity.resolve_time(expression, reference)
+    fact["event_time"] = (fact["temporal"]["start"]
+                          if fact["temporal"]["precision"] == "instant" else None)
+    fact["evidence"] = [dict(e, message_index=start + e["message_index"],
+                             request_id=req.request_id) for e in fact["evidence"]]
+    nested = fact.get("triples", [])
+    if not isinstance(nested, list) or any(not isinstance(t, dict) or not all(
+            isinstance(t.get(k), str) and t[k].strip()
+            for k in ("subject", "relation", "object")) for t in nested):
+        raise ValueError("Invalid nested triples")
+    if fact.get("state") is not None and integrity.state_key(fact) is None:
+        raise ValueError("Invalid state metadata")
+    return fact
+
+
+def _episode(req, indices):
+    return {"content": _format_messages([req.messages[i] for i in indices]),
+            "retrieval_key": "Conversation episode", "type": "episode",
+            "_sources": indices, "entities": [], "keywords": [],
+            "event_time": None, "sensitivity": "normal"}
+
+
 async def _extract(st: store.Store, req: schemas.AddRequest) -> Dict:
     summary = st.get_summary(req.user_id, req.session_id)
     batch_size = config.EXTRACT_BATCH_MESSAGES
@@ -92,38 +140,54 @@ async def _extract(st: store.Store, req: schemas.AddRequest) -> Dict:
             if not isinstance(data, dict):
                 raise ValueError("extraction result is not a JSON object")
             grounded = []
-            for raw in data.get("facts") or []:
-                if not _is_grounded_fact(raw, _format_messages(batch)):
-                    raise ValueError("Ungrounded extraction result")
-                fact = dict(raw)
-                indices = integrity.verify_quotes(fact, batch)
-                fact["_sources"] = [start + j for j in indices]
-                evidence_text = "\n".join(e["quote"] for e in fact["evidence"])
-                expression = fact.get("time_expression")
-                if expression and expression.casefold() not in evidence_text.casefold():
-                    raise ValueError("Time expression is not present in source evidence")
-                refs = {batch[j].timestamp for j in indices if batch[j].timestamp is not None}
-                reference = (datetime.fromtimestamp(next(iter(refs)) / 1000,
-                             tz=timezone.utc).isoformat() if len(refs) == 1 else None)
-                fact["temporal"] = integrity.resolve_time(expression, reference)
-                fact["event_time"] = (fact["temporal"]["start"]
-                                      if fact["temporal"]["precision"] == "instant" else None)
-                fact["evidence"] = [dict(e, message_index=start + e["message_index"],
-                                         request_id=req.request_id) for e in fact["evidence"]]
-                nested = fact.get("triples", [])
-                if not isinstance(nested, list) or any(not isinstance(t, dict) or not all(
-                        isinstance(t.get(k), str) and t[k].strip()
-                        for k in ("subject", "relation", "object")) for t in nested):
-                    raise ValueError("Invalid nested triples")
-                if fact.get("state") is not None and integrity.state_key(fact) is None:
-                    raise ValueError("Invalid state metadata")
-                grounded.append(fact)
+            rejected_sources = set()
+            raw_facts = data.get("facts") or []
+            if not isinstance(raw_facts, list):
+                raise ValueError("Extraction facts must be an array")
+            for fact_index, raw in enumerate(raw_facts):
+                try:
+                    grounded.append(_validate_fact(raw, batch, start, req))
+                except Exception as exc:
+                    # Invalid citations cannot reliably locate the failed fact;
+                    # preserve the entire batch in that case, plus valid facts.
+                    try:
+                        indices = integrity.verify_quotes(raw, batch)
+                    except Exception:
+                        indices = range(len(batch))
+                    rejected_sources.update(start + j for j in indices)
+                    log.warning("extraction fact rejected batch_start=%d fact_index=%d "
+                                "source_indices=%s reason=%s", start, fact_index,
+                                [start + j for j in indices], exc)
+            messages = [dict(message_index=start+j, role=m.role, content=m.content)
+                        for j, m in enumerate(batch)]
             if grounded:
-                await _verify_semantics(grounded, [dict(message_index=start+j, role=m.role,
-                                        content=m.content) for j, m in enumerate(batch)])
-            if not grounded:
-                raise ValueError("No verified facts; preserving source episode")
+                try:
+                    await _verify_semantics(grounded, messages)
+                except ValueError as exc:
+                    if len(grounded) == 1:
+                        log.warning("semantic fact rejected batch_start=%d "
+                                    "source_indices=%s reason=%s", start,
+                                    grounded[0]["_sources"], exc)
+                        rejected_sources.update(grounded[0]["_sources"])
+                        grounded = []
+                    # The normal path costs one check. Isolate semantic failures
+                    # only when the batch-level check actually rejects the facts.
+                    verified = []
+                    for fact_index, fact in enumerate(grounded):
+                        try:
+                            await _verify_semantics([fact], messages)
+                            verified.append(fact)
+                        except ValueError as exc:
+                            rejected_sources.update(fact["_sources"])
+                            log.warning("semantic fact rejected batch_start=%d "
+                                        "fact_index=%d source_indices=%s reason=%s",
+                                        start, fact_index, fact["_sources"], exc)
+                    grounded = verified
+            if not grounded and not rejected_sources:
+                rejected_sources.update(range(start, start + len(batch)))
             facts.extend(grounded)
+            if rejected_sources:
+                facts.append(_episode(req, sorted(rejected_sources)))
         except Exception as e:
             log.warning(
                 "extraction batch %d-%d failed (%s); storing that batch as "

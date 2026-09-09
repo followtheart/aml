@@ -190,7 +190,7 @@ def apply_ablations(args):
 
 
 async def answer_and_judge(question, gold, memories):
-    mem_text = "\n".join(m["content"] for m in memories) or "(no memories)"
+    mem_text = eval_scoring.answer_context.build(memories)
     ap = prompts.render("06_eval_answer.txt",
                         speaker_1_user_id="A", speaker_1_memories=mem_text,
                         speaker_2_user_id="B", speaker_2_memories="(n/a)",

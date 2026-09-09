@@ -166,6 +166,66 @@ class EvidenceTests(unittest.IsolatedAsyncioTestCase):
             result = await add._extract(self.st, self.req(fact['content']))
         self.assertEqual(result['facts'][0]['type'], 'episode')
 
+    async def test_time_in_cited_message_expands_quote_without_mutation(self):
+        text = 'Yesterday Alice moved to Paris.'
+        fact = self.fact('Alice moved to Paris.')
+        fact['time_expression'] = 'Yesterday'
+        with patch.object(llm, 'complete_json', AsyncMock(return_value={'facts': [fact]})):
+            result = await add._extract(self.st, self.req(text))
+        saved = result['facts'][0]
+        self.assertNotEqual(saved['type'], 'episode')
+        self.assertEqual(saved['evidence'][0]['quote'], text)
+        self.assertEqual(fact['evidence'][0]['quote'], 'Alice moved to Paris.')
+        self.assertIsNotNone(saved['temporal']['start'])
+
+    async def test_one_bad_time_preserves_other_facts(self):
+        good = self.fact()
+        bad = self.fact('Alice enjoys pottery.')
+        bad['time_expression'] = 'yesterday'
+        bad['evidence'][0]['message_index'] = 1
+        req = self.req(good['content'])
+        req.messages.append(schemas.Message(role='user', content=bad['content']))
+        with patch.object(llm, 'complete_json', AsyncMock(return_value={'facts': [bad, good]})):
+            result = await add._extract(self.st, req)
+        self.assertEqual([f['type'] for f in result['facts']], ['profile', 'episode'])
+        self.assertEqual(result['facts'][0]['content'], good['content'])
+        self.assertEqual(result['facts'][1]['_sources'], [1])
+
+    async def test_time_cannot_be_borrowed_from_uncited_message(self):
+        fact = self.fact()
+        fact['time_expression'] = 'Yesterday'
+        req = self.req(fact['content'])
+        req.messages.append(schemas.Message(role='user', content='Yesterday Bob left.'))
+        with patch.object(llm, 'complete_json', AsyncMock(return_value={'facts': [fact]})):
+            result = await add._extract(self.st, req)
+        self.assertEqual(result['facts'][0]['type'], 'episode')
+
+    async def test_semantic_rejection_isolated_to_one_fact(self):
+        good = self.fact()
+        bad = self.fact('Alice enjoys pottery.')
+        bad['evidence'][0]['message_index'] = 1
+        req = self.req(good['content'])
+        req.messages.append(schemas.Message(role='user', content=bad['content']))
+        responses = [{'facts': [good, bad]}, {'valid': False},
+                     {'valid': True}, {'valid': False, 'reason': 'unsupported triple'}]
+        with patch.object(config, 'FAKE', False), patch.object(
+                llm, 'complete_json', AsyncMock(side_effect=responses)):
+            result = await add._extract(self.st, req)
+        self.assertEqual([f['type'] for f in result['facts']], ['profile', 'episode'])
+        self.assertEqual(result['facts'][1]['_sources'], [1])
+
+    async def test_partial_failure_uses_request_indices_in_later_batch(self):
+        good = self.fact()
+        bad = self.fact('Alice enjoys pottery.')
+        bad['time_expression'] = 'yesterday'
+        req = self.req(good['content'])
+        req.messages.append(schemas.Message(role='user', content=bad['content']))
+        with patch.object(config, 'EXTRACT_BATCH_MESSAGES', 1), patch.object(
+                llm, 'complete_json', AsyncMock(side_effect=[{'facts': [good]}, {'facts': [bad]}])):
+            result = await add._extract(self.st, req)
+        self.assertEqual(result['facts'][1]['_sources'], [1])
+        self.assertIn('pottery', result['facts'][1]['content'])
+
 
 if __name__ == '__main__':
     unittest.main(verbosity=2)

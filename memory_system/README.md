@@ -28,6 +28,37 @@ data/
 
 ## 快速开始
 
+抽取按事实校验证据。时间短语若存在于已引用的原消息中但被短引用遗漏，
+会扩展为该消息的完整原文，并继续语义校验；不会跨未引用消息借用时间或
+自动猜测日期。单条事实失败时保留其他有效事实，将失败来源合并保存为
+episode；引用本身无效、无法定位时保留整批原文。语义批次校验被拒绝时，
+才追加逐条校验以隔离错误。日志包含批次起点、事实序号和来源消息序号。
+
+回答上下文默认总上限为 24,000 字符，单条上限为 2,400 字符，分别通过
+`AML_ANSWER_CONTEXT_MAX_CHARS`、`AML_ANSWER_CONTEXT_ITEM_MAX_CHARS` 配置。
+预算覆盖所有记忆类型、证据正文及分隔符，按检索顺序保留，截断处标注
+`[truncated]`；问题、选项和任务指令不被截断。这是字符预算而非精确 token
+预算；较长任务可按需调大，以免丢失证据。搜索结果的 `content` 仅拼接有正文
+的证据、时间戳和角色，来源 ID 等元数据保留在 `sources` 字段中。
+`aml.context` 日志记录输入和实际上下文字符数，修改配置后需重启进程。
+
+遇到服务端限流（HTTP 429 / `RateLimitError`）时，所有模型调用默认额外重试
+6 次，异步等待约 15、30、60、120、120、120 秒（带随机抖动）。若服务端
+返回 `Retry-After` 秒数或 HTTP 日期，至少等待该时长。日志中的
+`retry_delay_s` 显示实际等待时间。可通过 `AML_RATE_LIMIT_RETRIES`、
+`AML_RATE_LIMIT_BACKOFF_SECONDS`、`AML_RATE_LIMIT_MAX_BACKOFF_SECONDS` 调整；
+修改后需重启评测/服务进程。持续限流或配额不足仍会在重试耗尽后报错，
+本地评测结果应检查 `error_stage` / `error_type`，避免将调用失败当作答错。
+离线重试测试：`python scripts/selftest_metrics.py`。
+
+主动节流：同一进程、事件循环内，同类同模型调用串行执行。默认最近 60 秒
+最多发起 30 次请求（含失败尝试）；已返回的累计 token 达到 60,000 后，
+后续请求等待旧用量退出窗口。分别通过 `AML_PROVIDER_RPM` 和
+`AML_PROVIDER_SOFT_TPM` 配置，0 禁用对应阈值；日志显示 `provider_throttle`。
+这是本地保守阈值，不代表服务商实际额度，也不预估下一次请求的 token；
+请按账户额度留余量调整。其他进程/账户共享用量以及服务商的其他限流仍可能
+触发 429，届时继续使用等待重试。修改后重启评测/服务进程。
+
 文本数据集现已支持 **LoCoMo-Refined、LongMemEval-S、BEAM-100K、CLBench、PersonaMem-v2**，
 并提供 ScriptMem/Refined 授权数据导入入口。下载、转换、评分差异及命令见
 [DATASETS.md](DATASETS.md)。ScriptMem 原始剧本仍需另行提供；LoCoMo-Refined 已从公开仓库下载。

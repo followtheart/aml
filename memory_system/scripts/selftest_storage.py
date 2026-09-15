@@ -23,8 +23,11 @@ def request(rid='r1', text='Alice lives in Paris.'):
 class IntegrityTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         self.st = store.Store(':memory:')
+        self.episodes = patch.object(config, 'STORE_EPISODES', False)
+        self.episodes.start()
 
     def tearDown(self):
+        self.episodes.stop()
         self.st.conn.close()
 
     def snapshot(self):
@@ -51,42 +54,40 @@ class IntegrityTests(unittest.IsolatedAsyncioTestCase):
         await add.run_add(self.st, request())
         old = self.st.get_amus('u')[0]
         decision = AsyncMock(return_value=('UPDATE', {
-            'target_id': old['id'], 'merged_content': 'Alice lives in Berlin.'}))
+            'target_id': old['id'], 'merged_content': 'Alice lives in Paris, near Berlin.'}))
         with patch.object(add, '_govern_one', decision):
-            await add.run_add(self.st, request('r2', 'Alice moved to Berlin.'))
+            await add.run_add(self.st, request('r2', 'Alice lives near Berlin.'))
         new = self.st.get_amus('u')[0]
         self.assertEqual(new['id'], old['id'])
-        self.assertEqual(new['content'], 'Alice lives in Berlin.')
+        self.assertEqual(new['content'], 'Alice lives in Paris, near Berlin.')
         self.assertNotEqual(new['retrieval_key'], old['retrieval_key'])
-        self.assertNotIn('Paris', new['entities'])
+        # ULM §3.5: complementary UPDATE keeps the union of both memories' metadata.
+        self.assertIn('Paris', new['entities'])
         self.assertIn('Berlin', new['entities'])
         expected = (await embed([add._embed_text(new)]))[0]
         np.testing.assert_allclose(new['embedding'], expected)
-        self.assertEqual(self.st.fts_search('u', 'Paris', 10), [])
         self.assertEqual(self.st.fts_search('u', 'Berlin', 10)[0]['id'], old['id'])
-        self.assertFalse(any(t['object'] == 'Paris' for t in self.st.triples_for_user('u')))
-        self.assertTrue(any(t['object'] == 'Berlin' for t in self.st.triples_for_user('u')))
+        objects = {t['object'] for t in self.st.triples_for_user('u')}
+        self.assertTrue({'Paris', 'Berlin'} <= objects)
         self.assertEqual(len(self.st.sources_for_amu(old['id'])), 2)
+        self.assertEqual(len(new['support_sessions']), 1)
 
-    async def test_update_aborts_when_merged_indexes_cannot_be_rebuilt(self):
+    async def test_update_does_not_re_extract(self):
         await add.run_add(self.st, request())
         old = self.st.get_amus('u')[0]
-        before = self.snapshot()
         decision = AsyncMock(return_value=('UPDATE', {
             'target_id': old['id'], 'merged_content': 'Alice lives elsewhere.'}))
         original_extract = add._extract
         calls = 0
-        async def empty_refresh(st, req):
+        async def counting(st, req):
             nonlocal calls
             calls += 1
-            if calls > 1:
-                return {'facts': [], 'triples': []}
             return await original_extract(st, req)
         with patch.object(add, '_govern_one', decision), patch.object(
-                add, '_extract', side_effect=empty_refresh):
-            with self.assertRaises(ValueError):
-                await add.run_add(self.st, request('r2', 'Alice moved.'))
-        self.assertEqual(before, self.snapshot())
+                add, '_extract', side_effect=counting):
+            await add.run_add(self.st, request('r2', 'Alice moved.'))
+        self.assertEqual(calls, 1)
+        self.assertEqual(self.st.get_amus('u')[0]['content'], 'Alice lives elsewhere.')
 
     async def test_same_entity_is_in_governance_candidates(self):
         vec = (await embed(['unrelated words']))[0]

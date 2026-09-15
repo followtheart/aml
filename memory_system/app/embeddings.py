@@ -18,6 +18,10 @@ async def embed(texts: List[str], stage: str = "embedding") -> np.ndarray:
         kwargs["api_base"] = config.EMBED_API_BASE
     if config.EMBED_API_KEY:
         kwargs["api_key"] = config.EMBED_API_KEY
+    # Matryoshka-capable models shorten natively; slicing other models' vectors
+    # would distort the similarity space (REVIEW P0-1).
+    if "text-embedding-3" in config.EMBED_MODEL:
+        kwargs["dimensions"] = config.EMBED_DIM
     async def _call(_attempt):
         return await litellm.aembedding(
             model=config.EMBED_MODEL, input=texts,

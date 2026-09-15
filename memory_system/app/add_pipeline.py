@@ -1,6 +1,8 @@
-"""Add pipeline (design doc v0.2 §4):
-normalize -> rolling summary -> AMU extraction -> item-level governance ->
-multi-index write. Synchronous from the caller's point of view.
+"""Add pipeline (ULM design §3 "trace formation" + §4 "consolidation"):
+normalize -> semantic segmentation -> MemCell extraction (episode + facts +
+triples) -> novelty gate -> item-level governance -> multi-index write ->
+scene consolidation / heat / forgetting -> rolling summary.
+Synchronous from the caller's point of view.
 """
 import json
 import logging
@@ -8,7 +10,9 @@ import re
 from datetime import datetime, timezone
 from typing import Dict, List, Optional
 
-from . import config, integrity, llm, memory_debug, prompts, schemas, store
+import numpy as np
+
+from . import config, integrity, llm, memory_debug, prompts, scenes, schemas, segment, store
 from .embeddings import embed
 
 log = logging.getLogger("aml.add")
@@ -109,20 +113,37 @@ def _validate_fact(raw, batch, start, req):
     return fact
 
 
-def _episode(req, indices):
+def _episode(req, indices, segment_index=0):
     return {"content": _format_messages([req.messages[i] for i in indices]),
             "retrieval_key": "Conversation episode", "type": "episode",
-            "_sources": indices, "entities": [], "keywords": [],
+            "_sources": list(indices), "_segment": segment_index,
+            "entities": [], "keywords": [],
             "event_time": None, "sensitivity": "normal"}
+
+
+async def _segments(req: schemas.AddRequest) -> List[List[int]]:
+    """§3.2 semantic boundaries; falls back to fixed windows on embedding failure."""
+    max_size = config.EXTRACT_BATCH_MESSAGES
+    if len(req.messages) <= 1:
+        return [list(range(len(req.messages)))]
+    try:
+        vecs = await embed([f"{m.role}: {m.content}" for m in req.messages],
+                           stage="add.embed_messages")
+        return segment.segment_indices(vecs, max_size)
+    except Exception as exc:
+        log.warning("segmentation embedding failed (%s); fixed windows", exc)
+        return [list(range(s, min(s + max_size, len(req.messages))))
+                for s in range(0, len(req.messages), max_size)]
 
 
 async def _extract(st: store.Store, req: schemas.AddRequest) -> Dict:
     summary = st.get_summary(req.user_id, req.session_id)
-    batch_size = config.EXTRACT_BATCH_MESSAGES
     facts = []
+    segments = await _segments(req)
 
-    for start in range(0, len(req.messages), batch_size):
-        batch = req.messages[start:start + batch_size]
+    for seg_index, indices in enumerate(segments):
+        start = indices[0]
+        batch = [req.messages[i] for i in indices]
         prior = req.messages[max(0, start - 4):start]
         prompt = prompts.render(
             "01_extract_amu.txt",
@@ -136,7 +157,7 @@ async def _extract(st: store.Store, req: schemas.AddRequest) -> Dict:
             data = await llm.complete_json(
                 prompt, json.dumps(llm.STRUCTURED_SCHEMAS["extraction"]),
                 schema=llm.STRUCTURED_SCHEMAS["extraction"],
-                stage=f"add.extract.batch_{start // batch_size + 1}")
+                stage=f"add.extract.segment_{seg_index + 1}")
             if not isinstance(data, dict):
                 raise ValueError("extraction result is not a JSON object")
             grounded = []
@@ -146,18 +167,20 @@ async def _extract(st: store.Store, req: schemas.AddRequest) -> Dict:
                 raise ValueError("Extraction facts must be an array")
             for fact_index, raw in enumerate(raw_facts):
                 try:
-                    grounded.append(_validate_fact(raw, batch, start, req))
+                    fact = _validate_fact(raw, batch, start, req)
+                    fact["_segment"] = seg_index
+                    grounded.append(fact)
                 except Exception as exc:
                     # Invalid citations cannot reliably locate the failed fact;
                     # preserve the entire batch in that case, plus valid facts.
                     try:
-                        indices = integrity.verify_quotes(raw, batch)
+                        indices_hit = integrity.verify_quotes(raw, batch)
                     except Exception:
-                        indices = range(len(batch))
-                    rejected_sources.update(start + j for j in indices)
-                    log.warning("extraction fact rejected batch_start=%d fact_index=%d "
+                        indices_hit = range(len(batch))
+                    rejected_sources.update(start + j for j in indices_hit)
+                    log.warning("extraction fact rejected segment_start=%d fact_index=%d "
                                 "source_indices=%s reason=%s", start, fact_index,
-                                [start + j for j in indices], exc)
+                                [start + j for j in indices_hit], exc)
             messages = [dict(message_index=start+j, role=m.role, content=m.content)
                         for j, m in enumerate(batch)]
             if grounded:
@@ -165,7 +188,7 @@ async def _extract(st: store.Store, req: schemas.AddRequest) -> Dict:
                     await _verify_semantics(grounded, messages)
                 except ValueError as exc:
                     if len(grounded) == 1:
-                        log.warning("semantic fact rejected batch_start=%d "
+                        log.warning("semantic fact rejected segment_start=%d "
                                     "source_indices=%s reason=%s", start,
                                     grounded[0]["_sources"], exc)
                         rejected_sources.update(grounded[0]["_sources"])
@@ -179,40 +202,52 @@ async def _extract(st: store.Store, req: schemas.AddRequest) -> Dict:
                             verified.append(fact)
                         except ValueError as exc:
                             rejected_sources.update(fact["_sources"])
-                            log.warning("semantic fact rejected batch_start=%d "
+                            log.warning("semantic fact rejected segment_start=%d "
                                         "fact_index=%d source_indices=%s reason=%s",
                                         start, fact_index, fact["_sources"], exc)
                     grounded = verified
             if not grounded and not rejected_sources:
-                rejected_sources.update(range(start, start + len(batch)))
+                rejected_sources.update(indices)
             facts.extend(grounded)
-            if rejected_sources:
-                facts.append(_episode(req, sorted(rejected_sources)))
+            # §2.1 MemCell keeps the raw chunk (E) next to its atomic facts (F);
+            # without episodes only rejected sources fall back to a chunk.
+            if config.STORE_EPISODES:
+                facts.append(_episode(req, indices, seg_index))
+            elif rejected_sources:
+                facts.append(_episode(req, sorted(rejected_sources), seg_index))
         except Exception as e:
             log.warning(
-                "extraction batch %d-%d failed (%s); storing that batch as "
-                "an episode", start, start + len(batch) - 1, e)
-            facts.append({
-                "content": _format_messages(batch),
-                "retrieval_key": "Conversation episode",
-                "type": "episode",
-                "_sources": list(range(start, start + len(batch))),
-                "entities": [],
-                "keywords": [],
-                "event_time": None,
-                "sensitivity": "normal",
-            })
+                "extraction segment %d-%d failed (%s); storing that segment as "
+                "an episode", start, indices[-1], e)
+            facts.append(_episode(req, indices, seg_index))
 
-    return {"facts": facts}
+    return {"facts": facts, "segments": segments}
+
+
+def _same_text(a: str, b: str) -> bool:
+    norm = lambda s: " ".join(re.findall(r"\w+", (s or "").casefold()))
+    return norm(a) == norm(b)
 
 
 async def _govern_one(st: store.Store, user_id: str, fact: Dict,
                       vec) -> str:
-    """Item-level governance: ADD / UPDATE / SUPERSEDE / NOOP."""
+    """Item-level governance: ADD / UPDATE / SUPERSEDE / NOOP.
+
+    §3.4 novelty gate: near-duplicates are NOOPed and clearly novel facts are
+    ADDed without spending an LLM call; only the ambiguous middle is judged.
+    """
     neighbors = st.nearest_by_embedding(user_id, vec,
                                         config.GOVERNANCE_NEIGHBORS)
     entity_neighbors = st.get_by_entities(
         user_id, fact.get("entities") or [], config.GOVERNANCE_NEIGHBORS)
+    novelty = 1.0 - max([n["_score"] for n in neighbors], default=0.0)
+    for n in neighbors:
+        if (n["_score"] >= config.NOVELTY_DUP_THRESHOLD
+                and n.get("type") == fact.get("type", "fact")
+                and _same_text(n["content"], fact.get("content"))):
+            return "NOOP", {"operation": "NOOP", "target_id": n["id"],
+                            "merged_content": None, "reason": "novelty_gate_duplicate",
+                            "novelty": novelty}
     by_id = {item["id"]: item for item in neighbors}
     by_id.update({item["id"]: item for item in entity_neighbors})
     # restrict to confident near-duplicates / same-entity items
@@ -220,7 +255,8 @@ async def _govern_one(st: store.Store, user_id: str, fact: Dict,
     cand = [n for n in by_id.values()
             if n["id"] in entity_ids or n["_score"] > 0.55]
     if not cand:
-        op = {"operation": "ADD", "target_id": None, "merged_content": None}
+        op = {"operation": "ADD", "target_id": None, "merged_content": None,
+              "reason": "novelty_gate_new"}
     else:
         cand_text = json.dumps([{k: n.get(k) for k in ("id", "content", "type", "state", "temporal")} for n in cand], ensure_ascii=False)
         prompt = prompts.render(
@@ -237,12 +273,30 @@ async def _govern_one(st: store.Store, user_id: str, fact: Dict,
         except Exception:
             op = {"operation": "ADD", "target_id": None,
                   "merged_content": None}
+    op["novelty"] = novelty
     return op.get("operation", "ADD"), op
+
+
+def _union(*lists):
+    out = []
+    for items in lists:
+        for item in items or []:
+            if item and item not in out:
+                out.append(item)
+    return out
 
 
 async def _persist_fact(st: store.Store, req: schemas.AddRequest,
                         fact: Dict, vec) -> Optional[str]:
+    if fact.get("type") == "episode":
+        # Raw chunks are never governed: they are the Memory-Doc fallback (§5.6).
+        return st.insert_amu(
+            user_id=req.user_id, session_id=req.session_id, content=fact["content"],
+            retrieval_key=fact.get("retrieval_key", ""), type="episode",
+            valid_from=_ref_time(req.messages), confidence=0.6, embedding=vec,
+            evidence=fact.get("evidence", []))
     op, detail = await _govern_one(st, req.user_id, fact, vec)
+    fact["_novelty"] = detail.get("novelty", 1.0)
     target = detail.get("target_id")
     if op in ("UPDATE", "SUPERSEDE", "NOOP") and target:
         candidates = st.get_amus_by_ids([target])
@@ -262,35 +316,32 @@ async def _persist_fact(st: store.Store, req: schemas.AddRequest,
             previous["evidence"] = previous.get("evidence", []) + fact.get("evidence", [])
             st.set_metadata(target, previous)
             st.link_sources(target, req.request_id, fact.get("_sources", []))
+            st.add_support_session(target, req.session_id)
         return None
     if op == "UPDATE" and target:
-        final = dict(fact, content=detail.get("merged_content") or fact["content"])
-        # Metadata and graph must describe the merged body, not just the incoming fact.
-        refresh_req = schemas.AddRequest(
-            request_id=req.request_id, user_id=req.user_id, session_id=req.session_id,
-            messages=[schemas.Message(role="user", content=final["content"])])
-        refreshed = await _extract(st, refresh_req)
-        parts = [part for part in refreshed["facts"]
-                 if part.get("type") != "episode"]
-        if not parts:
-            raise ValueError("Cannot rebuild derived indexes for merged memory")
-        final["entities"] = sorted({e for f in parts for e in f.get("entities", [])})
-        final["keywords"] = sorted({e for f in parts for e in f.get("keywords", [])})
-        final["retrieval_key"] = " ".join(f.get("retrieval_key", "") for f in parts)
-        final_vec = (await embed([_embed_text(final)], stage="add.embed_update"))[0]
+        # Complementary detail: merge text, keep the union of both memories'
+        # derived metadata and re-embed once. No re-extraction (REVIEW P1-5).
         previous = candidates[0]
+        final = dict(fact, content=detail.get("merged_content") or fact["content"])
+        final["entities"] = _union(previous.get("entities"), fact.get("entities"))
+        final["keywords"] = _union(previous.get("keywords"), fact.get("keywords"))
+        final["retrieval_key"] = " ".join(_union(
+            [previous.get("retrieval_key", "")], [fact.get("retrieval_key", "")]))
         final["evidence"] = previous.get("evidence", []) + fact.get("evidence", [])
         if previous.get("state") != fact.get("state"):
             final["state"] = None
-        final["triples"] = [t for part in parts for t in part.get("triples", [])]
+        old_triples = [{"subject": t["subject"], "relation": t["relation"], "object": t["object"]}
+                       for t in st.triples_for_user(req.user_id) if t["amu_id"] == target]
+        final["triples"] = _union(old_triples, fact.get("triples", []))
+        final_vec = (await embed([_embed_text(final)], stage="add.embed_update"))[0]
         await _verify_semantics([final], st.sources_for_amu(target) + [
             dict(message_index=j, request_id=req.request_id, role=m.role, content=m.content)
             for j, m in enumerate(req.messages)])
         st.replace_fact(target, final, final_vec)
-        for part in parts:
-            for t in part.get("triples", []):
-                st.insert_triple(req.user_id, t["subject"], t["relation"], t["object"], target)
+        for t in final["triples"]:
+            st.insert_triple(req.user_id, t["subject"], t["relation"], t["object"], target)
         st.link_sources(target, req.request_id, fact.get("_sources", []))
+        st.add_support_session(target, req.session_id)
         return None  # refreshed triples already persisted against final content
     supersedes = None
     # Unknown/coarse event times are not invented state-transition instants.
@@ -350,17 +401,34 @@ async def _run_add(st: store.Store, req: schemas.AddRequest) -> None:
     data = await _extract(st, req)
     facts = data.get("facts") or [{
         "content": _format_messages(req.messages), "type": "episode",
-        "_sources": list(range(len(req.messages)))}]
+        "_sources": list(range(len(req.messages))), "_segment": 0}]
     vecs = await embed([_embed_text(f) for f in facts], stage="add.embed_facts")
     if len(vecs) != len(facts):
         raise ValueError("Embedding count does not match extracted facts")
-    for i, (fact, vec) in enumerate(zip(facts, vecs)):
+    # One MemCell per segment: its memories are consolidated into a scene together.
+    cells: Dict[int, Dict] = {}
+    surprise = 0.0
+    for fact, vec in zip(facts, vecs):
         aid = await _persist_fact(st, req, fact, vec)
+        novelty = fact.get("_novelty", 1.0)
+        surprise = config.SURPRISE_MOMENTUM * surprise + (1 - config.SURPRISE_MOMENTUM) * novelty
         if not aid:
             continue
         st.link_sources(aid, req.request_id,
                         fact.get("_sources", list(range(len(req.messages)))))
         for t in fact.get("triples", []):
             st.insert_triple(req.user_id, t["subject"], t["relation"], t["object"], aid)
+        cell = cells.setdefault(fact.get("_segment", 0),
+                                {"ids": [], "vecs": [], "facts": [], "surprise": 0.0})
+        cell["ids"].append(aid)
+        cell["vecs"].append(np.asarray(vec, dtype=np.float32))
+        cell["facts"].append(fact)
+        cell["surprise"] = surprise
+    for seg_index, cell in sorted(cells.items()):
+        cell_id = f"cell_{req.request_id}_{seg_index}"
+        await scenes.consolidate_cell(st, req.user_id, cell_id, cell["ids"],
+                                      cell["vecs"], cell["facts"], cell["surprise"])
+    scenes.promote_and_evict(st, req.user_id)
+    scenes.forget(st, req.user_id)
     await _update_summary(st, req)
     st.record_request(req.request_id, req.user_id, req.session_id)

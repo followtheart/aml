@@ -144,17 +144,60 @@ request field `include_history` overrides this decision (`true` includes history
 `false` uses current AMUs). Defaults in Store remain current-only for governance.
 Temporal bounds also drive a dedicated event/validity interval recall route and
 are passed to the reranker. `reference_time` anchors relative dates; local eval
-passes the dataset's `question_date`, while online requests default to current UTC.
+passes the dataset's `question_date`, while online requests default to the user's
+latest known memory time (`Store.latest_time`), not the service wall clock.
 
 `sessions_fts` adds BM25 recall for summaries using original/expanded queries.
 Opening an older database backfills its existing summaries; summary writes update
 this index atomically. Summary candidates have stable `summary_` IDs and type
 `session_summary`, and are explicitly marked as derived context during reranking
-and answering. Summary recall currently uses text matching, not summary vectors.
+and answering. Per the ULM design (§3.1) the rolling summary is extraction context
+only, so this route is disabled unless `AML_SUMMARY_ROUTE=1`.
 
-Candidates are reranked in parallel batches (`RERANK_CANDIDATES`, default 40),
-bounded by `AML_RERANK_MAX_CANDIDATES` (default 200 and never below requested
-`top_k`). `top_k=100` can therefore return 100 relevant results when available.
+## ULM lifecycle (segments, MemCells, MemScenes, heat, forgetting)
+
+Each Add is cut into topic segments by embedding-similarity drops
+(`AML_SEGMENT_SIM_DROP`, `AML_SEGMENT_MIN_MESSAGES`, capped by
+`AML_EXTRACT_BATCH_MESSAGES`). A segment yields one MemCell: an `episode` AMU
+holding the raw chunk (unless `AML_STORE_EPISODES=0`) plus its atomic facts and
+triples, all sharing a `cell_id`. Episodes bypass governance.
+
+Governance is preceded by a novelty gate: a neighbour with cosine ≥
+`AML_NOVELTY_DUP_THRESHOLD` and identical normalised text is a NOOP without an LLM
+call; facts with no close neighbour are ADDed without one. `UPDATE` merges text,
+keeps the union of both memories' entities/keywords/triples and re-embeds once.
+NOOP/UPDATE targets record the contributing session in `support_sessions`; profile
+items supported by ≥ `AML_PROFILE_STABLE_SESSIONS` sessions are annotated
+`[profile: stable]`, otherwise `transient`; rules are always recalled.
+
+Cells are clustered into `scenes` rows (0.7·cosine + 0.3·keyword Jaccard ≥
+`AML_SCENE_JOIN_THRESHOLD`) with a running centroid, keyword union and a
+deterministic line summary (`AML_SCENE_SUMMARY_LLM=1` uses the model). Search adds
+a scene->cell route: top `AML_SCENE_TOP_M` scenes by query similarity, then the
+best cells inside them. Scene heat is
+`visits + 0.5·interactions + 2·recency + surprise`; scenes above
+`AML_HEAT_PROMOTE_THRESHOLD` reset their interaction count (promotion), and scenes
+beyond `AML_MAX_HOT_SCENES` are cold-tiered. Recall updates `recall_count`,
+`strength`, scene `visit_count` with relative SQL updates and never bumps the user
+revision, so it cannot invalidate a concurrent staged Add.
+
+Forgetting uses `R = exp(-age / (30 days · strength))`; with
+`AML_FORGET_THRESHOLD > 0` memories below it move to `tier='cold'`, which the
+dense and sparse routes skip (graph/temporal routes still reach them). A cold
+memory that is recalled returns to `hot`. Nothing is deleted.
+
+The search loop runs up to `AML_SEARCH_MAX_ROUNDS` (default 2): after reranking,
+prompt 08 judges whether the evidence is necessary and sufficient; if not, its
+follow-up queries drive one more recall round. If the final verdict is
+insufficient with confidence below `AML_ABSTAIN_CONFIDENCE`, the search returns an
+empty list. Verifier failures fail open. `plan`-type memories (foresight) are
+prefixed with `[plan; status: pending|expired]` relative to the anchor time and
+are dropped when a query time scope does not intersect their window.
+
+Candidates are LLM-scored only for the fused head (`AML_RERANK_MAX_CANDIDATES`,
+default 40, one batch of `RERANK_CANDIDATES`). Kept items are ordered by relevance;
+the unscored tail follows in fusion order (`unscored_fused`) so `top_k=100` stays
+full without penalising unscored evidence.
 Explicit scores below `AML_SEARCH_MIN_RELEVANCE` (default 0.3) are rejected. If
 any batch fails or omits a candidate, the entire request falls back to one coherent
 RRF ordering; relevance and RRF scales are never mixed.
@@ -176,7 +219,12 @@ set it to an empty string to disable. Each event includes:
   and channel scores when available (including empty routes).
 - `fused`: deduplicated candidates with RRF scores and fusion ranks.
 - `rerank`: per-candidate batch, score, keep flag and decision reason;
-  `rerank_rejected`, `global_rrf_fallback`, or `kept`.
+  `rerank_rejected`, `global_rrf_fallback`, `unscored_fused`, or `kept`.
+- `rounds`: per-round query set, fused/ranked counts and the verifier verdict;
+  `abstained` marks an empty response caused by the verifier.
+- `scenes`: the top MemScenes chosen for the scene->cell route;
+  `foresight_dropped`: plan memories outside the query time scope.
+- `anchor_time`: the reference time used for relative dates.
 - `pre_rerank_excluded`: the fusion tail omitted by the configured cost budget.
 - `top_k_excluded`: relevant candidates omitted only because of the result limit.
 - `returned`: final response items including source evidence.
@@ -184,4 +232,5 @@ set it to an empty string to disable. Each event includes:
 Failed searches record error type and any diagnostics collected before failure.
 Log I/O errors warn without failing retrieval. Logs append across runs, contain
 full content, and are excluded from Git by the existing logs-directory rule.
-Run `python scripts/selftest_search.py` for the offline search regression suite.
+Run `python scripts/selftest_search.py` for the offline search regression suite and
+`python scripts/selftest_ulm.py` for the lifecycle (segments/scenes/heat/verifier) suite.

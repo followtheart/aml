@@ -32,7 +32,9 @@ Extract atomic memory units from the NEW messages only. Rules:
 2. Resolve pronouns and speaker references into explicit names. Distinguish
    the conversation participants from people merely mentioned.
 3. Assign each fact a type: fact | preference | rule | workflow | event |
-   profile.
+   profile | plan. Use `plan` for foresight: stated intentions, upcoming
+   events, or temporary states (EverMemOS P). A plan MUST carry the source
+   time phrase in time_expression when one exists ("next weekend").
 4. For each fact, provide a retrieval_key: a short question-form rewrite
    that this fact answers (e.g. "When did Dave start photography?").
 5. Extract knowledge-graph triples (subject, relation, object) for entities

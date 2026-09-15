@@ -169,7 +169,7 @@ def _looks_graph(route):  # heuristic: graph route items lack _score/_fused
     return all("_score" not in i for i in route)
 
 
-async def _rerank_passthrough(req, plan, fused):
+async def _rerank_passthrough(req, plan, fused, scored=None):
     # Preserve the requested result capacity during the no-rerank ablation.
     return [dict(c, _final=c.get("_fused", 0)) for c in fused[:req.top_k]]
 
@@ -182,7 +182,7 @@ def apply_ablations(args):
     if args.no_rerank:
         search_pipeline._filter_rerank = _rerank_passthrough
     if args.no_keyexp:
-        async def _plain(req):
+        async def _plain(req, anchor=None):
             return {"intent": "fact", "time_scope": None, "entities": [],
                     "sub_queries": [req.query],
                     "expanded_queries": [req.query]}

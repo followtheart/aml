@@ -17,9 +17,13 @@ class EvidenceTests(unittest.IsolatedAsyncioTestCase):
         self.st = store.Store(':memory:')
         self.logging = patch.object(config, 'MEMORY_DEBUG_LOG', '')
         self.logging.start()
+        # Chunk fallback semantics are tested without the always-on episode view.
+        self.episodes = patch.object(config, 'STORE_EPISODES', False)
+        self.episodes.start()
 
     def tearDown(self):
         self.logging.stop()
+        self.episodes.stop()
         self.st.conn.close()
 
     def req(self, text, rid='r', timestamp=1684972800000):

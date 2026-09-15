@@ -75,6 +75,17 @@ STRUCTURED_SCHEMAS: Dict[str, dict] = {
         },
         "required": ["label"],
     },
+    # ULM §5.5: is the evidence necessary and sufficient? what is missing?
+    "verify": {
+        "type": "object",
+        "properties": {
+            "sufficient": {"type": "boolean"},
+            "confidence": {"type": "number"},
+            "missing": {"type": "string"},
+            "follow_up_queries": {"type": "array", "items": {"type": "string"}},
+        },
+        "required": ["sufficient", "confidence", "missing", "follow_up_queries"],
+    },
 }
 
 
@@ -91,7 +102,7 @@ _STATE["type"] = ["object", "null"]
 STRUCTURED_SCHEMAS["extraction"] = _object({
     "facts": {"type": "array", "items": _object({
         "content": _TEXT, "retrieval_key": _TEXT,
-        "type": {"type": "string", "enum": ["fact", "preference", "rule", "workflow", "event", "profile"]},
+        "type": {"type": "string", "enum": ["fact", "preference", "rule", "workflow", "event", "profile", "plan"]},
         "entities": {"type": "array", "items": _TEXT},
         "keywords": {"type": "array", "items": _TEXT},
         "time_expression": {"type": ["string", "null"]},
@@ -309,6 +320,9 @@ class FakeLLM:
             return json.dumps(self._fake_query(prompt))
         if "relevance scoring module" in prompt:
             return json.dumps({"scores": self._fake_rerank(prompt)})
+        if "sufficiency verifier" in prompt:
+            return json.dumps({"sufficient": True, "confidence": 0.9,
+                               "missing": "", "follow_up_queries": []})
         if "intelligent memory assistant" in prompt:
             return "fake answer"
         if 'label an answer to a question' in prompt:

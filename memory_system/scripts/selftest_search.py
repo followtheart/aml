@@ -70,7 +70,11 @@ class SearchTests(unittest.IsolatedAsyncioTestCase):
             messages=[schemas.Message(role='user', content='Original evidence about Alice work', timestamp=123)])
         self.st.save_messages(req)
         self.st.set_summary('u', 's', 'Alice work is based in Hangzhou')
+        # ULM §3.1: the rolling summary is extraction context, not evidence, by default.
         result = await self.run_search(self.req())
+        self.assertEqual(result.data, [])
+        with patch.object(config, 'SUMMARY_ROUTE', True):
+            result = await self.run_search(self.req())
         self.assertEqual(len(result.data), 1)
         self.assertEqual(result.data[0].memory_type, 'session_summary')
         self.assertEqual(result.data[0].sources[0]['timestamp'], 123)
@@ -83,15 +87,21 @@ class SearchTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(self.st.summary_search('u', 'Bob', 10)), 1)
         self.assertEqual(self.st.summary_search('another', 'Bob', 10), [])
 
-    async def test_top_100_and_batched_reranking(self):
+    async def test_top_100_with_small_r_rerank_head(self):
         for i in range(105):
             await self.memory(f'Alice work record {i}')
         result = await self.run_search(self.req(top_k=100))
         self.assertEqual(len(result.data), 100)
         trace = json.loads(self.path.read_text().splitlines()[-1])
-        self.assertGreater(len(trace['rerank']), 40)
-        self.assertGreaterEqual(max(x['batch'] for x in trace['rerank']), 3)
+        scored = [x for x in trace['rerank'] if x['reason'] in ('kept', 'rerank_rejected')]
+        unscored = [x for x in trace['rerank'] if x['reason'] == 'unscored_fused']
+        # §5.4: only the fused head is LLM-scored; the rest keeps fusion order below it.
+        self.assertEqual(len(scored), config.RERANK_MAX_CANDIDATES)
+        self.assertGreater(len(unscored), 0)
         self.assertEqual(len(trace['returned']), 100)
+        returned_ids = [x['id'] for x in trace['returned']]
+        self.assertEqual(returned_ids[:len(scored)], [x['id'] for x in scored])
+        self.assertEqual(trace['rounds'][0]['verdict']['sufficient'], True)
 
     async def test_rerank_rejection_and_topk_logged_separately(self):
         ids = [await self.memory(f'Alice work {i}') for i in range(3)]

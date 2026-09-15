@@ -18,6 +18,8 @@ class DebugLogTests(unittest.IsolatedAsyncioTestCase):
         self.path = Path(self.tmp.name) / 'logs' / 'memory.jsonl'
         self.setting = patch.object(config, 'MEMORY_DEBUG_LOG', str(self.path))
         self.setting.start()
+        self.episodes = patch.object(config, 'STORE_EPISODES', False)
+        self.episodes.start()
         self.st = store.Store(':memory:')
         self.req = schemas.AddRequest(request_id='debug-1', user_id='u', session_id='s',
             messages=[schemas.Message(role='user', content='Alice lives in Paris. 中文', timestamp=123)])
@@ -25,6 +27,7 @@ class DebugLogTests(unittest.IsolatedAsyncioTestCase):
     def tearDown(self):
         self.st.conn.close()
         self.setting.stop()
+        self.episodes.stop()
         self.tmp.cleanup()
 
     def records(self):

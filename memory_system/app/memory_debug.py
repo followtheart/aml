@@ -41,8 +41,13 @@ def capture(st, req):
             'SELECT * FROM triples WHERE amu_id=? ORDER BY id', (aid,))]
         memory['sources'] = st.sources_for_amu(aid)
         memories.append(memory)
+    scene_ids = sorted({m.get('scene_id') for m in memories if m.get('scene_id')})
+    scenes = []
+    for scene in st.get_scenes_by_ids(scene_ids):
+        scene.pop('centroid', None)
+        scenes.append(scene)
     return {
-        'event': 'memory.add.committed', 'schema_version': 1,
+        'event': 'memory.add.committed', 'schema_version': 2,
         'request_id': req.request_id, 'user_id': req.user_id, 'session_id': req.session_id,
         'fake': config.FAKE, 'configured_embedding_model': config.EMBED_MODEL,
         'configured_embedding_space': config.EMBEDDING_SPACE,
@@ -50,6 +55,7 @@ def capture(st, req):
             'SELECT * FROM source_messages WHERE request_id=? ORDER BY message_index',
             (req.request_id,))],
         'memories': memories,
+        'scenes': scenes,
         'session_summary': st.get_summary(req.user_id, req.session_id),
     }
 

@@ -99,9 +99,44 @@ GOVERNANCE_NEIGHBORS = 5
 RECALL_PER_ROUTE = 100
 RERANK_CANDIDATES = 40
 RERANK_SCORED = 30
+# ULM §5.4: score only a small head of the fused list; the rest keeps its
+# fusion order below the scored items instead of being penalised.
 RERANK_MAX_CANDIDATES = max(
-    100, int(os.environ.get("AML_RERANK_MAX_CANDIDATES", "200")))
+    10, int(os.environ.get("AML_RERANK_MAX_CANDIDATES", "40")))
 SEARCH_MIN_RELEVANCE = float(os.environ.get("AML_SEARCH_MIN_RELEVANCE", "0.3"))
+
+# ---- ULM lifecycle knobs (llm-memory-survey/memory-system-design.md) ----
+# §3.2 semantic boundary segmentation (embedding drop between adjacent windows)
+SEGMENT_MIN_MESSAGES = max(1, int(os.environ.get("AML_SEGMENT_MIN_MESSAGES", "2")))
+SEGMENT_SIM_DROP = float(os.environ.get("AML_SEGMENT_SIM_DROP", "0.35"))
+# §2.1 keep the raw chunk of every segment as an `episode` memory (Memory-Doc)
+STORE_EPISODES = os.environ.get("AML_STORE_EPISODES", "1") == "1"
+# §3.4 novelty gate: near-identical facts skip the governance LLM call
+NOVELTY_DUP_THRESHOLD = float(os.environ.get("AML_NOVELTY_DUP_THRESHOLD", "0.97"))
+SURPRISE_MOMENTUM = 0.7
+# §2.2/§4.1 MemScene clustering (cosine + keyword Jaccard)
+SCENE_JOIN_THRESHOLD = float(os.environ.get("AML_SCENE_JOIN_THRESHOLD", "0.55"))
+SCENE_TOP_M = max(1, int(os.environ.get("AML_SCENE_TOP_M", "5")))
+SCENE_CELLS_PER_SCENE = max(1, int(os.environ.get("AML_SCENE_CELLS_PER_SCENE", "20")))
+SCENE_SUMMARY_LLM = os.environ.get("AML_SCENE_SUMMARY_LLM", "0") == "1"
+# §4.4 heat = a*visits + b*interactions + c*recency + d*surprise
+HEAT_WEIGHTS = (1.0, 0.5, 2.0, 1.0)
+HEAT_RECENCY_HALFLIFE_DAYS = 14.0
+HEAT_PROMOTE_THRESHOLD = float(os.environ.get("AML_HEAT_PROMOTE_THRESHOLD", "5"))
+MAX_HOT_SCENES = max(1, int(os.environ.get("AML_MAX_HOT_SCENES", "500")))
+# §4.5 Ebbinghaus retention R=exp(-t/S); 0 disables cold-tiering
+FORGET_THRESHOLD = float(os.environ.get("AML_FORGET_THRESHOLD", "0"))
+FORGET_STRENGTH_DAYS = 30.0
+FORGET_RECALL_BONUS_DAYS = 15.0
+# §4.2 profile: traits supported by >= N sessions count as stable
+PROFILE_STABLE_SESSIONS = max(1, int(os.environ.get("AML_PROFILE_STABLE_SESSIONS", "2")))
+# §5.5 sufficiency verifier + iterative retrieval + abstention
+SEARCH_MAX_ROUNDS = max(1, int(os.environ.get("AML_SEARCH_MAX_ROUNDS", "2")))
+VERIFY_EVIDENCE_ITEMS = 15
+ABSTAIN_CONFIDENCE = float(os.environ.get("AML_ABSTAIN_CONFIDENCE", "0.15"))
+# §3.1 the rolling session summary is extraction context only (ACE collapse);
+# the legacy summary recall route stays available for ablation.
+SUMMARY_ROUTE = os.environ.get("AML_SUMMARY_ROUTE", "0") == "1"
 
 # Full stored content for local debugging; empty path disables the JSONL log.
 MEMORY_DEBUG_LOG = os.environ.get(

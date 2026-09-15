@@ -1,4 +1,4 @@
-# AML 参赛记忆系统设计方案（v0.2.1）
+# AML 参赛记忆系统设计方案（v0.3）
 
 > 目标平台：Agent Memory Leaderboard（agentmemoryleaderboard.ai）
 > 目标评测：Textual Track（学术方法榜），兼顾 Coding Track 扩展
@@ -8,6 +8,13 @@
 > ③ DELETE 改为软废止（Zep 双时间轴）；④ 提示词资产独立成 `prompts/` 模板文件。
 > v0.2.1：2026-09-01 LLM 抽象改为 LiteLLM（`AML_LLM_MODEL` 可配置，默认 gpt-4o-mini）；
 > M1–M3 已实现并通过验证，代码在 `memory_system/`（契约自测 11/11，LoCoMo 管线冒烟通过）。
+> v0.3：2026-09-15 按 `llm-memory-survey/memory-system-design.md`（ULM）§11 落地七项增量：
+> ① 语义边界切分（`segment.py`）；② MemCell = episode + facts，MemScene 巩固 + 场景→情景两阶段召回（`scenes.py`）；
+> ③ `plan` 类型前瞻信号 + 时效状态/过滤；④ MemoryOS 热度晋升/驱逐 + 画像 stable/transient + rules 常驻；
+> ⑤ 充分性验证器（`prompts/08`）驱动 ≤2 轮迭代召回与低置信弃权（补齐 REVIEW D4）；
+> ⑥ 惊奇度/新颖度写入门控（重复与全新事实不调 LLM）；⑦ 艾宾浩斯冷热分层（默认关闭，不删除）。
+> 同时修复 REVIEW P0-1（Matryoshka 短向量）、P0-3（时间锚点取用户最新记忆）、P0-4（重排仅头部 40、未评分不惩罚）、
+> P1-5（UPDATE 不重抽取，元数据取并集）、D2（会话摘要默认不作检索证据）。细节见 `memory_system/STORAGE.md`。
 
 ---
 

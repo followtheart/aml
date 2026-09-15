@@ -19,7 +19,7 @@ Answer options (may be empty):
 
 Analyze and return ONLY a JSON object:
 {{
-  "intent": "fact|multi_hop|temporal|preference|rule|abstention_check",
+  "intent": "fact|multi_hop|temporal|preference|rule|profile|abstention_check",
   "include_history": false,
   "time_scope": {{
     "from": "ISO-8601 or null",
@@ -35,8 +35,13 @@ Analyze and return ONLY a JSON object:
 
 Rules:
 - Resolve all relative time expressions against the question reference time.
+- The reference time is the latest moment known in this user's memory when no
+  question date was supplied; never assume the service's wall-clock date.
 - For temporal questions ("when", "before/after", "most recent"), always
   fill time_scope.
+- Use intent=profile for questions about who the user is (traits, background,
+  habits) and intent=preference for likes/dislikes; intent=rule for explicit
+  instructions the user gave the assistant.
 - For multi-hop questions, decompose into atomic sub-questions that each
   retrieve one hop of evidence.
 - Never output an answer to the question itself.

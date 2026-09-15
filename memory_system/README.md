@@ -1,23 +1,28 @@
-# AML Memory System（M1–M3 实现）
+# AML Memory System（M1–M3 实现 + ULM 生命周期）
 
 AML（Agent Memory Leaderboard）参赛记忆系统的参考实现，对应
-`../agent-memory-system-design.md` v0.2.1 与 `../prompts/` 模板库。
+`../agent-memory-system-design.md` v0.3、通用设计 `../llm-memory-survey/memory-system-design.md`
+（ULM）与 `../prompts/` 模板库。
 
 ## 架构
 
 ```
 app/
-  config.py          环境变量配置（模型/密钥/路径/阈值）
+  config.py          环境变量配置（模型/密钥/路径/阈值/ULM 生命周期参数）
   schemas.py         Add/Search 契约的 pydantic 模型
   llm.py             LiteLLM 统一抽象 + 离线 FakeLLM（AML_FAKE=1）
-  embeddings.py      LiteLLM embedding + 哈希 Fake embedding
-  store.py           SQLite 存储（AMU + FTS5 + triples + 幂等账本）
+  embeddings.py      LiteLLM embedding（text-embedding-3 原生 Matryoshka 短向量）+ 哈希 Fake
+  store.py           SQLite 存储（AMU + scenes + FTS5 + triples + 幂等账本 + 热度/分层字段）
+  segment.py         语义边界切分（SeCom/EverMemOS，相邻消息嵌入相似度骤降）
+  scenes.py          MemScene 增量聚类、MemoryOS 热度/晋升/驱逐、艾宾浩斯冷热分层、画像稳定性
   graph.py           实体-AMU 二部图 + PPR（HippoRAG 式单步多跳）
-  add_pipeline.py    抽取→治理(ADD/UPDATE/SUPERSEDE/NOOP)→多索引→滚动摘要
-  search_pipeline.py 查询理解→六路召回→RRF→过滤重排→时间区间前缀→top_k
+  add_pipeline.py    切分→MemCell 抽取(episode+facts+triples)→新颖度门控→治理→多索引→场景巩固→滚动摘要
+  search_pipeline.py 查询理解(锚定用户最新记忆时间)→七路召回(含场景→情景)→RRF→小 R 重排
+                     →充分性验证/迭代召回/弃权→前瞻时效过滤→top_k
   main.py            FastAPI: /add /search /health（Bearer 鉴权）
 scripts/
   selftest_contract.py   契约自测 11 项（幂等/回显/隔离/422/health…）
+  selftest_ulm.py        ULM 生命周期自测（切分/场景/门控/热度/遗忘/验证器/前瞻）
   convert_locomo.py      locomo10.json → 评测格式（1542 QA）
   local_eval.py          本地代理评测 + 消融开关
 data/
@@ -25,6 +30,8 @@ data/
   locomo10.json          LoCoMo 原始数据（已下载）
   locomo_eval.json       转换后的评测数据
 ```
+
+存储与检索细节（包括 ULM 各环境变量）见 [STORAGE.md](STORAGE.md)。
 
 ## 快速开始
 

@@ -1,7 +1,9 @@
 """SQLite storage layer.
 
 Tables:
-  amu          -- atomic memory units (with embedding blob, validity interval)
+  amu          -- atomic memory units (with embedding blob, validity interval,
+                  MemScene id, recall strength / tier for ULM forgetting)
+  scenes       -- MemScene clusters (centroid, keywords, heat counters)
   triples      -- (subject, relation, object, amu_id) knowledge graph edges
   sessions     -- rolling session summaries
   requests     -- Add idempotency ledger
@@ -46,10 +48,37 @@ CREATE TABLE IF NOT EXISTS amu (
   sensitivity TEXT DEFAULT 'normal',
   embedding BLOB,
   embedding_space TEXT,
-  created_at TEXT NOT NULL
+  created_at TEXT NOT NULL,
+  scene_id TEXT,
+  cell_id TEXT,
+  recall_count INTEGER NOT NULL DEFAULT 0,
+  last_recalled TEXT,
+  strength REAL NOT NULL DEFAULT 1.0,
+  tier TEXT NOT NULL DEFAULT 'hot',
+  support_sessions TEXT NOT NULL DEFAULT '[]'
 );
 CREATE INDEX IF NOT EXISTS idx_amu_user ON amu(user_id);
 CREATE INDEX IF NOT EXISTS idx_amu_user_type ON amu(user_id, type);
+CREATE INDEX IF NOT EXISTS idx_amu_scene ON amu(scene_id);
+
+CREATE TABLE IF NOT EXISTS scenes (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL,
+  summary TEXT NOT NULL DEFAULT '',
+  keywords TEXT NOT NULL DEFAULT '[]',
+  centroid BLOB,
+  embedding_space TEXT,
+  cell_count INTEGER NOT NULL DEFAULT 0,
+  visit_count INTEGER NOT NULL DEFAULT 0,
+  interaction_count INTEGER NOT NULL DEFAULT 0,
+  surprise REAL NOT NULL DEFAULT 0,
+  last_access TEXT,
+  tier TEXT NOT NULL DEFAULT 'hot',
+  promoted_at TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_scenes_user ON scenes(user_id);
 
 CREATE TABLE IF NOT EXISTS triples (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -132,6 +161,14 @@ class Store:
             for column in ("temporal", "state", "evidence"):
                 if column not in columns:
                     self.conn.execute(f"ALTER TABLE amu ADD COLUMN {column} TEXT")
+            for column, decl in (("scene_id", "TEXT"), ("cell_id", "TEXT"),
+                                 ("recall_count", "INTEGER NOT NULL DEFAULT 0"),
+                                 ("last_recalled", "TEXT"),
+                                 ("strength", "REAL NOT NULL DEFAULT 1.0"),
+                                 ("tier", "TEXT NOT NULL DEFAULT 'hot'"),
+                                 ("support_sessions", "TEXT NOT NULL DEFAULT '[]'")):
+                if column not in columns:
+                    self.conn.execute(f"ALTER TABLE amu ADD COLUMN {column} {decl}")
             self.conn.executescript(FTS_SCHEMA)
             self.conn.executescript(SOURCE_SCHEMA)
             self.conn.commit()
@@ -164,6 +201,7 @@ class Store:
                 ([row[name] for name in columns] for row in rows))
 
         copy("amu", "user_id=?", (user_id,))
+        copy("scenes", "user_id=?", (user_id,))
         copy("triples", "user_id=?", (user_id,))
         copy("sessions", "user_id=?", (user_id,))
         copy("requests", "user_id=?", (user_id,))
@@ -295,7 +333,8 @@ class Store:
                    valid_from=None, valid_to=None, supersedes=None,
                    confidence=0.9, sensitivity="normal",
                    embedding: Optional[np.ndarray] = None,
-                   temporal=None, state=None, evidence=None) -> str:
+                   temporal=None, state=None, evidence=None,
+                   scene_id=None, cell_id=None) -> str:
         integrity.validate_interval(valid_from, valid_to)
         integrity.validate_interval((temporal or {}).get("start"), (temporal or {}).get("end"))
         amu_id = f"amu_{uuid.uuid4().hex[:16]}"
@@ -305,14 +344,16 @@ class Store:
             self._write(
                 """INSERT INTO amu (id,user_id,session_id,content,retrieval_key,
                    type,entities,keywords,event_time,valid_from,valid_to,
-                   supersedes,confidence,sensitivity,embedding,embedding_space,created_at)
-                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                   supersedes,confidence,sensitivity,embedding,embedding_space,created_at,
+                   scene_id,cell_id,support_sessions)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                 (amu_id, user_id, session_id, content, retrieval_key, type,
                  json.dumps(entities or [], ensure_ascii=False),
                  json.dumps(keywords or [], ensure_ascii=False),
                  event_time, valid_from, valid_to, supersedes, confidence,
                  sensitivity, blob,
-                 config.EMBEDDING_SPACE if blob is not None else None, _now()))
+                 config.EMBEDDING_SPACE if blob is not None else None, _now(),
+                 scene_id, cell_id, json.dumps([session_id])))
             self._write(
                 "INSERT INTO amu_fts (amu_id,user_id,content,retrieval_key)"
                 " VALUES (?,?,?,?)",
@@ -381,17 +422,26 @@ class Store:
         return [self._row_to_dict(r) for r in rows]
 
     def nearest_many_by_embedding(self, user_id: str, vecs: np.ndarray,
-                                  k: int, include_history=False) -> List[List[Dict]]:
+                                  k: int, include_history=False,
+                                  scene_ids: Optional[List[str]] = None,
+                                  include_cold=False) -> List[List[Dict]]:
         """Load a user's matrix once and rank any number of query vectors."""
+        sql = ("SELECT id,user_id,session_id,content,retrieval_key,type,"
+               "event_time,valid_from,valid_to,created_at,scene_id,cell_id,tier,"
+               "temporal,state,embedding FROM amu"
+               " WHERE user_id=? AND embedding NOT NULL AND embedding_space=?"
+               + ("" if include_history else " AND valid_to IS NULL")
+               + ("" if include_cold else " AND tier!='cold'"))
+        params = [user_id, config.EMBEDDING_SPACE]
+        if scene_ids is not None:
+            if not scene_ids:
+                return [[] for _ in np.atleast_2d(vecs)]
+            sql += f" AND scene_id IN ({','.join('?' * len(scene_ids))})"
+            params.extend(scene_ids)
         with _LOCK:
-            rows = self.conn.execute(
-                "SELECT id,user_id,session_id,content,retrieval_key,type,"
-                "event_time,valid_from,valid_to,created_at,embedding FROM amu"
-                " WHERE user_id=? AND embedding NOT NULL AND embedding_space=?"
-                + ("" if include_history else " AND valid_to IS NULL"),
-                (user_id, config.EMBEDDING_SPACE)).fetchall()
+            rows = self.conn.execute(sql, params).fetchall()
         if not rows:
-            return [[] for _ in vecs]
+            return [[] for _ in np.atleast_2d(vecs)]
         mat = np.stack([np.frombuffer(r["embedding"], dtype=np.float32)
                         for r in rows])
         queries = np.asarray(vecs, dtype=np.float32)
@@ -406,6 +456,8 @@ class Store:
             for i in np.argsort(-query_scores)[:k]:
                 d = {c: rows[int(i)][c] for c in rows[int(i)].keys()
                      if c != "embedding"}
+                for key in ("temporal", "state"):
+                    d[key] = json.loads(d.get(key) or "null")
                 d["_score"] = float(query_scores[int(i)])
                 out.append(d)
             results.append(out)
@@ -428,7 +480,7 @@ class Store:
             history = "" if include_history else " AND valid_to IS NULL"
             with _LOCK:
                 rows = self.conn.execute(
-                    f"SELECT * FROM amu WHERE user_id=?{history} AND ({clauses}) LIMIT ?",
+                    f"SELECT * FROM amu WHERE user_id=?{history} AND tier!='cold' AND ({clauses}) LIMIT ?",
                     (user_id, *params, k)).fetchall()
             out = [self._row_to_dict(r) for r in rows]
             for item in out:
@@ -454,7 +506,7 @@ class Store:
         ph = ",".join("?" * len(ids))
         with _LOCK:
             amu_rows = self.conn.execute(
-                f"SELECT * FROM amu WHERE id IN ({ph})"
+                f"SELECT * FROM amu WHERE id IN ({ph}) AND tier!='cold'"
                 + ("" if include_history else " AND valid_to IS NULL"),
                 ids).fetchall()
         by_id = {r["id"]: self._row_to_dict(r) for r in amu_rows}
@@ -600,10 +652,164 @@ class Store:
         d = dict(r)
         d["entities"] = json.loads(d.get("entities") or "[]")
         d["keywords"] = json.loads(d.get("keywords") or "[]")
+        d["support_sessions"] = json.loads(d.get("support_sessions") or "[]")
         for key in ("temporal", "state", "evidence"):
             d[key] = json.loads(d.get(key) or ("[]" if key == "evidence" else "null"))
         if d.get("embedding") is not None:
             d["embedding"] = np.frombuffer(d["embedding"], dtype=np.float32)
+        return d
+
+    # ---------------- ULM lifecycle: time anchor, scenes, heat, forgetting ----
+    def latest_time(self, user_id: str) -> Optional[str]:
+        """Most recent moment known for a user; anchors relative query times (§5.1)."""
+        with _LOCK:
+            ts = self.conn.execute(
+                "SELECT MAX(timestamp) FROM source_messages WHERE user_id=?",
+                (user_id,)).fetchone()[0]
+            iso = self.conn.execute(
+                "SELECT MAX(COALESCE(event_time, valid_from)) FROM amu WHERE user_id=?",
+                (user_id,)).fetchone()[0]
+        candidates = []
+        if ts:
+            candidates.append(datetime.fromtimestamp(ts / 1000, tz=timezone.utc))
+        if iso:
+            try:
+                candidates.append(integrity.instant(iso))
+            except ValueError:
+                pass
+        return max(candidates).isoformat() if candidates else None
+
+    def list_scenes(self, user_id: str, include_cold=False) -> List[Dict]:
+        with _LOCK:
+            rows = self.conn.execute(
+                "SELECT * FROM scenes WHERE user_id=?"
+                + ("" if include_cold else " AND tier!='cold'"), (user_id,)).fetchall()
+        return [self._scene_to_dict(r) for r in rows]
+
+    def get_scenes_by_ids(self, ids: List[str]) -> List[Dict]:
+        if not ids:
+            return []
+        with _LOCK:
+            rows = self.conn.execute(
+                f"SELECT * FROM scenes WHERE id IN ({','.join('?' * len(ids))})", ids).fetchall()
+        return [self._scene_to_dict(r) for r in rows]
+
+    def insert_scene(self, user_id, centroid: np.ndarray, keywords, summary="",
+                     surprise=0.0) -> str:
+        scene_id = f"scene_{uuid.uuid4().hex[:12]}"
+        now = _now()
+        with _LOCK:
+            self._write(
+                "INSERT INTO scenes (id,user_id,summary,keywords,centroid,embedding_space,"
+                "cell_count,visit_count,interaction_count,surprise,last_access,tier,"
+                "created_at,updated_at) VALUES (?,?,?,?,?,?,0,0,0,?,?,'hot',?,?)",
+                (scene_id, user_id, summary, json.dumps(sorted(keywords), ensure_ascii=False),
+                 centroid.astype(np.float32).tobytes(), config.EMBEDDING_SPACE,
+                 surprise, now, now, now))
+            self._touch_user(user_id)
+            self.conn.commit()
+        return scene_id
+
+    def update_scene(self, scene_id, *, centroid=None, keywords=None, summary=None,
+                     surprise=None, cells_added=0):
+        with _LOCK:
+            row = self.conn.execute("SELECT user_id FROM scenes WHERE id=?", (scene_id,)).fetchone()
+            if row is None:
+                raise ValueError("Unknown scene")
+            if centroid is not None:
+                self._write("UPDATE scenes SET centroid=?,embedding_space=? WHERE id=?",
+                            (centroid.astype(np.float32).tobytes(), config.EMBEDDING_SPACE, scene_id))
+            if keywords is not None:
+                self._write("UPDATE scenes SET keywords=? WHERE id=?",
+                            (json.dumps(sorted(keywords), ensure_ascii=False), scene_id))
+            if summary is not None:
+                self._write("UPDATE scenes SET summary=? WHERE id=?", (summary, scene_id))
+            if surprise is not None:
+                self._write("UPDATE scenes SET surprise=? WHERE id=?", (surprise, scene_id))
+            if cells_added:
+                self._write("UPDATE scenes SET cell_count=cell_count+?,"
+                            "interaction_count=interaction_count+?,updated_at=? WHERE id=?",
+                            (cells_added, cells_added, _now(), scene_id))
+            self._touch_user(row[0])
+            self.conn.commit()
+
+    def assign_scene(self, amu_ids: List[str], scene_id: str, cell_id: str):
+        with _LOCK:
+            for amu_id in amu_ids:
+                self._write("UPDATE amu SET scene_id=?,cell_id=? WHERE id=?",
+                            (scene_id, cell_id, amu_id))
+            self.conn.commit()
+
+    def scene_cell_ids(self, scene_id: str) -> List[str]:
+        with _LOCK:
+            rows = self.conn.execute(
+                "SELECT id FROM amu WHERE scene_id=? AND valid_to IS NULL", (scene_id,)).fetchall()
+        return [r[0] for r in rows]
+
+    def reset_scene_interactions(self, scene_id: str, tier: Optional[str] = None):
+        with _LOCK:
+            self._write("UPDATE scenes SET interaction_count=0,promoted_at=? WHERE id=?",
+                        (_now(), scene_id))
+            if tier:
+                self._write("UPDATE scenes SET tier=? WHERE id=?", (tier, scene_id))
+                self._write("UPDATE amu SET tier=? WHERE scene_id=? AND type!='rule'",
+                            (tier, scene_id))
+            self.conn.commit()
+
+    def set_tier(self, amu_ids: List[str], tier: str):
+        if not amu_ids:
+            return
+        with _LOCK:
+            for amu_id in amu_ids:
+                self._write("UPDATE amu SET tier=? WHERE id=?", (tier, amu_id))
+            self.conn.commit()
+
+    def add_support_session(self, amu_id: str, session_id: str):
+        with _LOCK:
+            row = self.conn.execute("SELECT support_sessions FROM amu WHERE id=?",
+                                    (amu_id,)).fetchone()
+            if row is None:
+                return
+            sessions = json.loads(row[0] or "[]")
+            if session_id not in sessions:
+                sessions.append(session_id)
+                self._write("UPDATE amu SET support_sessions=? WHERE id=?",
+                            (json.dumps(sessions), amu_id))
+                self.conn.commit()
+
+    def record_recall(self, amu_ids: List[str], scene_ids: List[str]):
+        """Search-side usage counters. Relative updates only and no revision bump,
+        so a concurrent staged Add of the same user is never invalidated."""
+        if not amu_ids and not scene_ids:
+            return
+        now = _now()
+        with _LOCK:
+            for amu_id in amu_ids:
+                self.conn.execute(
+                    "UPDATE amu SET recall_count=recall_count+1,last_recalled=?,"
+                    "strength=strength+?,tier=CASE WHEN tier='cold' THEN 'hot' ELSE tier END"
+                    " WHERE id=?", (now, config.FORGET_RECALL_BONUS_DAYS, amu_id))
+            for scene_id in scene_ids:
+                self.conn.execute(
+                    "UPDATE scenes SET visit_count=visit_count+1,last_access=? WHERE id=?",
+                    (now, scene_id))
+            self.conn.commit()
+
+    def forgettable(self, user_id: str) -> List[Dict]:
+        """Hot, non-rule memories with the fields the retention formula needs."""
+        with _LOCK:
+            rows = self.conn.execute(
+                "SELECT id,type,created_at,last_recalled,strength FROM amu "
+                "WHERE user_id=? AND tier='hot' AND type NOT IN ('rule','profile')",
+                (user_id,)).fetchall()
+        return [dict(r) for r in rows]
+
+    @staticmethod
+    def _scene_to_dict(r: sqlite3.Row) -> Dict:
+        d = dict(r)
+        d["keywords"] = json.loads(d.get("keywords") or "[]")
+        if d.get("centroid") is not None:
+            d["centroid"] = np.frombuffer(d["centroid"], dtype=np.float32)
         return d
 
 

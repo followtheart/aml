@@ -4,6 +4,7 @@
 >
 > - **笔记目录**：[`notes/`](notes/)
 > - **数据来源**：对话原始提取文本 `../deepseek_share_full.txt`
+> - **基于本综述的系统设计**：[memory-system-design.md](memory-system-design.md)（ULM：统一生命周期记忆系统）
 
 ## 笔记索引
 

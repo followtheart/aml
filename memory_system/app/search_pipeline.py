@@ -112,6 +112,7 @@ async def _recall(st: store.Store, req: schemas.SearchRequest,
         plan.get("_queries") or
         ([req.query] + (plan.get("sub_queries") or []) +
          (plan.get("expanded_queries") or []))))[:6]
+    plan["_used_queries"] = queries
     vecs = await embed(queries, stage="search.embed_queries")
     routes = []
     history = _historical(req, plan)
@@ -121,7 +122,8 @@ async def _recall(st: store.Store, req: schemas.SearchRequest,
     def route(name, items, query=None):
         routes.append(items)
         plan.setdefault("_routes", []).append({
-            "channel": name, "query": query, "candidates": _snapshot(items)})
+            "channel": name, "round": plan.get("_round", 1), "query": query,
+            "candidates": _snapshot(items)})
 
     dense_routes = st.nearest_many_by_embedding(
         req.user_id, vecs, limit, include_history=history)
@@ -177,6 +179,7 @@ async def _filter_rerank(req: schemas.SearchRequest, plan: Dict,
     candidates = [c for c in head if c["id"] not in scored]
     plan["_pre_rerank_excluded"] = _snapshot(tail)
     decisions = plan.setdefault("_rerank", [])
+    round_index = plan.get("_round", 1)
     batch_size = max(1, config.RERANK_CANDIDATES)
 
     async def score_batch(start):
@@ -216,11 +219,13 @@ async def _filter_rerank(req: schemas.SearchRequest, plan: Dict,
         # back as one coherent ranking so high-fusion evidence is not buried.
         for rank, candidate in enumerate(fused):
             candidate["_final"] = 1.0 / (rank + 1)
-            decisions.append({"id": candidate["id"], "content": candidate["content"],
+            decisions.append({"id": candidate["id"], "round": round_index,
+                              "content": candidate["content"],
                               "keep": True, "score": candidate["_final"],
                               "reason": "global_rrf_fallback", "error": error})
         return list(fused)
 
+    newly = {c["id"] for c in candidates}
     for start, cands, by_id, _ in batches:
         for c in cands:
             scored[c["id"]] = (float(by_id[c["id"]]["relevance"]),
@@ -230,16 +235,19 @@ async def _filter_rerank(req: schemas.SearchRequest, plan: Dict,
         relevance, keep_flag = scored[c["id"]]
         c["_final"] = relevance
         keep = keep_flag and relevance >= config.SEARCH_MIN_RELEVANCE
-        decisions.append({"id": c["id"], "batch": 1, "content": c["content"],
-                          "keep": keep, "score": relevance,
-                          "reason": "kept" if keep else "rerank_rejected", "error": None})
+        # Cached scores from earlier rounds are not logged again.
+        if c["id"] in newly:
+            decisions.append({"id": c["id"], "round": round_index, "batch": 1,
+                              "content": c["content"], "keep": keep, "score": relevance,
+                              "reason": "kept" if keep else "rerank_rejected", "error": None})
         if keep:
             kept.append(c)
     kept.sort(key=lambda x: -x["_final"])
     for c in tail:
         c.pop("_final", None)
-        decisions.append({"id": c["id"], "content": c["content"], "keep": True,
-                          "score": c.get("_fused"), "reason": "unscored_fused", "error": None})
+        decisions.append({"id": c["id"], "round": round_index, "content": c["content"],
+                          "keep": True, "score": c.get("_fused"),
+                          "reason": "unscored_fused", "error": None})
         unscored.append(c)
     return kept + unscored
 
@@ -373,17 +381,23 @@ async def run_search(st: store.Store,
         plan = await _understand(req, anchor)
         routes_all, scored, rounds = [], {}, []
         ranked, verdict = [], {"sufficient": True, "confidence": 1.0, "_fallback": True}
+        tried = set()
         for round_index in range(1, config.SEARCH_MAX_ROUNDS + 1):
+            plan["_round"] = round_index
             routes_all.extend(await _recall(st, req, plan))
+            tried.update(q.strip().casefold() for q in plan.get("_used_queries", []))
             fused = _rrf(routes_all)
             ranked = await _filter_rerank(req, plan, fused, scored)
             verdict = await _verify(req, plan, ranked)
             rounds.append({"round": round_index, "queries": plan.get("_queries"),
                            "fused": len(fused), "ranked": len(ranked),
                            "verdict": {k: v for k, v in verdict.items() if not k.startswith("_")}})
-            if verdict["sufficient"] or not verdict.get("follow_up_queries"):
+            # Another round only pays off when it brings queries not yet tried.
+            fresh = [q for q in verdict.get("follow_up_queries") or []
+                     if q.strip().casefold() not in tried]
+            if verdict["sufficient"] or not fresh:
                 break
-            plan["_queries"] = verdict["follow_up_queries"]
+            plan["_queries"] = fresh
         trace["fused"] = _snapshot(_rrf(routes_all))
         trace["rounds"] = rounds
         ranked = _foresight_filter(ranked, plan)

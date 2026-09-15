@@ -210,8 +210,9 @@ async def _extract(st: store.Store, req: schemas.AddRequest) -> Dict:
                 rejected_sources.update(indices)
             facts.extend(grounded)
             # §2.1 MemCell keeps the raw chunk (E) next to its atomic facts (F);
-            # without episodes only rejected sources fall back to a chunk.
-            if config.STORE_EPISODES:
+            # a single fully-extracted message would only duplicate its fact.
+            # Without episodes only rejected sources fall back to a chunk.
+            if config.STORE_EPISODES and (len(indices) > 1 or not grounded or rejected_sources):
                 facts.append(_episode(req, indices, seg_index))
             elif rejected_sources:
                 facts.append(_episode(req, sorted(rejected_sources), seg_index))

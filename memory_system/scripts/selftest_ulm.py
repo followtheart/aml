@@ -87,7 +87,7 @@ class LifecycleTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_novelty_gate_skips_governance_llm_for_duplicates(self):
         await add.run_add(self.st, request('r1', 'Alice lives in Paris.'))
-        before = len(self.st.get_amus('u'))
+        before = len([a for a in self.st.get_amus('u') if a['type'] != 'episode'])
         original = llm.complete_json
         governance_calls = 0
         async def counting(prompt, *args, **kwargs):
@@ -99,7 +99,7 @@ class LifecycleTests(unittest.IsolatedAsyncioTestCase):
             await add.run_add(self.st, request('r2', 'Alice lives in Paris.', session='s2'))
         self.assertEqual(governance_calls, 0)
         facts = [a for a in self.st.get_amus('u') if a['type'] != 'episode']
-        self.assertEqual(len(facts), before - 1)
+        self.assertEqual(len(facts), before)
         self.assertEqual(sorted(facts[0]['support_sessions']), ['s', 's2'])
         self.assertEqual(scenes.profile_stability(dict(facts[0], type='preference')), 'stable')
 
@@ -183,6 +183,21 @@ class LifecycleTests(unittest.IsolatedAsyncioTestCase):
         result = await self.run_search(schemas.SearchRequest(user_id='u', query='Alice work'))
         self.assertEqual(result.data[0].id, aid)
         self.assertEqual(len(self.trace()['rounds']), 1)
+
+    async def test_no_second_round_when_follow_up_repeats_tried_queries(self):
+        req = schemas.SearchRequest(user_id='u', query='quantum chromodynamics')
+        await self.run_search(req, plan={'intent': 'fact', 'entities': [],
+                                         'sub_queries': ['quantum chromodynamics']})
+        trace = self.trace()
+        self.assertEqual(len(trace['rounds']), 1)
+        self.assertEqual({r['round'] for r in trace['routes']}, {1})
+        self.assertTrue(trace['abstained'])
+
+    async def test_single_message_segment_does_not_duplicate_fact_as_episode(self):
+        await add.run_add(self.st, request('r1', 'Alice plays tennis.'))
+        types = [a['type'] for a in self.st.get_amus('u')]
+        self.assertNotIn('episode', types)
+        self.assertEqual(len(types), 1)
 
     async def test_foresight_status_and_scope_filter(self):
         vec = (await embed(['Alice plans beach trip']))[0]

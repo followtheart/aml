@@ -26,3 +26,5 @@ Thumbs.db
 
 # Full-content local memory debug logs
 memory_system/logs/
+# Local eval runs (DBs + per-question JSONL)
+memory_system/runs/

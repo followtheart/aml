@@ -101,6 +101,22 @@ check("bad request -> 422", r.status_code == 422)
 r = client.get("/health")
 check("health 200 no auth", r.status_code == 200)
 
+# 10. explicit task feedback creates procedural memory
+r = client.post("/feedback", headers=H, json={
+    "user_id": add_body["user_id"], "session_id": add_body["session_id"],
+    "task": "Summarize the conversation", "outcome": "success",
+    "trace": "Retrieved memories and produced a supported summary.",
+    "environment_verified": False})
+check("feedback creates experience memory",
+    r.status_code == 200 and len(r.json().get("memory_ids", [])) == 1)
+
+# 11. authenticated hard purge removes all user content
+r = client.delete(f"/memory/{add_body['user_id']}", headers=H)
+check("purge returns content-free receipt",
+    r.status_code == 200 and r.json().get("receipt_id", "").startswith("purge_"))
+r = client.post("/search", json=sbody, headers=H)
+check("purged user has no memories", r.status_code == 200 and r.json()["data"] == [])
+
 failed = [n for n, ok in results if not ok]
 print(f"\n{len(results) - len(failed)}/{len(results)} passed")
 sys.exit(1 if failed else 0)

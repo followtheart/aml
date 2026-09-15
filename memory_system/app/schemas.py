@@ -29,6 +29,7 @@ class SearchRequest(BaseModel):
     user_id: str = Field(min_length=1)
     top_k: int = Field(default=100, ge=1, le=100)
     include_history: Optional[bool] = None
+    include_sensitive: bool = False
     # ISO-8601 question/evaluation time used to resolve relative expressions.
     reference_time: Optional[str] = None
 
@@ -46,3 +47,26 @@ class SearchItem(BaseModel):
 
 class SearchResponse(BaseModel):
     data: List[SearchItem]
+
+
+class PurgeResponse(BaseModel):
+    success: bool = True
+    receipt_id: str
+    user_id: str
+    deleted_at: str
+    row_counts: dict
+
+
+class FeedbackRequest(BaseModel):
+    user_id: str = Field(min_length=1)
+    session_id: str = Field(min_length=1)
+    task: str = Field(min_length=1)
+    outcome: str = Field(pattern="^(success|failure)$")
+    trace: str = Field(min_length=1)
+    task_signature: Optional[str] = None
+    environment_verified: bool = False
+
+
+class FeedbackResponse(BaseModel):
+    success: bool = True
+    memory_ids: List[str] = Field(default_factory=list)

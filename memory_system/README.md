@@ -1,7 +1,7 @@
 # AML Memory System（M1–M3 实现 + ULM 生命周期）
 
 AML（Agent Memory Leaderboard）参赛记忆系统的参考实现，对应
-`../agent-memory-system-design.md` v0.3、通用设计 `../llm-memory-survey/memory-system-design.md`
+`../agent-memory-system-design.md` v0.4、通用设计 `../llm-memory-survey/memory-system-design.md`
 （ULM）与 `../prompts/` 模板库。
 
 ## 架构
@@ -15,11 +15,12 @@ app/
   store.py           SQLite 存储（AMU + scenes + FTS5 + triples + 幂等账本 + 热度/分层字段）
   segment.py         语义边界切分（SeCom/EverMemOS，相邻消息嵌入相似度骤降）
   scenes.py          MemScene 增量聚类、MemoryOS 热度/晋升/驱逐、艾宾浩斯冷热分层、画像稳定性
+  experience.py      显式任务反馈→策略/工作流/技能/手册（成功与失败经验）
   graph.py           实体-AMU 二部图 + PPR（HippoRAG 式单步多跳）
   add_pipeline.py    切分→MemCell 抽取(episode+facts+triples)→新颖度门控→治理→多索引→场景巩固→滚动摘要
   search_pipeline.py 查询理解(锚定用户最新记忆时间)→七路召回(含场景→情景)→RRF→小 R 重排
                      →充分性验证/迭代召回/弃权→前瞻时效过滤→top_k
-  main.py            FastAPI: /add /search /health（Bearer 鉴权）
+  main.py            FastAPI: /add /search /feedback /memory/{user_id} /health
 scripts/
   selftest_contract.py   契约自测 11 项（幂等/回显/隔离/422/health…）
   selftest_ulm.py        ULM 生命周期自测（切分/场景/门控/热度/遗忘/验证器/前瞻）
@@ -45,8 +46,9 @@ episode；引用本身无效、无法定位时保留整批原文。语义批次�
 `AML_ANSWER_CONTEXT_MAX_CHARS`、`AML_ANSWER_CONTEXT_ITEM_MAX_CHARS` 配置。
 预算覆盖所有记忆类型、证据正文及分隔符，按检索顺序保留，截断处标注
 `[truncated]`；问题、选项和任务指令不被截断。这是字符预算而非精确 token
-预算；较长任务可按需调大，以免丢失证据。搜索结果的 `content` 仅拼接有正文
-的证据、时间戳和角色，来源 ID 等元数据保留在 `sources` 字段中。
+预算；较长任务可按需调大，以免丢失证据。Memory-Only 只返回原子记忆和
+结构化来源引用；narrative/document 意图切换到 Memory-Doc，优先 episode 并
+在预算内拼接来源正文。来源 ID 等元数据始终保留在 `sources` 字段中。
 `aml.context` 日志记录输入和实际上下文字符数，修改配置后需重启进程。
 
 遇到服务端限流（HTTP 429 / `RateLimitError`）时，所有模型调用默认额外重试
@@ -122,7 +124,12 @@ python scripts/local_eval.py --data data/locomo_eval.json --convs 1 --limit 100 
     # --no-keyexp      去掉查询理解扩展
 ```
 
-## 验证状态（2026-09-01）
+`POST /feedback` 接受显式任务成败与轨迹，蒸馏最多 3 条程序性记忆；普通
+对话不会推断任务结果。`DELETE /memory/{user_id}` 执行合规硬删除并返回不含
+正文的 receipt。敏感记忆默认不召回，只有服务端开关与请求 opt-in 同时开启
+才可访问。完整正文调试日志默认关闭。
+
+## 验证状态（2026-09-15）
 
 - 契约自测 **11/11 通过**（含幂等重放、ID 逐字节回显、user_id 隔离、
   422、分块会话、无鉴权 health）。

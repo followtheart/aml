@@ -1,4 +1,4 @@
-# AML 参赛记忆系统设计方案（v0.3）
+# AML 参赛记忆系统设计方案（v0.4）
 
 > 目标平台：Agent Memory Leaderboard（agentmemoryleaderboard.ai）
 > 目标评测：Textual Track（学术方法榜），兼顾 Coding Track 扩展
@@ -15,6 +15,8 @@
 > ⑥ 惊奇度/新颖度写入门控（重复与全新事实不调 LLM）；⑦ 艾宾浩斯冷热分层（默认关闭，不删除）。
 > 同时修复 REVIEW P0-1（Matryoshka 短向量）、P0-3（时间锚点取用户最新记忆）、P0-4（重排仅头部 40、未评分不惩罚）、
 > P1-5（UPDATE 不重抽取，元数据取并集）、D2（会话摘要默认不作检索证据）。细节见 `memory_system/STORAGE.md`。
+> v0.4：补齐敏感记忆双重授权、点时态版本折叠、画像状态/TTL、Memory-Only/Memory-Doc、
+> 冷 Scene 回温、显式任务反馈经验路和合规 purge；RRF 按通道计票，热度改为饱和衰减公式。
 
 ---
 
@@ -37,7 +39,8 @@
 
 - **Add/Search 内部 LLM 必须满足平台模型要求**（第一期 Full 前置清单第 3 条为 gpt-4o-mini；平台复现，分数差异过大作废）。实现上**统一走 LiteLLM 抽象**（`AML_LLM_MODEL` 环境变量，默认 `gpt-4o-mini`，可切换任意 litellm 支持的模型），温度 0；第二期开放后先复核该条款再定默认值。Mem0 论文（ECAI 2025）即为全链路 gpt-4o-mini 的合规范本。
 - 平台分块：每个来源会话默认一次 Add；**超过 20 条消息或 2000 词按消息/句子边界分段**。
-- 并发：Add 16–64，Search 16–256 → **写入链路幂等 + 可水平扩展；LLM 调用全部前置 Add 侧**，Search 侧仅 2 次 LLM 调用（查询理解 + 轻量重排）。
+- 并发目标：Add 16–64，Search 16–256。当前 SQLite 参考实现支持单进程并发准备、短事务发布和 revision 冲突内部重试，但不宣称水平扩展；生产需切换 Postgres/pgvector 与数据库级 request claim。
+- Search 首轮最多执行查询理解、一次小 R 重排和一次充分性验证；追加轮最多再执行一次重排和验证。调用量由轮数和候选硬上限约束，不再假设固定两次。
 - 错误处理：Add 遇 408/409/425/429/5xx 平台有限重试 → Add 以 request_id 幂等去重；400/422 不重试 → 响应格式必须一次正确。
 - 托管接口公网可达、稳定 ≥30 天；评测数据 30 天内删除、禁止训练/外泄。
 - **规则复核待办**：第二期预计 2026-09-20 开放；开放后第一件事重新核对评测页 Full 前置清单（含 gpt-4o-mini 条款）是否有变化。本方案所有模型相关设计均为配置项，规则变动时改动成本极低。
@@ -104,7 +107,7 @@ v0.2 修订（来源见 `papers/notes/README.md` 对照表）：
 - **软废止版本链**：知识更新不删除旧记忆，`valid_to` 关闭 + `supersedes` 链接（修正 Mem0 硬 DELETE 的缺陷）。
 - **retrieval_key 字段**（新增）：LongMemEval 的 fact-augmented key expansion——检索键与存储值解耦，问句形式改写提升问句-事实匹配率。
 - **keywords/entities 联合编码**（新增）：A-MEM 多字段联合 embedding。
-- **sensitivity 字段**（新增）：MIRIX Knowledge Vault 思想，敏感信息标记，Search 侧可加过滤策略（安全与隐私维度）。
+- **sensitivity 字段**（新增）：敏感记忆默认从向量、FTS、图、时序、Scene 和画像路全部排除；只有服务策略与请求双重 opt-in 才可召回。
 - **episode 类型保留原始切片**：Zep episode/semantic 双层 + structural-memory 混合结构韧性——抽取失败时兜底召回。
 - **raw_refs 溯源**：平台审计 + 本地调试。
 - **content 禁止指令式文本**：记忆投毒防御（survey-security WRITE 阶段）。
@@ -163,6 +166,7 @@ v0.2 修订（来源见 `papers/notes/README.md` 对照表）：
 4. **图谱 PPR 扩展**：query 实体 + AMU 节点种子 → PPR 一跳邻域 AMU（HippoRAG 单步多跳）；
 5. 时序切片（temporal 意图）；
 6. **画像/规则直通**（preference/rule 意图时拉取该 user 全量画像与规则——体量小，Dynamic Cheatsheet 式整份直通）。
+7. **经验路**（procedural 意图按任务签名召回 strategy/workflow/skill/playbook）。
 
 ### 5.3 融合、过滤与重排
 - RRF 融合多路结果并去重；
@@ -174,8 +178,9 @@ v0.2 修订（来源见 `papers/notes/README.md` 对照表）：
 
 ### 5.4 认知安全 / 弃权
 - 低置信且无高相关候选 → 返回空数组（LongMemEval abstention 维度）；
-- sensitivity=sensitive 的记忆按策略参与召回（默认参与同 user_id 内召回，但不跨域；隐私维度）；
+- sensitivity=sensitive 默认不参与任何召回；服务端 `AML_SENSITIVE_RECALL_ENABLED=1` 且请求 `include_sensitive=true` 时才允许；
 - user_id 隔离在存储层强制。
+- `DELETE /memory/{user_id}` 硬删数据库和显式开启的本地调试日志，只保留无正文删除凭证。
 
 ---
 
@@ -196,10 +201,10 @@ v0.2 修订（来源见 `papers/notes/README.md` 对照表）：
 |---|---|
 | 内部 LLM | **LiteLLM 统一抽象**：`AML_LLM_MODEL` 环境变量（默认 `gpt-4o-mini`，温度 0）；嵌入用 `AML_EMBED_MODEL`（默认 `text-embedding-3-small`）；规则变动只改配置。实现见 `memory_system/app/llm.py` |
 | 嵌入模型 | 本地开源多语言模型（BGE-M3 类），无外部依赖 |
-| 存储 | Postgres（pgvector + 全文索引 + 图谱邻接表）单容器起步 |
-| 服务 | FastAPI 异步 IO；`/add`、`/search`、`/health`；Bearer 鉴权 |
+| 存储 | 当前 SQLite/WAL 单机参考实现；生产目标 Postgres（pgvector + 全文索引 + 图谱邻接表） |
+| 服务 | FastAPI 异步 IO；`/add`、`/search`、`/feedback`、`DELETE /memory/{user_id}`、`/health`；Bearer 鉴权 |
 | 幂等 | request_id 唯一约束 + UPSERT |
-| 并发 | Add 队列化内部并行、外部同步；Search 无状态水平扩展 |
+| 并发 | 当前同用户进程内串行、跨进程 revision 冲突最多重试 3 次；迁移 Postgres 后再启用水平扩展 |
 | 部署 | 单 Dockerfile；README 含启动命令、API 入口、配置、原创性披露 |
 | 数据合规 | 评测数据独立命名空间；30 天删除脚本；不记请求正文日志 |
 | 安全 | 消息内容视为数据非指令（防注入）；AMU content 禁止指令式文本 |
@@ -220,6 +225,8 @@ v0.2 修订（来源见 `papers/notes/README.md` 对照表）：
 | `05_rerank_filter.txt` | 相关性过滤+重排打分 | Search §5.3 | Memory-R1 |
 | `06_eval_answer.txt` | 本地评测 Answer | 本地代理评测 | Mem0 附录 A |
 | `07_eval_judge.txt` | 本地评测 Judge | 本地代理评测 | Mem0 附录 A（时间宽容规则） |
+| `08_sufficiency_verify.txt` | 证据充分性与 follow-up | Search §5.4 | EverMemOS |
+| `09_experience_distill.txt` | 显式任务反馈蒸馏 | Feedback | ReasoningBank、AWM、Voyager、ACE |
 
 注：`06`/`07` 仅用于本地代理评测，不在参赛服务内（Search 不得生成答案）。
 
@@ -260,6 +267,6 @@ v0.2 修订（来源见 `papers/notes/README.md` 对照表）：
 
 - **gpt-4o-mini 复现一致性**：温度 0 + 固定版本号 + 记录每次调用；若第二期规则变动，改 `AML_LLM_MODEL` 一处即可。
 - **full 每 3 个月 1 次**：本地代理评测充分后再提交，禁止用 full 调试。
-- **Search 延迟**：重排只对 top-30；图谱 PPR 纯算法毫秒级；查询理解单次调用。
+- **Search 延迟**：重排只对 top-40；首轮含理解、重排、验证，追加轮有硬上限并跳过重复 follow-up。
 - **证据伪装答案红线**：AMU content 一律陈述性事实原句；宁可少召回不可违规。
 - **记忆投毒**：评测对话可能含注入文本；抽取提示词明确"内容即数据"，content 字段拒绝指令式句子。

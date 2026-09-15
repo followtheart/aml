@@ -43,7 +43,14 @@ class EvidenceTests(unittest.IsolatedAsyncioTestCase):
         with patch.object(llm, 'complete_json', AsyncMock(return_value={'facts': [self.fact()]})):
             result = await add._extract(self.st, req)
         self.assertEqual(result['facts'][0]['type'], 'episode')
+        self.assertEqual(result['facts'][0]['sensitivity'], 'sensitive')
         self.assertIn('Alice lives in Paris.', result['facts'][0]['content'])
+        amu_id = await add._persist_fact(
+            self.st, req, result['facts'][0], (await embed(['fallback episode']))[0])
+        self.assertEqual(
+            self.st.get_amus_by_ids([amu_id], include_sensitive=True)[0]['sensitivity'],
+            'sensitive')
+        self.assertEqual(self.st.get_amus_by_ids([amu_id]), [])
 
     async def test_semantic_rejection_does_not_store_wrong_graph(self):
         fact = self.fact()
@@ -52,6 +59,7 @@ class EvidenceTests(unittest.IsolatedAsyncioTestCase):
         with patch.object(config, 'FAKE', False), patch.object(llm, 'complete_json', AsyncMock(side_effect=responses)):
             result = await add._extract(self.st, self.req(fact['content']))
         self.assertEqual(result['facts'][0]['type'], 'episode')
+        self.assertEqual(result['facts'][0]['sensitivity'], 'sensitive')
         self.assertNotIn('triples', result['facts'][0])
 
     async def test_verified_evidence_keeps_original_quote(self):
@@ -82,7 +90,10 @@ class EvidenceTests(unittest.IsolatedAsyncioTestCase):
         with patch.object(add, '_govern_one', AsyncMock(return_value=('SUPERSEDE', {'target_id': target}))):
             aid = await add._persist_fact(self.st, req, fact, (await embed(['Berlin']))[0])
         self.assertEqual(self.st.get_amus_by_ids([aid])[0]['supersedes'], target)
-        self.assertIsNotNone(self.st.conn.execute('SELECT valid_to FROM amu WHERE id=?', (target,)).fetchone()[0])
+        predecessor = self.st.conn.execute(
+            'SELECT valid_to,superseded_by FROM amu WHERE id=?', (target,)).fetchone()
+        self.assertIsNotNone(predecessor['valid_to'])
+        self.assertEqual(predecessor['superseded_by'], aid)
 
     async def test_failed_add_rolls_back_valid_state_transition(self):
         target = await self.insert_state()
@@ -146,6 +157,16 @@ class EvidenceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([a['id'] for a in found], [aid])
         self.assertIn('precision: month', _time_prefix(found[0]))
         self.assertEqual(self.st.temporal_search('u', {'from': '2023-10-01', 'to': '2023-10-02'}, 10), [])
+
+    async def test_graph_edges_keep_fact_time_range(self):
+        temporal = integrity.resolve_time('2023-09', None)
+        aid = self.st.insert_amu(user_id='u', session_id='s', content='Alice visited Paris.',
+                                 temporal=temporal)
+        self.st.insert_triple('u', 'Alice', 'visited', 'Paris', aid,
+                              temporal['start'], temporal['end'])
+        edge = self.st.triples_for_user('u')[0]
+        self.assertEqual(edge['valid_from'], temporal['start'])
+        self.assertEqual(edge['valid_to'], temporal['end'])
 
     def test_relative_dates_and_precision(self):
         for reference, expression, expected in [

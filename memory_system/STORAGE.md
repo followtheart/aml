@@ -7,10 +7,11 @@ preparation replays its SQL mutations in one `BEGIN IMMEDIATE` transaction,
 including FTS, triples, provenance, summary and the request completion ledger.
 Errors and cancellation discard the snapshot; publication errors roll back.
 A per-user revision detects intervening writes for the same user. Different users
-can prepare and commit independently; a same-user conflict raises a retryable Add
-error. Same-user Adds through one Store are serialized before preparation, avoiding
-repeated model work and ordinary in-process conflicts. File databases use WAL and
-a short `BEGIN IMMEDIATE` publish transaction.
+can prepare and commit independently; a same-user conflict is retried internally
+up to three times. Same-user Adds through one Store are serialized before preparation.
+File databases use WAL and a short `BEGIN IMMEDIATE` publish transaction. This is
+a single-node reference design, not horizontal scaling; production uses a database-
+level request claim and Postgres/pgvector.
 
 ## Derived representations
 
@@ -96,12 +97,11 @@ memory_system/.venv/Scripts/python.exe memory_system/scripts/selftest_datasets.p
 
 ## Full-content debug log
 
-By default, successful Add requests append one UTF-8 JSON object per line to
-`memory_system/logs/memory-debug.jsonl` (relative to the project, independent of
-current working directory). Both the API and local evaluation use this log; it
-survives deletion of the evaluation's temporary database. The directory is ignored
-by Git. Records contain actual stored data, including unredacted source text and
-complete vectors.
+Full-content Add and Search logs are disabled by default. Setting
+`AML_MEMORY_DEBUG_LOG` or `AML_SEARCH_DEBUG_LOG` to a filename enables local JSONL
+diagnostics containing unredacted data; these files must be access-controlled.
+`DELETE /memory/{user_id}` removes matching records from enabled logs as well as
+the database. The directory is ignored by Git, which is not a privacy control.
 
 Each `memory.add.committed` event includes request/user/session IDs, commit log
 time, original request messages, final session summary, and affected `memories`:
@@ -111,7 +111,8 @@ time, original request messages, final session summary, and affected `memories`:
 - `full_text_index`: the actual FTS rows, including body and retrieval key.
 - `triples`: saved graph edges for that AMU.
 - `sources`: source message IDs, role, original text and timestamp.
-- `valid_to` / `supersedes`: include the closed predecessor on SUPERSEDE.
+- `valid_to` / `supersedes` / `superseded_by`: include both directions of a
+  SUPERSEDE chain; graph edges retain the fact's validity interval too.
 
 UPDATE records the final body and regenerated representations. NOOP with a target
 records that target and its evidence; without a target, the event still records
@@ -121,8 +122,8 @@ a warning without changing an already committed Add's success. This debug file i
 best-effort diagnostics, not a transactional audit ledger; a process crash between
 database commit and file append can leave a missing event.
 
-Set `AML_MEMORY_DEBUG_LOG` to a custom filename, or set it to an empty string in
-`.env` to disable logging. Files append across runs without automatic rotation.
+Set `AML_MEMORY_DEBUG_LOG` to a custom filename to enable logging. Files append
+across runs without automatic rotation.
 `configured_embedding_model` describes the current configuration, not verified
 provenance of older or fallback vectors. `fake` distinguishes offline test runs.
 
@@ -146,6 +147,8 @@ Temporal bounds also drive a dedicated event/validity interval recall route and
 are passed to the reranker. `reference_time` anchors relative dates; local eval
 passes the dataset's `question_date`, while online requests default to the user's
 latest known memory time (`Store.latest_time`), not the service wall clock.
+An explicit time scope removes versions whose validity interval does not overlap;
+an unbounded change-history question retains the chain so changes can be explained.
 
 `sessions_fts` adds BM25 recall for summaries using original/expanded queries.
 Opening an older database backfills its existing summaries; summary writes update
@@ -159,32 +162,38 @@ only, so this route is disabled unless `AML_SUMMARY_ROUTE=1`.
 Each Add is cut into topic segments by embedding-similarity drops
 (`AML_SEGMENT_SIM_DROP`, `AML_SEGMENT_MIN_MESSAGES`, capped by
 `AML_EXTRACT_BATCH_MESSAGES`). A segment yields one MemCell: an `episode` AMU
-holding the raw chunk (unless `AML_STORE_EPISODES=0`) plus its atomic facts and
-triples, all sharing a `cell_id`. Episodes bypass governance.
+holding an extracted third-person narrative and compressed view (unless
+`AML_STORE_EPISODES=0`) plus its atomic facts and triples, all sharing a `cell_id`.
+Raw messages remain in source references. Episodes bypass governance.
 
 Governance is preceded by a novelty gate: a neighbour with cosine ≥
 `AML_NOVELTY_DUP_THRESHOLD` and identical normalised text is a NOOP without an LLM
 call; facts with no close neighbour are ADDed without one. `UPDATE` merges text,
 keeps the union of both memories' entities/keywords/triples and re-embeds once.
 NOOP/UPDATE targets record the contributing session in `support_sessions`; profile
-items supported by ≥ `AML_PROFILE_STABLE_SESSIONS` sessions are annotated
-`[profile: stable]`, otherwise `transient`; rules are always recalled.
+items supported by ≥ `AML_PROFILE_STABLE_SESSIONS` sessions are persisted as
+`profile_status=stable`; preferences start as transient with
+`AML_PROFILE_TRANSIENT_TTL_DAYS`, while explicit profile facts are static and rules
+are always recalled.
 
 Cells are clustered into `scenes` rows (0.7·cosine + 0.3·keyword Jaccard ≥
 `AML_SCENE_JOIN_THRESHOLD`) with a running centroid, keyword union and a
 deterministic line summary (`AML_SCENE_SUMMARY_LLM=1` uses the model). Search adds
 a scene->cell route: top `AML_SCENE_TOP_M` scenes by query similarity, then the
-best cells inside them. Scene heat is
-`visits + 0.5·interactions + 2·recency + surprise`; scenes above
+best cells inside them. Scene heat uses log-saturated visits/interactions plus
+recency and recency-decayed surprise; scenes above
 `AML_HEAT_PROMOTE_THRESHOLD` reset their interaction count (promotion), and scenes
 beyond `AML_MAX_HOT_SCENES` are cold-tiered. Recall updates `recall_count`,
 `strength`, scene `visit_count` with relative SQL updates and never bumps the user
 revision, so it cannot invalidate a concurrent staged Add.
 
-Forgetting uses `R = exp(-age / (30 days · strength))`; with
+Forgetting uses `R = exp(-age / (30 days · strength))`; each recall adds
+`AML_FORGET_RECALL_BONUS_DAYS / AML_FORGET_STRENGTH_DAYS` to the dimensionless
+strength multiplier. With
 `AML_FORGET_THRESHOLD > 0` memories below it move to `tier='cold'`, which the
 dense and sparse routes skip (graph/temporal routes still reach them). A cold
-memory that is recalled returns to `hot`. Nothing is deleted.
+memory that is recalled returns to `hot`, as does its Scene. Nothing is deleted
+except through the explicit compliance purge endpoint.
 
 The search loop runs up to `AML_SEARCH_MAX_ROUNDS` (default 2): after reranking,
 prompt 08 judges whether the evidence is necessary and sufficient; if not, its
@@ -209,9 +218,18 @@ response reports `source_count` and caps returned references separately. Full
 sources remain in SQLite and debug logs. Summary sources cover the same user's
 session. Older memories without source records return an empty list.
 
-Each search appends a UTF-8 JSONL event to
-`memory_system/logs/search-debug.jsonl`. Override with `AML_SEARCH_DEBUG_LOG`, or
-set it to an empty string to disable. Each event includes:
+Fact, multi-hop, temporal and profile intents use Memory-Only: episode candidates
+are removed when atomic evidence exists, and source references omit their bodies.
+Narrative/document intents use Memory-Doc: episode candidates are preferred and
+bounded source text is included. Sensitive AMUs are absent from every route unless
+both `AML_SENSITIVE_RECALL_ENABLED=1` and request `include_sensitive=true`.
+
+`POST /feedback` is the only task-experience write path. It requires an explicit
+success/failure signal and distills at most three strategy/workflow/skill/playbook
+items; only environment-verified skills receive `verified=true`.
+
+When `AML_SEARCH_DEBUG_LOG` is explicitly configured, each search appends a UTF-8
+JSONL event to that path. Each event includes:
 
 - `search_id`, query, user, options, requested top_k, timestamps and status.
 - `plan` and the effective `include_history` decision.

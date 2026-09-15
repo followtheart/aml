@@ -121,6 +121,10 @@ class IntegrityTests(unittest.IsolatedAsyncioTestCase):
             with self.assertRaises(RuntimeError):
                 await embeddings.embed(['must not hash'], stage='test.embedding')
 
+    def test_embedding_dimension_mismatch_is_never_sliced_or_padded(self):
+        with self.assertRaisesRegex(ValueError, 'returned 3 dimensions'):
+            embeddings._fit_dim(np.ones((1, 3), dtype=np.float32))
+
     async def test_vector_search_isolated_by_embedding_space(self):
         vec = (await embed(['Alice']))[0]
         current = self.st.insert_amu(user_id='u', session_id='s', content='current',
@@ -202,6 +206,14 @@ class IntegrityTests(unittest.IsolatedAsyncioTestCase):
                 await add.run_add(self.st, request())
         self.assertEqual(before, self.snapshot())
 
+    async def test_cross_user_request_id_replay_is_rejected(self):
+        await add.run_add(self.st, request('shared'))
+        other = request('shared', 'Bob lives in London.')
+        other.user_id = 'other'
+        with self.assertRaisesRegex(ValueError, 'already belongs'):
+            await add.run_add(self.st, other)
+        self.assertEqual(self.st.get_amus('other'), [])
+
     async def test_noop_retains_new_evidence_without_new_graph(self):
         await add.run_add(self.st, request())
         target = self.st.get_amus('u')[0]['id']
@@ -280,6 +292,18 @@ class IntegrityTests(unittest.IsolatedAsyncioTestCase):
                 work.insert_amu(user_id='u', session_id='s', content='Alice')
                 work._pending.append(('INSERT INTO nonexistent VALUES (?)', (1,)))
         self.assertEqual(before, self.snapshot())
+
+    async def test_purge_removes_user_content_and_keeps_receipt_only(self):
+        await add.run_add(self.st, request())
+        receipt = self.st.purge_user('u')
+        self.assertTrue(receipt['receipt_id'].startswith('purge_'))
+        self.assertGreater(receipt['row_counts']['amu'], 0)
+        self.assertEqual(self.st.get_amus('u'), [])
+        self.assertEqual(self.st.sources_for_session('u', 's'), [])
+        saved = self.st.conn.execute(
+            'SELECT row_counts FROM purge_receipts WHERE receipt_id=?',
+            (receipt['receipt_id'],)).fetchone()[0]
+        self.assertNotIn('Alice lives in Paris', saved)
 
     def test_conflicting_connection_and_existing_database(self):
         with tempfile.TemporaryDirectory() as tmp:

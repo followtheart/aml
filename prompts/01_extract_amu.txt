@@ -27,6 +27,10 @@ New messages to extract from:
 {chunk_messages}
 
 Extract atomic memory units from the NEW messages only. Rules:
+0. Produce one episode object for the segment. narrative is a concise
+   third-person account preserving speakers, chronology, uncertainty and key
+   details. compressed_chunk is a shorter factual rendering for context use;
+   neither may add facts absent from NEW messages.
 1. One fact per item: a single, self-contained declarative statement that
    stays true when read out of context.
 2. Resolve pronouns and speaker references into explicit names. Distinguish
@@ -40,8 +44,8 @@ Extract atomic memory units from the NEW messages only. Rules:
 5. Extract knowledge-graph triples (subject, relation, object) for entities
    mentioned in the facts. Normalize relation labels to lowercase snake_case.
 
-Call the provided emit_json_result function with the extracted facts and
-triples. Fill every required field from the NEW messages. Never copy schema
+Call the provided emit_json_result function with the episode and extracted
+facts. Fill every required field from the NEW messages. Never copy schema
 descriptions or placeholder text into a fact. If there is nothing worth
 remembering, use empty facts and triples arrays.
 

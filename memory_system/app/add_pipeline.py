@@ -113,12 +113,15 @@ def _validate_fact(raw, batch, start, req):
     return fact
 
 
-def _episode(req, indices, segment_index=0):
-    return {"content": _format_messages([req.messages[i] for i in indices]),
+def _episode(req, indices, segment_index=0, episode=None, sensitivity="normal"):
+    episode = episode or {}
+    raw = _format_messages([req.messages[i] for i in indices])
+    return {"content": episode.get("narrative") or raw,
+            "compressed_content": episode.get("compressed_chunk") or raw,
             "retrieval_key": "Conversation episode", "type": "episode",
             "_sources": list(indices), "_segment": segment_index,
             "entities": [], "keywords": [],
-            "event_time": None, "sensitivity": "normal"}
+            "event_time": None, "sensitivity": sensitivity}
 
 
 async def _segments(req: schemas.AddRequest) -> List[List[int]]:
@@ -213,14 +216,17 @@ async def _extract(st: store.Store, req: schemas.AddRequest) -> Dict:
             # a single fully-extracted message would only duplicate its fact.
             # Without episodes only rejected sources fall back to a chunk.
             if config.STORE_EPISODES and (len(indices) > 1 or not grounded or rejected_sources):
-                facts.append(_episode(req, indices, seg_index))
+                sensitivity = ("sensitive" if rejected_sources or any(
+                    fact.get("sensitivity") == "sensitive" for fact in grounded) else "normal")
+                facts.append(_episode(req, indices, seg_index, data.get("episode"), sensitivity))
             elif rejected_sources:
-                facts.append(_episode(req, sorted(rejected_sources), seg_index))
+                facts.append(_episode(req, sorted(rejected_sources), seg_index,
+                                      data.get("episode"), "sensitive"))
         except Exception as e:
             log.warning(
                 "extraction segment %d-%d failed (%s); storing that segment as "
                 "an episode", start, indices[-1], e)
-            facts.append(_episode(req, indices, seg_index))
+            facts.append(_episode(req, indices, seg_index, sensitivity="sensitive"))
 
     return {"facts": facts, "segments": segments}
 
@@ -290,12 +296,13 @@ def _union(*lists):
 async def _persist_fact(st: store.Store, req: schemas.AddRequest,
                         fact: Dict, vec) -> Optional[str]:
     if fact.get("type") == "episode":
-        # Raw chunks are never governed: they are the Memory-Doc fallback (§5.6).
         return st.insert_amu(
             user_id=req.user_id, session_id=req.session_id, content=fact["content"],
+            compressed_content=fact.get("compressed_content"),
             retrieval_key=fact.get("retrieval_key", ""), type="episode",
             valid_from=_ref_time(req.messages), confidence=0.6, embedding=vec,
-            evidence=fact.get("evidence", []))
+            evidence=fact.get("evidence", []),
+            sensitivity=fact.get("sensitivity", "normal"))
     op, detail = await _govern_one(st, req.user_id, fact, vec)
     fact["_novelty"] = detail.get("novelty", 1.0)
     target = detail.get("target_id")
@@ -350,7 +357,9 @@ async def _persist_fact(st: store.Store, req: schemas.AddRequest,
             final_vec = (await embed([_embed_text(final)], stage="add.embed_update"))[0]
             st.replace_fact(target, final, final_vec)
             for t in final["triples"]:
-                st.insert_triple(req.user_id, t["subject"], t["relation"], t["object"], target)
+                temporal = final.get("temporal") or {}
+                st.insert_triple(req.user_id, t["subject"], t["relation"], t["object"],
+                                 target, temporal.get("start"), temporal.get("end"))
             st.link_sources(target, req.request_id, fact.get("_sources", []))
             st.add_support_session(target, req.session_id)
             return None  # refreshed triples already persisted against final content
@@ -366,7 +375,7 @@ async def _persist_fact(st: store.Store, req: schemas.AddRequest,
         else:
             st.close_validity(target, valid_from)
             supersedes = target
-    return st.insert_amu(
+    amu_id = st.insert_amu(
         user_id=req.user_id, session_id=req.session_id,
         content=fact["content"], retrieval_key=fact.get("retrieval_key", ""),
         type=fact.get("type", "fact"), entities=fact.get("entities") or [],
@@ -375,6 +384,9 @@ async def _persist_fact(st: store.Store, req: schemas.AddRequest,
         sensitivity=fact.get("sensitivity", "normal"), embedding=vec,
         temporal=fact.get("temporal"), state=fact.get("state"),
         evidence=fact.get("evidence", []))
+    if supersedes:
+        st.link_supersession(supersedes, amu_id)
+    return amu_id
 
 
 
@@ -392,19 +404,30 @@ async def _update_summary(st: store.Store, req: schemas.AddRequest):
 
 async def run_add(st: store.Store, req: schemas.AddRequest) -> None:
     """Publish a complete Add atomically; failures leave the live store unchanged."""
-    debug_record = None
-    async with st.add_lock(req.user_id):
-        if st.request_seen(req.request_id):
+    for attempt in range(3):
+        debug_record = None
+        try:
+            async with st.add_lock(req.user_id):
+                owner = st.request_owner(req.request_id)
+                if owner and (owner["user_id"] != req.user_id
+                              or owner["session_id"] != req.session_id):
+                    raise ValueError("request_id already belongs to another user or session")
+                if owner:
+                    return
+                with st.staged(req.user_id) as work:
+                    await _run_add(work, req)
+                    if config.MEMORY_DEBUG_LOG:
+                        try:
+                            debug_record = memory_debug.capture(work, req)
+                        except Exception:
+                            log.warning("Could not capture memory debug snapshot", exc_info=True)
+            if debug_record is not None:
+                memory_debug.append(debug_record)
             return
-        with st.staged(req.user_id) as work:
-            await _run_add(work, req)
-            if config.MEMORY_DEBUG_LOG:
-                try:
-                    debug_record = memory_debug.capture(work, req)
-                except Exception:
-                    log.warning("Could not capture memory debug snapshot", exc_info=True)
-    if debug_record is not None:
-        memory_debug.append(debug_record)
+        except RuntimeError as exc:
+            if "Memory changed during Add" not in str(exc) or attempt == 2:
+                raise
+            log.info("Retrying Add after concurrent publish request_id=%s", req.request_id)
 
 
 async def _run_add(st: store.Store, req: schemas.AddRequest) -> None:
@@ -427,8 +450,14 @@ async def _run_add(st: store.Store, req: schemas.AddRequest) -> None:
             continue
         st.link_sources(aid, req.request_id,
                         fact.get("_sources", list(range(len(req.messages)))))
-        for t in fact.get("triples", []):
-            st.insert_triple(req.user_id, t["subject"], t["relation"], t["object"], aid)
+        if fact.get("sensitivity") != "sensitive":
+            for t in fact.get("triples", []):
+                temporal = fact.get("temporal") or {}
+                st.insert_triple(req.user_id, t["subject"], t["relation"], t["object"],
+                                 aid, temporal.get("start"), temporal.get("end"))
+        else:
+            # Vault memories stay out of shared graph and scene summaries.
+            continue
         cell = cells.setdefault(fact.get("_segment", 0),
                                 {"ids": [], "vecs": [], "facts": [], "surprise": 0.0})
         cell["ids"].append(aid)

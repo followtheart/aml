@@ -31,7 +31,9 @@ STRUCTURED_SCHEMAS: Dict[str, dict] = {
     "query": {
         "type": "object",
         "properties": {
-            "intent": {"type": "string"},
+            "intent": {"type": "string", "enum": ["fact", "multi_hop", "temporal",
+                "preference", "rule", "profile", "narrative", "document",
+                "procedural", "abstention_check"]},
             "include_history": {"type": "boolean"},
             "time_scope": {
                 "type": ["object", "null"],
@@ -100,6 +102,7 @@ _EVIDENCE = _object({"message_index": {"type": "integer"}, "quote": _TEXT})
 _STATE = _object({"subject": _TEXT, "attribute": _TEXT, "value": _TEXT})
 _STATE["type"] = ["object", "null"]
 STRUCTURED_SCHEMAS["extraction"] = _object({
+    "episode": _object({"narrative": _TEXT, "compressed_chunk": _TEXT}),
     "facts": {"type": "array", "items": _object({
         "content": _TEXT, "retrieval_key": _TEXT,
         "type": {"type": "string", "enum": ["fact", "preference", "rule", "workflow", "event", "profile", "plan"]},
@@ -114,6 +117,15 @@ STRUCTURED_SCHEMAS["extraction"] = _object({
 })
 STRUCTURED_SCHEMAS["evidence_check"] = _object({
     "valid": {"type": "boolean"}, "reason": _TEXT
+})
+STRUCTURED_SCHEMAS["experience"] = _object({
+    "items": {"type": "array", "maxItems": 3, "items": _object({
+        "type": {"type": "string", "enum": ["strategy", "workflow", "skill", "playbook"]},
+        "title": _TEXT,
+        "description": _TEXT,
+        "content": _TEXT,
+        "keywords": {"type": "array", "items": _TEXT},
+    })}
 })
 
 
@@ -323,6 +335,11 @@ class FakeLLM:
         if "sufficiency verifier" in prompt:
             return json.dumps({"sufficient": True, "confidence": 0.9,
                                "missing": "", "follow_up_queries": []})
+        if "experience distillation module" in prompt:
+            return json.dumps({"items": [{"type": "strategy", "title": "Task lesson",
+                "description": "Reusable lesson from explicit task feedback",
+                "content": "Review the observed outcome before repeating this task.",
+                "keywords": ["task", "feedback"]}]})
         if "intelligent memory assistant" in prompt:
             return "fake answer"
         if 'label an answer to a question' in prompt:
@@ -336,7 +353,7 @@ class FakeLLM:
             section = prompt.split("New messages to extract from:", 1)[1]
             section = section.split("Extract atomic memory units", 1)[0]
         except IndexError:
-            return {"facts": [], "triples": []}
+            return {"episode": {"narrative": "", "compressed_chunk": ""}, "facts": []}
         facts, triples = [], []
         for line in section.strip().splitlines():
             line = line.strip()
@@ -366,7 +383,9 @@ class FakeLLM:
             for e in ents:
                 facts[-1]["triples"].append({"subject": speaker.strip(),
                                 "relation": "mentioned", "object": e})
-        return {"facts": facts}
+        episode_text = " ".join(fact["content"] for fact in facts)
+        return {"episode": {"narrative": episode_text,
+                    "compressed_chunk": episode_text}, "facts": facts}
 
     def _fake_query(self, prompt: str):
         q = ""

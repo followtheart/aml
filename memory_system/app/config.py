@@ -95,6 +95,9 @@ EMBED_DIM = max(32, int(os.environ.get("AML_EMBED_DIM", "256")))
 EMBEDDING_SPACE = os.environ.get(
     "AML_EMBEDDING_SPACE",
     f"{'fake-hash' if FAKE else EMBED_MODEL}:float32:{EMBED_DIM}")
+# Sensitive memories are excluded from every retrieval/index route unless both
+# the deployment policy and an individual request explicitly opt in.
+SENSITIVE_RECALL_ENABLED = os.environ.get("AML_SENSITIVE_RECALL_ENABLED", "0") == "1"
 GOVERNANCE_NEIGHBORS = 5
 RECALL_PER_ROUTE = 100
 RERANK_CANDIDATES = 40
@@ -130,6 +133,8 @@ FORGET_STRENGTH_DAYS = 30.0
 FORGET_RECALL_BONUS_DAYS = 15.0
 # §4.2 profile: traits supported by >= N sessions count as stable
 PROFILE_STABLE_SESSIONS = max(1, int(os.environ.get("AML_PROFILE_STABLE_SESSIONS", "2")))
+PROFILE_TRANSIENT_TTL_DAYS = max(
+    1, int(os.environ.get("AML_PROFILE_TRANSIENT_TTL_DAYS", "90")))
 # §5.5 sufficiency verifier + iterative retrieval + abstention
 SEARCH_MAX_ROUNDS = max(1, int(os.environ.get("AML_SEARCH_MAX_ROUNDS", "2")))
 VERIFY_EVIDENCE_ITEMS = 15
@@ -140,12 +145,10 @@ SUMMARY_ROUTE = os.environ.get("AML_SUMMARY_ROUTE", "0") == "1"
 
 # Full stored content for local debugging; empty path disables the JSONL log.
 MEMORY_DEBUG_LOG = os.environ.get(
-    "AML_MEMORY_DEBUG_LOG",
-    str(Path(__file__).resolve().parents[1] / "logs" / "memory-debug.jsonl"))
+    "AML_MEMORY_DEBUG_LOG", "")
 
 SEARCH_DEBUG_LOG = os.environ.get(
-    "AML_SEARCH_DEBUG_LOG",
-    str(Path(__file__).resolve().parents[1] / "logs" / "search-debug.jsonl"))
+    "AML_SEARCH_DEBUG_LOG", "")
 
 # Source evidence returned to the answer model. Full evidence remains in SQLite
 # and the debug log; these limits prevent top_k=100 from producing megabytes.

@@ -43,10 +43,11 @@ def _fit_dim(vecs: np.ndarray) -> np.ndarray:
     d = vecs.shape[1]
     if d == config.EMBED_DIM:
         out = vecs
-    elif d > config.EMBED_DIM:
-        out = vecs[:, : config.EMBED_DIM]
     else:
-        out = np.pad(vecs, ((0, 0), (0, config.EMBED_DIM - d)))
+        raise ValueError(
+            f"Embedding provider returned {d} dimensions; configured space "
+            f"requires {config.EMBED_DIM}. Configure the native model dimension "
+            "or use a provider-supported dimensions parameter.")
     return _normalize(out)
 
 

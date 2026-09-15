@@ -83,8 +83,10 @@ def heat(scene: Dict, now: Optional[datetime] = None) -> float:
             recency = math.exp(-age_days / config.HEAT_RECENCY_HALFLIFE_DAYS)
         except ValueError:
             pass
-    return (a * scene.get("visit_count", 0) + b * scene.get("interaction_count", 0)
-            + c * recency + d * float(scene.get("surprise") or 0.0))
+    visits = math.log1p(max(0, scene.get("visit_count", 0)))
+    interactions = math.log1p(max(0, scene.get("interaction_count", 0)))
+    surprise = float(scene.get("surprise") or 0.0) * recency
+    return a * visits + b * interactions + c * recency + d * surprise
 
 
 def retention(item: Dict, now: Optional[datetime] = None) -> float:
@@ -159,6 +161,7 @@ def promote_and_evict(st: store.Store, user_id: str) -> Dict:
     ranked = sorted(scenes, key=lambda s: heat(s, now), reverse=True)
     for scene in ranked:
         if heat(scene, now) >= config.HEAT_PROMOTE_THRESHOLD and scene.get("interaction_count", 0) > 0:
+            st.promote_scene_profiles(scene["id"])
             st.reset_scene_interactions(scene["id"])
             promoted.append(scene["id"])
     for scene in ranked[config.MAX_HOT_SCENES:]:
@@ -180,6 +183,8 @@ def forget(st: store.Store, user_id: str) -> List[str]:
 
 def profile_stability(item: Dict) -> str:
     """§2.3: traits supported across enough sessions are stable, else transient."""
+    if item.get("profile_status"):
+        return item["profile_status"]
     if item.get("type") == "rule":
         return "rule"
     sessions = item.get("support_sessions") or []

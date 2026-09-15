@@ -72,3 +72,22 @@ def append(record):
                 output.write(line)
     except Exception:
         log.warning('Could not append committed memory debug log', exc_info=True)
+
+
+def purge_user(user_id):
+    """Best-effort removal from an explicitly enabled local JSONL log."""
+    if not config.MEMORY_DEBUG_LOG:
+        return
+    path = Path(config.MEMORY_DEBUG_LOG)
+    if not path.exists():
+        return
+    with _lock:
+        kept = []
+        for line in path.read_text(encoding='utf-8').splitlines():
+            try:
+                if json.loads(line).get('user_id') == user_id:
+                    continue
+            except (json.JSONDecodeError, TypeError):
+                pass
+            kept.append(line)
+        path.write_text(('\n'.join(kept) + '\n') if kept else '', encoding='utf-8')

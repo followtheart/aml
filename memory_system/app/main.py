@@ -3,11 +3,12 @@ import logging
 
 from fastapi import Depends, FastAPI, Header, HTTPException
 
-from . import add_pipeline, config, schemas, search_pipeline, store
+from . import (add_pipeline, config, experience, memory_debug, schemas,
+               search_debug, search_pipeline, store)
 
 logging.basicConfig(level=logging.INFO)
 
-app = FastAPI(title="AML Memory System", version="0.2.0")
+app = FastAPI(title="AML Memory System", version="0.4.0")
 _store = store.Store()
 
 
@@ -44,3 +45,27 @@ async def search(req: schemas.SearchRequest):
     except Exception as e:
         raise HTTPException(status_code=500,
                             detail={"reason": f"search failed: {e}"})
+
+
+@app.delete("/memory/{user_id}", response_model=schemas.PurgeResponse,
+            dependencies=[Depends(auth)])
+async def purge_memory(user_id: str):
+    try:
+        receipt = _store.purge_user(user_id)
+        memory_debug.purge_user(user_id)
+        search_debug.purge_user(user_id)
+        return schemas.PurgeResponse(**receipt)
+    except Exception as e:
+        raise HTTPException(status_code=500,
+                            detail={"reason": f"purge failed: {e}"})
+
+
+@app.post("/feedback", response_model=schemas.FeedbackResponse,
+          dependencies=[Depends(auth)])
+async def feedback(req: schemas.FeedbackRequest):
+    try:
+        ids = await experience.run_feedback(_store, req)
+        return schemas.FeedbackResponse(memory_ids=ids)
+    except Exception as e:
+        raise HTTPException(status_code=500,
+                            detail={"reason": f"feedback failed: {e}"})

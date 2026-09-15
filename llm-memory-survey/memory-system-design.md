@@ -2,7 +2,7 @@
 
 > 依据 [survey.md](survey.md) 所覆盖的 30 篇论文，把各方法中经过验证的机制拆解为可组合的构件，组装成一套面向 LLM 智能体的通用记忆系统。
 > 每个设计点均标注来源笔记，并说明**采用了原论文的哪一机制、规避了它的哪一缺陷**。
-> 与本仓库 AML 参赛方案（`../agent-memory-system-design.md` v0.2.1）的关系见 §10。
+> 与本仓库 AML 参赛方案（`../agent-memory-system-design.md` v0.4）的关系见 §10。
 
 ---
 
@@ -22,7 +22,7 @@
 1. **没有单一最优结构，混合结构最稳**（[Structural Memory](notes/27-structural-memory.md) Finding 1/4）→ 同一段经历同时保留 chunk/episode、原子事实、三元组、摘要四种视图。
 2. **写入侧做重、读取侧做准**（[Mem0](notes/14-mem0.md)、[EverMemOS](notes/05-evermemos.md)）→ 结构化在 Add 时完成，Search 只做召回+验证。
 3. **记忆是生命周期而非仓库**（EverMemOS 三阶段）→ 形成 → 巩固 → 重建回忆 → 遗忘/演化闭环。
-4. **不硬删除，只失效**（[Zep](notes/30-zep.md) 双时间轴）→ 所有更新表现为版本链，旧版本可审计、可回溯。
+4. **业务更新不硬删除，合规删除必须硬删**（[Zep](notes/30-zep.md) 双时间轴）→ 普通知识更新表现为版本链；用户删除请求清除正文、索引、来源与调试副本，只保留无内容删除凭证。
 5. **精选优于堆量**（Structural Memory：R=10 优于更大 R；K 过大引入噪声）→ 重排只对少量候选，注入上下文的记忆严格限额。
 
 ---
@@ -65,7 +65,7 @@ flowchart TB
     CLUSTER["增量聚类→MemScene"]
     HEAT["热度分数→晋升画像 / 驱逐\n(MemoryOS)"]
     FORGET["艾宾浩斯保留率→冷热分层\n(MemoryBank)"]
-    EVOLVE["邻居记忆演化 / 链接更新\n(A-Mem，限定簇内)"]
+    EVOLVE["可选：邻居记忆演化 / 链接更新\n(A-Mem，需消融验证)"]
   end
 
   subgraph LEARN["经验回路（任务结束后）"]
@@ -167,7 +167,7 @@ Profile
 ### 3.2 语义边界切分（[SeCom](notes/26-secom.md) + [EverMemOS](notes/05-evermemos.md)）
 
 - 粒度选择依据 SeCom：轮次级太碎、会话级太噪，**片段级**最优。
-- 边界判定：相邻消息窗口的嵌入相似度骤降 + LLM 二值判断"是否换话题"（MemoryOS 链接/重置两步法）。EverMemOS 消融证明语义边界优于固定/人工 session 边界。
+- 边界判定：相邻消息与当前段质心的嵌入相似度骤降，并以最大段长作确定性上限。LLM 二值判断仅作为离线消融项，避免默认路径为切分额外支付一次调用。
 - 每个片段生成压缩版（SeCom 用 LLMLingua-2 去噪），存于 `episode.compressed_chunk`，用于注入上下文时节省 token；原文引用保留用于 Memory-Doc 模式（§5.6）。
 
 ### 3.3 MemCell 抽取（单次 LLM 调用输出 E/F/P/三元组）
@@ -220,27 +220,28 @@ Scene 聚合触发 `profile_delta` 生成：
 - 单 Scene 出现的状态 → `transient`（TTL）；
 - 与已有画像冲突 → 走 §3.5 INVALIDATE，画像条目也有版本链。
 
-### 4.3 簇内链接与邻居演化（[A-Mem](notes/03-a-mem.md)，受限版）
-- 仅在同一 Scene 内、且只对 top-k（k≤5）最相似 Cell 生成链接与"演化"（更新邻居的 keywords/context 描述）。
-- 限定范围后，链接生成成本从 O(N) 降到 O(k)，也避免 A-Mem 的过度连接。
+### 4.3 可选：簇内链接与邻居演化（[A-Mem](notes/03-a-mem.md)）
+- 该机制默认关闭。只有消融证明其最终准确率收益覆盖额外写入成本和误差累积后，才在同一 Scene 内对 top-k（k≤5）最相似 Cell 生成链接。
+- 启用时链接是独立派生视图，不原地改写事实 content；重建失败可直接丢弃并从事实重算，避免演化文本污染证据。
 
 ### 4.4 热度、晋升与驱逐（[MemoryOS](notes/20-memoryos.md)）
 
 $$
-\text{Heat}(s) = \alpha N_{\text{visit}} + \beta L_{\text{interaction}} + \gamma R_{\text{recency}} + \delta\,\text{surprise}_0
+	ext{Heat}(s) = \alpha \log(1+N_{\text{visit}}) + \beta \log(1+L_{\text{interaction}}) + \gamma R_{\text{recency}} + \delta\,R_{\text{recency}}\,\text{surprise}_0
 $$
 
-- 每次检索命中更新 `N_visit` 与 `R_recency`；
+- 每次检索命中更新 `N_visit` 与 `R_recency`；计数使用对数饱和，surprise 随时间衰减，防止早期热门 Scene 永久垄断；
 - Heat > τ → 触发 §4.2 画像晋升，随后 `L_interaction` 归零（MemoryOS：防重复晋升）；
 - Scene 数超上限 → 驱逐最低热度 Scene 到冷层（不删除）。
 
 ### 4.5 遗忘：艾宾浩斯冷热分层（[MemoryBank](notes/18-memorybank.md)）
 
 $$
-R = e^{-t/S}, \qquad S \leftarrow S + \Delta \text{ 每次被成功召回}
+R = e^{-t/(S_0\cdot s)}, \qquad s \leftarrow s + \Delta_S/S_0 \text{ 每次被成功召回}
 $$
 
 - `R` 低于阈值的事实进入**冷层**：不参与稠密/BM25 主召回，仅可通过版本链、实体图、显式时间范围查询到达。
+- `strength` 是无量纲乘数，`S_0` 和召回奖励 `ΔS` 使用天为单位；冷记忆命中后同时回温所属 Scene，避免形成永久不可达的重复场景。
 - 与 MemoryBank 差异：不真正删除（Zep 审计原则）；`S` 增量与 §4.4 热度联动。
 - 参数化层若启用（§7），可对应 [MemoryLLM](notes/19-memoryllm.md) 的指数遗忘。
 
@@ -266,8 +267,8 @@ $$
 | 经验路 | 任务签名 → 策略/工作流/技能 top-k | ReasoningBank、AWM、Voyager | 程序性任务 |
 
 ### 5.3 融合与治理感知排序
-- RRF 融合多路结果；
-- **版本链折叠**：同链多版本只保留在 `time_scope` 内有效的版本（默认取最新有效；问"以前"时取历史版本）；
+- RRF 按**检索通道**融合，而不是把每个 query rewrite 当作独立通道；同一通道的多查询先取每条候选的最佳名次，避免改写数量产生额外投票权；
+- **版本链折叠**：默认只取当前有效版本；有明确 `time_scope` 时只保留与该区间相交的版本；无界的“如何变化”问题才保留整条历史链；
 - **前瞻时效过滤**：`foresight` 仅在 `t_start ≤ now ≤ t_end` 或与 `time_scope` 相交时返回（EverMemOS）；
 - 冷层记忆若被图/时序路命中，回升热度（§4.4/4.5）。
 
@@ -292,10 +293,13 @@ if not verdict.sufficient and confidence < θ_abs:
 - 精确问答/多跳（LoCoMo、HotPotQA 型）→ **Memory-Only**：注入原子事实 + 三元组。
 - 需要广泛上下文（叙事理解、长文档）→ **Memory-Doc**：以命中的事实定位 `raw_chunk_ref`，注入原文（或 SeCom 压缩版）。
 - 由 §5.1 的 `intent` 自动选择；注入总量设硬预算，按融合序截断。
+- Memory-Only 仍返回结构化来源引用，但不把原文正文复制进模型上下文；若原子抽取完全失败，则 episode 作为召回下限。`narrative/document` 意图优先 episode 并允许注入受预算约束的原文。
 
 ---
 
 ## 6. 经验回路（任务级自进化）
+
+经验回路只接受独立的显式任务反馈事件，普通聊天不能自行推断成功或失败。接口至少包含 `task/outcome/trace/task_signature/environment_verified`；真实环境信号优先于 LLM judge，只有环境验证通过的代码技能可标为 `verified=true`。
 
 ```
 任务结束
@@ -334,8 +338,10 @@ MemOS 提出明文 ↔ 激活 ↔ 参数三态记忆及其转换。本设计以�
 
 - **隔离**：`user_id` 为存储层行级隔离边界，不依赖查询层过滤。
 - **敏感库**（[MIRIX](notes/23-mirix.md) Knowledge Vault）：`sensitivity=sensitive` 的事实单独存储，默认不进入召回，只在意图明确匹配且策略允许时返回。
+- **双重授权**：敏感召回同时要求部署侧策略开关和单请求显式 opt-in；敏感事实不进入共享 Scene 摘要或知识图，避免在重排前泄漏。
 - **投毒防御**：记忆 `content` 必须为陈述句，抽取阶段过滤指令式文本（"忽略之前的指令…"）；Playbook 条目只由策展人写入，用户消息不能直接成为规则。
 - **可遗忘**：INVALIDATE + 冷层 + 显式 purge 接口（合规删除需硬删，此时记录删除凭证而非内容）。
+- **日志最小化**：正文调试日志默认关闭；显式开启时 purge 同步清除该用户的 JSONL 记录。
 - **弃权优先**：§5.5 低置信返回空，避免幻觉外溢。
 
 ---
@@ -351,6 +357,8 @@ MemOS 提出明文 ↔ 激活 ↔ 参数三态记忆及其转换。本设计以�
 | 成本 | — | Add/Search LLM 调用数、延迟、token | 门控、簇内链接、重排规模 |
 
 必须报告：**每个模块的增量收益**（EverMemOS/HippoRAG 2 均以消融证明各组件价值），以及 Recall@k 与最终准确率的分离（定位是召回还是阅读失分）。
+
+同时报告最坏成本：首轮为查询理解 + 一次小 R 重排 + 一次充分性验证；每个追加轮最多增加 embedding、一次重排和一次验证。通过 `N/R/K` 硬上限、重复 follow-up 去重及按意图跳过非必要路线控制 TPM，而不再声称 Search 固定只有两次 LLM 调用。
 
 ---
 
@@ -389,9 +397,9 @@ MemOS 提出明文 ↔ 激活 ↔ 参数三态记忆及其转换。本设计以�
 
 ---
 
-## 11. 与本仓库 AML 方案（`../agent-memory-system-design.md` v0.2.1）的关系
+## 11. 与本仓库 AML 方案（`../agent-memory-system-design.md` v0.4）的关系
 
-v0.2.1 是本通用设计在 AML 平台约束下（Add 同步屏障、Search 只返证据、top_k=100、gpt-4o-mini）的一个**实例化子集**：AMU ≈ 本文的 `facts[]`，episode 兜底 ≈ `episode.raw_chunk_ref`，软废止版本链 ≈ INVALIDATE，六路召回 ≈ §5.2 去掉经验路。相对 v0.2.1，本设计新增且可迁移的部分：
+AML v0.4 是本通用设计在平台约束下（Add 同步屏障、Search 只返证据、top_k=100、模型可配置）的实例化：AMU 承载 facts/episode/程序性条目，软废止版本链对应 INVALIDATE，并实现七路召回与显式反馈经验路。
 
 1. **语义边界切分**替代按平台分块直接抽取（§3.2）；
 2. **MemScene 巩固 + 场景→情景两阶段召回**，直接针对多会话整合失分（§2.2 §4.1 §5.2）；
@@ -399,6 +407,8 @@ v0.2.1 是本通用设计在 AML 平台约束下（Add 同步屏障、Search 只
 4. **热度驱动画像晋升 + 稳定/临时区分**，替代静态 profile 直通（§2.3 §4.4）；
 5. **充分性验证 + 迭代检索 + 弃权**（§5.5），对应 REVIEW 中 D4 缺失项；
 6. **惊奇度写入门控**降低重复事实与治理调用量（§3.4）；
-7. **经验层**（策略/工作流/技能）为 Coding Track 预留（§2.4 §6）。
+7. **经验层**通过独立反馈接口写入策略/工作流/技能/手册；普通 Add 不推断任务成败（§2.4 §6）。
+
+激活记忆与参数记忆仍是 §7 的可选研究插槽，不属于 AML v0.4 的交付范围；SQLite 是单机参考实现，生产水平扩展目标仍为 Postgres/pgvector。
 
 REVIEW.md 中已识别的 P0 问题（embedding 截断、时间锚点、全量重排）在本设计中分别由 §5.1 锚点规则、§5.4 小 R 重排原则直接约束。

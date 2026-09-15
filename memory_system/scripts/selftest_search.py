@@ -78,9 +78,10 @@ class SearchTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(result.data), 1)
         self.assertEqual(result.data[0].memory_type, 'session_summary')
         self.assertEqual(result.data[0].sources[0]['timestamp'], 123)
+        self.assertEqual(result.data[0].sources[0]['content_omitted'], 'memory_only')
         prompt = eval_scoring.answer_prompt({'question': 'Alice work?'},
                                             [x.model_dump() for x in result.data])
-        self.assertIn('Original evidence about Alice work', prompt)
+        self.assertNotIn('Original evidence about Alice work', prompt)
         self.assertIn('Hangzhou', prompt)
         self.st.set_summary('u', 's', 'Bob hobbies')
         self.assertEqual(self.st.summary_search('u', 'Hangzhou', 10), [])
@@ -164,8 +165,9 @@ class SearchTests(unittest.IsolatedAsyncioTestCase):
         self.st.save_messages(req)
         self.st.link_sources(aid, 'r', [0])
         result = await self.run_search(self.req())
-        self.assertIn('Evidence text', result.data[0].content)
+        self.assertNotIn('Evidence text', result.data[0].content)
         self.assertEqual(result.data[0].sources[0]['request_id'], 'r')
+        self.assertEqual(result.data[0].sources[0]['content_omitted'], 'memory_only')
         self.assertNotIn('request_id', result.data[0].content)
         result = await self.run_search(schemas.SearchRequest(user_id='other', query='Alice work'))
         self.assertEqual(result.data, [])
@@ -228,10 +230,51 @@ class SearchTests(unittest.IsolatedAsyncioTestCase):
         self.st.link_sources(second, 'source', [0])
         result = await self.run_search(self.req(top_k=2))
         bodies = '\n'.join(item.content for item in result.data)
-        self.assertEqual(bodies.count('shared source evidence'), 1)
+        self.assertEqual(bodies.count('shared source evidence'), 0)
         self.assertNotIn('content_omitted', bodies)
-        self.assertTrue(any(source.get('content_omitted') == 'duplicate'
+        self.assertTrue(all(source.get('content_omitted') == 'memory_only'
                             for item in result.data for source in item.sources))
+
+    async def test_memory_doc_prefers_episode_and_includes_sources(self):
+        fact = await self.memory('Alice work fact')
+        episode = await self.memory('Alice described her work journey in detail', type='episode')
+        req = schemas.AddRequest(request_id='doc-source', user_id='u', session_id='s',
+            messages=[schemas.Message(role='user', content='Full narrative source')])
+        self.st.save_messages(req)
+        self.st.link_sources(episode, 'doc-source', [0])
+        result = await self.run_search(self.req('Tell the story'),
+                                       {'intent': 'narrative', 'entities': []})
+        self.assertEqual([item.id for item in result.data], [episode])
+        self.assertNotIn(fact, [item.id for item in result.data])
+        self.assertIn('Full narrative source', result.data[0].content)
+
+    async def test_explicit_time_scope_folds_versions(self):
+        old = await self.memory('Alice works in Shanghai', valid_from='2020-01-01',
+                                valid_to='2024-01-01')
+        current = await self.memory('Alice works in Hangzhou', valid_from='2024-01-01',
+                                    supersedes=old)
+        plan = {'intent': 'temporal', 'include_history': True, 'entities': [],
+                'time_scope': {'from': '2022-01-01', 'to': '2022-12-31'}}
+        result = await self.run_search(self.req('Where did Alice work in 2022?'), plan)
+        self.assertEqual([item.id for item in result.data], [old])
+        self.assertNotIn(current, [item.id for item in result.data])
+
+    async def test_expired_transient_profile_is_excluded(self):
+        aid = await self.memory('Alice temporarily likes tea', type='preference')
+        self.st.conn.execute("UPDATE amu SET expires_at='2020-01-01T00:00:00Z' WHERE id=?", (aid,))
+        self.st.conn.commit()
+        result = await self.run_search(self.req('What does Alice like?',
+                                                reference_time='2024-01-01T00:00:00Z'),
+                                       {'intent': 'preference', 'entities': []})
+        self.assertEqual(result.data, [])
+
+    async def test_sensitive_memory_requires_server_and_request_opt_in(self):
+        aid = await self.memory('Alice bank account 1234', sensitivity='sensitive')
+        self.assertEqual((await self.run_search(self.req('Alice bank account'))).data, [])
+        with patch.object(config, 'SENSITIVE_RECALL_ENABLED', True):
+            result = await self.run_search(self.req(
+                'Alice bank account', include_sensitive=True))
+        self.assertEqual([item.id for item in result.data], [aid])
 
 
 if __name__ == '__main__':

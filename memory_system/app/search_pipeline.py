@@ -79,6 +79,53 @@ def _rrf(routes: List[List[Dict]], k: int = 60) -> List[Dict]:
     return out
 
 
+def _overlaps_scope(item: Dict, scope: Dict) -> bool:
+    start, end = scope.get("from"), scope.get("to")
+    if not (start or end):
+        return True
+    valid_from = item.get("valid_from") or "0001-01-01T00:00:00+00:00"
+    valid_to = item.get("valid_to") or "9999-12-31T23:59:59+00:00"
+    try:
+        return (not end or integrity.instant(valid_from) <= integrity.instant(end)) and (
+            not start or integrity.instant(valid_to) >= integrity.instant(start))
+    except ValueError:
+        return True
+
+
+def _fold_versions(items: List[Dict], plan: Dict) -> List[Dict]:
+    """Restrict version chains to versions valid in an explicit time scope.
+
+    Unbounded change-history questions retain all versions. Current-state
+    searches are already restricted to open versions by the storage layer.
+    """
+    scope = plan.get("time_scope") or {}
+    if not (scope.get("from") or scope.get("to")):
+        return items
+    return [item for item in items if _overlaps_scope(item, scope)]
+
+
+def _select_memory_view(routes: List[List[Dict]], plan: Dict) -> List[List[Dict]]:
+    document = plan.get("intent") in ("narrative", "document")
+    flat = [item for route in routes for item in route]
+    has_preferred = any((item.get("type") == "episode") == document for item in flat)
+    plan["_memory_mode"] = "memory_doc" if document else "memory_only"
+    if not has_preferred:
+        return routes
+    return [[item for item in route
+             if item.get("type") == "rule"
+             or (item.get("type") == "episode") == document] for route in routes]
+
+
+def _profile_not_expired(item: Dict, anchor: str, include_history: bool) -> bool:
+    expires = item.get("expires_at")
+    if include_history or not expires:
+        return True
+    try:
+        return integrity.instant(expires) > integrity.instant(anchor)
+    except ValueError:
+        return True
+
+
 def _historical(req, plan):
     if req.include_history is not None:
         return req.include_history
@@ -105,6 +152,17 @@ def _query_terms(queries: List[str]) -> List[str]:
     return sorted(terms)
 
 
+def _merge_query_results(routes: List[List[Dict]], limit: int) -> List[Dict]:
+    """One retrieval channel gets one RRF vote, independent of rewrite count."""
+    best = {}
+    for route in routes:
+        for item in route:
+            current = best.get(item["id"])
+            if current is None or item.get("_score", 0.0) > current.get("_score", 0.0):
+                best[item["id"]] = item
+    return sorted(best.values(), key=lambda item: -item.get("_score", 0.0))[:limit]
+
+
 async def _recall(st: store.Store, req: schemas.SearchRequest,
                   plan: Dict) -> List[List[Dict]]:
     # A follow-up round (§5.5) supplies its own queries via plan["_queries"].
@@ -117,6 +175,8 @@ async def _recall(st: store.Store, req: schemas.SearchRequest,
     routes = []
     history = _historical(req, plan)
     plan["_include_history"] = history
+    sensitive = bool(config.SENSITIVE_RECALL_ENABLED and req.include_sensitive)
+    plan["_include_sensitive"] = sensitive
     limit = max(config.RECALL_PER_ROUTE, req.top_k)
 
     def route(name, items, query=None):
@@ -126,22 +186,26 @@ async def _recall(st: store.Store, req: schemas.SearchRequest,
             "candidates": _snapshot(items)})
 
     dense_routes = st.nearest_many_by_embedding(
-        req.user_id, vecs, limit, include_history=history)
-    for query, items in zip(queries, dense_routes):
-        route("vector", items, query)
+        req.user_id, vecs, limit, include_history=history,
+        include_sensitive=sensitive)
+    route("vector", _merge_query_results(dense_routes, limit), " | ".join(queries))
     route("full_text", st.fts_search(req.user_id, req.query, limit,
-                                    include_history=history), req.query)
-    triples = st.triples_for_user(req.user_id)
+                                    include_history=history,
+                                    include_sensitive=sensitive), req.query)
+    triples = st.triples_for_user(req.user_id, include_sensitive=sensitive)
     # Exclude closed memories before graph traversal on current-state searches.
     if not history:
-        valid = {a["id"] for a in st.get_amus_by_ids(list({t["amu_id"] for t in triples}))}
+        valid = {a["id"] for a in st.get_amus_by_ids(
+            list({t["amu_id"] for t in triples}), include_sensitive=sensitive)}
         triples = [t for t in triples if t["amu_id"] in valid]
     ppr_ids = graph.ppr_recall(triples, plan.get("entities") or [], top_n=limit)
-    by_id = {a["id"]: a for a in st.get_amus_by_ids(ppr_ids, include_history=history)}
+    by_id = {a["id"]: a for a in st.get_amus_by_ids(
+        ppr_ids, include_history=history, include_sensitive=sensitive)}
     route("graph", [by_id[i] for i in ppr_ids if i in by_id])
     time_scope = plan.get("time_scope") or {}
     if plan.get("intent") == "temporal" or time_scope.get("from") or time_scope.get("to"):
-        route("temporal", st.temporal_search(req.user_id, time_scope, limit))
+        route("temporal", st.temporal_search(
+            req.user_id, time_scope, limit, include_sensitive=sensitive))
     # §5.2 scene->cell two-stage route: pick top-m MemScenes, then rank cells inside.
     top_scenes = scenes.rank_scenes(st.list_scenes(req.user_id), vecs,
                                     _query_terms(queries), config.SCENE_TOP_M)
@@ -150,14 +214,20 @@ async def _recall(st: store.Store, req: schemas.SearchRequest,
     if top_scenes:
         per_scene = st.nearest_many_by_embedding(
             req.user_id, vecs[:1], config.SCENE_CELLS_PER_SCENE * len(top_scenes),
-            include_history=history, scene_ids=[s["id"] for s in top_scenes])[0]
+            include_history=history, scene_ids=[s["id"] for s in top_scenes],
+            include_sensitive=sensitive)[0]
         route("scene", per_scene, queries[0])
     # §2.3 rules are always injected; other profile memories on matching intents.
     profile_types = ["rule"]
     if plan.get("intent") in ("preference", "rule", "profile"):
         profile_types += ["preference", "profile", "workflow"]
     route("profile_rule", st.get_by_type(req.user_id, profile_types,
-                                         include_history=history))
+                                         include_history=history,
+                                         include_sensitive=sensitive))
+    if plan.get("intent") == "procedural":
+        route("experience", st.get_by_type(
+            req.user_id, ["strategy", "workflow", "skill", "playbook"],
+            include_history=history, include_sensitive=sensitive))
     if config.SUMMARY_ROUTE:
         for query in queries:
             route("session_summary", st.summary_search(req.user_id, query, limit), query)
@@ -384,9 +454,14 @@ async def run_search(st: store.Store,
         tried = set()
         for round_index in range(1, config.SEARCH_MAX_ROUNDS + 1):
             plan["_round"] = round_index
-            routes_all.extend(await _recall(st, req, plan))
+            round_routes = _select_memory_view(await _recall(st, req, plan), plan)
+            history = bool(plan.get("_include_history"))
+            round_routes = [[item for item in route
+                             if _profile_not_expired(item, anchor, history)]
+                            for route in round_routes]
+            routes_all.extend(round_routes)
             tried.update(q.strip().casefold() for q in plan.get("_used_queries", []))
-            fused = _rrf(routes_all)
+            fused = _fold_versions(_rrf(routes_all), plan)
             ranked = await _filter_rerank(req, plan, fused, scored)
             verdict = await _verify(req, plan, ranked)
             rounds.append({"round": round_index, "queries": plan.get("_queries"),
@@ -398,7 +473,7 @@ async def run_search(st: store.Store,
             if verdict["sufficient"] or not fresh:
                 break
             plan["_queries"] = fresh
-        trace["fused"] = _snapshot(_rrf(routes_all))
+        trace["fused"] = _snapshot(_fold_versions(_rrf(routes_all), plan))
         trace["rounds"] = rounds
         ranked = _foresight_filter(ranked, plan)
         trace["pre_rerank_excluded"] = plan.get("_pre_rerank_excluded", [])
@@ -418,6 +493,10 @@ async def run_search(st: store.Store,
             raw_sources = (st.sources_for_session(req.user_id, c["session_id"]) if is_summary
                            else st.sources_for_amu(c["id"]))
             sources = _answer_sources(raw_sources, seen_sources, remaining_source_chars)
+            if plan.get("_memory_mode") == "memory_only":
+                for source in sources:
+                    source.pop("content", None)
+                    source["content_omitted"] = "memory_only"
             body = _memory_prefix(c, full_rows.get(c["id"]), anchor) + c["content"]
             body = answer_context.with_evidence(body, sources)
             data.append(schemas.SearchItem(

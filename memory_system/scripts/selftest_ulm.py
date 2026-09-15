@@ -1,6 +1,7 @@
 """Offline regressions for the ULM lifecycle: segmentation, MemCell/MemScene
 consolidation, novelty gate, heat/forgetting, verifier loop, foresight filter."""
 import json
+import math
 import os
 import re
 import sys
@@ -125,7 +126,10 @@ class LifecycleTests(unittest.IsolatedAsyncioTestCase):
         scene = {'visit_count': 2, 'interaction_count': 4, 'surprise': 0.5,
                  'last_access': datetime.now(timezone.utc).isoformat()}
         a, b, c, d = config.HEAT_WEIGHTS
-        self.assertAlmostEqual(scenes.heat(scene), a * 2 + b * 4 + c * 1.0 + d * 0.5, places=3)
+        self.assertAlmostEqual(
+            scenes.heat(scene),
+            a * math.log1p(2) + b * math.log1p(4) + c * 1.0 + d * 0.5,
+            places=3)
         await add.run_add(self.st, request('r1', 'Alice plays tennis with Bob.'))
         sid = self.st.list_scenes('u')[0]['id']
         self.st.conn.execute('UPDATE scenes SET visit_count=10 WHERE id=?', (sid,))
@@ -133,6 +137,18 @@ class LifecycleTests(unittest.IsolatedAsyncioTestCase):
         outcome = scenes.promote_and_evict(self.st, 'u')
         self.assertEqual(outcome['promoted'], [sid])
         self.assertEqual(self.st.list_scenes('u')[0]['interaction_count'], 0)
+
+    async def test_cross_session_preference_materializes_stable_profile(self):
+        vec = (await embed(['Alice prefers tea']))[0]
+        aid = self.st.insert_amu(user_id='u', session_id='s1',
+                                 content='Alice prefers tea', type='preference', embedding=vec)
+        initial = self.st.get_amus_by_ids([aid])[0]
+        self.assertEqual(initial['profile_status'], 'transient')
+        self.assertIsNotNone(initial['expires_at'])
+        self.st.add_support_session(aid, 's2')
+        stable = self.st.get_amus_by_ids([aid])[0]
+        self.assertEqual(stable['profile_status'], 'stable')
+        self.assertIsNone(stable['expires_at'])
 
     async def test_forgetting_cold_tiers_stale_memory_and_recall_revives_it(self):
         vec = (await embed(['Alice tennis']))[0]
@@ -145,8 +161,12 @@ class LifecycleTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.st.nearest_by_embedding('u', vec, 10), [])
         self.assertEqual(self.st.fts_search('u', 'tennis', 10), [])
         self.assertEqual(self.st.nearest_many_by_embedding('u', vec[None, :], 10, include_cold=True)[0][0]['id'], aid)
-        self.st.record_recall([aid], [])
+        scene_id = self.st.insert_scene('u', vec, ['tennis'])
+        self.st.assign_scene([aid], scene_id, 'cell-cold')
+        self.st.reset_scene_interactions(scene_id, tier='cold')
+        self.st.record_recall([aid], [scene_id])
         self.assertEqual(self.st.nearest_by_embedding('u', vec, 10)[0]['id'], aid)
+        self.assertEqual(self.st.list_scenes('u')[0]['id'], scene_id)
 
     async def test_verifier_triggers_follow_up_round_and_abstention(self):
         vec = (await embed(['Alice sister Carol']))[0]

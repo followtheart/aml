@@ -18,7 +18,7 @@ import sqlite3
 import threading
 import uuid
 import weakref
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Optional
 
 import numpy as np
@@ -33,6 +33,7 @@ CREATE TABLE IF NOT EXISTS amu (
   user_id TEXT NOT NULL,
   session_id TEXT NOT NULL,
   content TEXT NOT NULL,
+    compressed_content TEXT,
   retrieval_key TEXT,
   type TEXT NOT NULL DEFAULT 'fact',
   entities TEXT NOT NULL DEFAULT '[]',
@@ -44,6 +45,7 @@ CREATE TABLE IF NOT EXISTS amu (
   valid_from TEXT,
   valid_to TEXT,
   supersedes TEXT,
+    superseded_by TEXT,
   confidence REAL DEFAULT 0.9,
   sensitivity TEXT DEFAULT 'normal',
   embedding BLOB,
@@ -55,7 +57,14 @@ CREATE TABLE IF NOT EXISTS amu (
   last_recalled TEXT,
   strength REAL NOT NULL DEFAULT 1.0,
   tier TEXT NOT NULL DEFAULT 'hot',
-  support_sessions TEXT NOT NULL DEFAULT '[]'
+    support_sessions TEXT NOT NULL DEFAULT '[]',
+    profile_status TEXT,
+    expires_at TEXT,
+    polarity TEXT,
+    helpful INTEGER NOT NULL DEFAULT 0,
+    harmful INTEGER NOT NULL DEFAULT 0,
+    verified INTEGER NOT NULL DEFAULT 0,
+    task_signature TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_amu_user ON amu(user_id);
 CREATE INDEX IF NOT EXISTS idx_amu_user_type ON amu(user_id, type);
@@ -86,7 +95,9 @@ CREATE TABLE IF NOT EXISTS triples (
   subject TEXT NOT NULL,
   relation TEXT NOT NULL,
   object TEXT NOT NULL,
-  amu_id TEXT NOT NULL
+    amu_id TEXT NOT NULL,
+    valid_from TEXT,
+    valid_to TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_triples_user ON triples(user_id);
 CREATE INDEX IF NOT EXISTS idx_triples_ent ON triples(user_id, subject);
@@ -107,6 +118,12 @@ CREATE TABLE IF NOT EXISTS requests (
 CREATE TABLE IF NOT EXISTS user_revisions (
   user_id TEXT PRIMARY KEY,
   revision INTEGER NOT NULL DEFAULT 0
+);
+CREATE TABLE IF NOT EXISTS purge_receipts (
+    receipt_id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL,
+    deleted_at TEXT NOT NULL,
+    row_counts TEXT NOT NULL
 );
 """
 
@@ -139,7 +156,11 @@ INSERT INTO sessions_fts(user_id,session_id,summary)
 
 
 def _now() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return _now_dt().isoformat()
+
+
+def _now_dt() -> datetime:
+    return datetime.now(timezone.utc)
 
 
 class Store:
@@ -156,8 +177,12 @@ class Store:
             # Forward-compatible migration for databases created before vector
             # spaces were recorded. NULL means "unknown" and is not searched.
             columns = {r["name"] for r in self.conn.execute("PRAGMA table_info(amu)")}
+            if "compressed_content" not in columns:
+                self.conn.execute("ALTER TABLE amu ADD COLUMN compressed_content TEXT")
             if "embedding_space" not in columns:
                 self.conn.execute("ALTER TABLE amu ADD COLUMN embedding_space TEXT")
+            if "superseded_by" not in columns:
+                self.conn.execute("ALTER TABLE amu ADD COLUMN superseded_by TEXT")
             for column in ("temporal", "state", "evidence"):
                 if column not in columns:
                     self.conn.execute(f"ALTER TABLE amu ADD COLUMN {column} TEXT")
@@ -166,11 +191,21 @@ class Store:
                                  ("last_recalled", "TEXT"),
                                  ("strength", "REAL NOT NULL DEFAULT 1.0"),
                                  ("tier", "TEXT NOT NULL DEFAULT 'hot'"),
-                                 ("support_sessions", "TEXT NOT NULL DEFAULT '[]'")):
+                                 ("support_sessions", "TEXT NOT NULL DEFAULT '[]'"),
+                                 ("profile_status", "TEXT"), ("expires_at", "TEXT"),
+                                 ("polarity", "TEXT"),
+                                 ("helpful", "INTEGER NOT NULL DEFAULT 0"),
+                                 ("harmful", "INTEGER NOT NULL DEFAULT 0"),
+                                 ("verified", "INTEGER NOT NULL DEFAULT 0"),
+                                 ("task_signature", "TEXT")):
                 if column not in columns:
                     self.conn.execute(f"ALTER TABLE amu ADD COLUMN {column} {decl}")
             self.conn.executescript(FTS_SCHEMA)
             self.conn.executescript(SOURCE_SCHEMA)
+            triple_columns = {r["name"] for r in self.conn.execute("PRAGMA table_info(triples)")}
+            for column in ("valid_from", "valid_to"):
+                if column not in triple_columns:
+                    self.conn.execute(f"ALTER TABLE triples ADD COLUMN {column} TEXT")
             self.conn.commit()
 
     def _write(self, sql, params=()):
@@ -314,6 +349,13 @@ class Store:
                 (request_id,)).fetchone()
             return row is not None
 
+    def request_owner(self, request_id: str) -> Optional[Dict]:
+        with _LOCK:
+            row = self.conn.execute(
+                "SELECT user_id,session_id FROM requests WHERE request_id=?",
+                (request_id,)).fetchone()
+        return dict(row) if row else None
+
     def record_request(self, request_id: str, user_id: str, session_id: str):
         with _LOCK:
             self._write(
@@ -327,33 +369,74 @@ class Store:
         key = (id(asyncio.get_running_loop()), user_id)
         return self._add_locks.setdefault(key, asyncio.Lock())
 
+    def purge_user(self, user_id: str) -> Dict:
+        """Hard-delete one user's content and retain a content-free receipt."""
+        receipt_id = f"purge_{uuid.uuid4().hex}"
+        deleted_at = _now()
+        with _LOCK:
+            self.conn.execute("BEGIN IMMEDIATE")
+            try:
+                counts = {
+                    table: self.conn.execute(
+                        f"SELECT COUNT(*) FROM {table} WHERE user_id=?", (user_id,)
+                    ).fetchone()[0]
+                    for table in ("amu", "scenes", "triples", "sessions", "requests",
+                                  "source_messages")
+                }
+                self.conn.execute(
+                    "DELETE FROM amu_sources WHERE amu_id IN "
+                    "(SELECT id FROM amu WHERE user_id=?)", (user_id,))
+                for table in ("amu_fts", "sessions_fts", "triples", "scenes", "amu",
+                              "sessions", "requests", "source_messages", "user_revisions"):
+                    self.conn.execute(f"DELETE FROM {table} WHERE user_id=?", (user_id,))
+                self.conn.execute(
+                    "INSERT INTO purge_receipts VALUES (?,?,?,?)",
+                    (receipt_id, user_id, deleted_at, json.dumps(counts, sort_keys=True)))
+                self.conn.commit()
+            except BaseException:
+                self.conn.rollback()
+                raise
+        return {"receipt_id": receipt_id, "user_id": user_id,
+                "deleted_at": deleted_at, "row_counts": counts}
+
     # ---------------- AMU CRUD ----------------
-    def insert_amu(self, *, user_id, session_id, content, retrieval_key="",
+    def insert_amu(self, *, user_id, session_id, content, compressed_content=None,
+                   retrieval_key="",
                    type="fact", entities=None, keywords=None, event_time=None,
                    valid_from=None, valid_to=None, supersedes=None,
                    confidence=0.9, sensitivity="normal",
                    embedding: Optional[np.ndarray] = None,
                    temporal=None, state=None, evidence=None,
-                   scene_id=None, cell_id=None) -> str:
+                   scene_id=None, cell_id=None, polarity=None,
+                   helpful=0, harmful=0, verified=False,
+                   task_signature=None) -> str:
         integrity.validate_interval(valid_from, valid_to)
         integrity.validate_interval((temporal or {}).get("start"), (temporal or {}).get("end"))
         amu_id = f"amu_{uuid.uuid4().hex[:16]}"
         blob = (embedding.astype(np.float32).tobytes()
                 if embedding is not None else None)
+        profile_status = ("rule" if type == "rule" else
+                          "static" if type == "profile" else
+                          "transient" if type == "preference" else None)
+        expires_at = ((_now_dt() + timedelta(
+            days=config.PROFILE_TRANSIENT_TTL_DAYS)).isoformat()
+            if profile_status == "transient" else None)
         with _LOCK:
             self._write(
-                """INSERT INTO amu (id,user_id,session_id,content,retrieval_key,
+                """INSERT INTO amu (id,user_id,session_id,content,compressed_content,retrieval_key,
                    type,entities,keywords,event_time,valid_from,valid_to,
                    supersedes,confidence,sensitivity,embedding,embedding_space,created_at,
-                   scene_id,cell_id,support_sessions)
-                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-                (amu_id, user_id, session_id, content, retrieval_key, type,
+                   scene_id,cell_id,support_sessions,profile_status,expires_at,
+                   polarity,helpful,harmful,verified,task_signature)
+                         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                     (amu_id, user_id, session_id, content, compressed_content, retrieval_key, type,
                  json.dumps(entities or [], ensure_ascii=False),
                  json.dumps(keywords or [], ensure_ascii=False),
                  event_time, valid_from, valid_to, supersedes, confidence,
                  sensitivity, blob,
                  config.EMBEDDING_SPACE if blob is not None else None, _now(),
-                 scene_id, cell_id, json.dumps([session_id])))
+                 scene_id, cell_id, json.dumps([session_id]), profile_status, expires_at,
+                 polarity, helpful, harmful, int(verified), task_signature))
             self._write(
                 "INSERT INTO amu_fts (amu_id,user_id,content,retrieval_key)"
                 " VALUES (?,?,?,?)",
@@ -403,6 +486,11 @@ class Store:
                 self._touch_user(row[0])
             self.conn.commit()
 
+    def link_supersession(self, old_id: str, new_id: str):
+        with _LOCK:
+            self._write("UPDATE amu SET superseded_by=? WHERE id=?", (new_id, old_id))
+            self.conn.commit()
+
     def get_amus(self, user_id: str, only_valid: bool = True) -> List[Dict]:
         q = "SELECT * FROM amu WHERE user_id=?"
         if only_valid:
@@ -411,12 +499,14 @@ class Store:
             rows = self.conn.execute(q, (user_id,)).fetchall()
         return [self._row_to_dict(r) for r in rows]
 
-    def get_by_type(self, user_id: str, types: List[str], include_history=False) -> List[Dict]:
+    def get_by_type(self, user_id: str, types: List[str], include_history=False,
+                    include_sensitive=False) -> List[Dict]:
         ph = ",".join("?" * len(types))
         with _LOCK:
             rows = self.conn.execute(
                 f"SELECT * FROM amu WHERE user_id=?"
                 + ("" if include_history else " AND valid_to IS NULL")
+                + ("" if include_sensitive else " AND sensitivity!='sensitive'")
                 + f" AND type IN ({ph})",
                 (user_id, *types)).fetchall()
         return [self._row_to_dict(r) for r in rows]
@@ -424,13 +514,16 @@ class Store:
     def nearest_many_by_embedding(self, user_id: str, vecs: np.ndarray,
                                   k: int, include_history=False,
                                   scene_ids: Optional[List[str]] = None,
-                                  include_cold=False) -> List[List[Dict]]:
+                                  include_cold=False,
+                                  include_sensitive=False) -> List[List[Dict]]:
         """Load a user's matrix once and rank any number of query vectors."""
-        sql = ("SELECT id,user_id,session_id,content,retrieval_key,type,"
-               "event_time,valid_from,valid_to,created_at,scene_id,cell_id,tier,"
-               "temporal,state,embedding FROM amu"
+        sql = ("SELECT id,user_id,session_id,content,compressed_content,retrieval_key,type,"
+             "event_time,valid_from,valid_to,supersedes,created_at,scene_id,cell_id,tier,"
+               "temporal,state,profile_status,expires_at,sensitivity,polarity,helpful,harmful,"
+               "verified,task_signature,embedding FROM amu"
                " WHERE user_id=? AND embedding NOT NULL AND embedding_space=?"
                + ("" if include_history else " AND valid_to IS NULL")
+               + ("" if include_sensitive else " AND sensitivity!='sensitive'")
                + ("" if include_cold else " AND tier!='cold'"))
         params = [user_id, config.EMBEDDING_SPACE]
         if scene_ids is not None:
@@ -468,7 +561,8 @@ class Store:
         return self.nearest_many_by_embedding(
             user_id, np.asarray(vec)[None, :], k, include_history)[0]
 
-    def fts_search(self, user_id: str, query: str, k: int, include_history=False) -> List[Dict]:
+    def fts_search(self, user_id: str, query: str, k: int, include_history=False,
+                   include_sensitive=False) -> List[Dict]:
         # OR semantics keeps recall high for keyword-ish queries.
         # FTS5 MATCH is syntax-sensitive: keep only alnum tokens, quote each.
         import re as _re
@@ -478,9 +572,10 @@ class Store:
             clauses = " OR ".join("content LIKE ? OR retrieval_key LIKE ?" for _ in grams)
             params = [value for gram in grams for value in (f"%{gram}%", f"%{gram}%")]
             history = "" if include_history else " AND valid_to IS NULL"
+            sensitive = "" if include_sensitive else " AND sensitivity!='sensitive'"
             with _LOCK:
                 rows = self.conn.execute(
-                    f"SELECT * FROM amu WHERE user_id=?{history} AND tier!='cold' AND ({clauses}) LIMIT ?",
+                    f"SELECT * FROM amu WHERE user_id=?{history}{sensitive} AND tier!='cold' AND ({clauses}) LIMIT ?",
                     (user_id, *params, k)).fetchall()
             out = [self._row_to_dict(r) for r in rows]
             for item in out:
@@ -509,6 +604,8 @@ class Store:
                 f"SELECT * FROM amu WHERE id IN ({ph}) AND tier!='cold'"
                 + ("" if include_history else " AND valid_to IS NULL"),
                 ids).fetchall()
+        if not include_sensitive:
+            amu_rows = [row for row in amu_rows if row["sensitivity"] != "sensitive"]
         by_id = {r["id"]: self._row_to_dict(r) for r in amu_rows}
         out = []
         for r in rows:
@@ -518,7 +615,7 @@ class Store:
                 out.append(d)
         return out
 
-    def temporal_search(self, user_id, time_scope, k):
+    def temporal_search(self, user_id, time_scope, k, include_sensitive=False):
         """Recall memories whose event/validity intervals overlap the query scope."""
         start = (time_scope or {}).get("from")
         end = (time_scope or {}).get("to")
@@ -530,7 +627,8 @@ class Store:
         end = end or "9999-12-31T23:59:59Z"
         with _LOCK:
             rows = self.conn.execute(
-                "SELECT * FROM amu WHERE user_id=? AND "
+                "SELECT * FROM amu WHERE user_id=? "
+                + ("" if include_sensitive else "AND sensitivity!='sensitive' ") + "AND "
                 "((json_extract(temporal,'$.start') IS NOT NULL AND "
                 "julianday(json_extract(temporal,'$.start'))<=julianday(?) AND "
                 "julianday(json_extract(temporal,'$.end'))>=julianday(?)) OR "
@@ -560,29 +658,36 @@ class Store:
         return sorted(matches, key=lambda item: -item["_score"])[:k]
 
     # ---------------- triples / graph ----------------
-    def insert_triple(self, user_id, subject, relation, object_, amu_id):
+    def insert_triple(self, user_id, subject, relation, object_, amu_id,
+                      valid_from=None, valid_to=None):
+        integrity.validate_interval(valid_from, valid_to)
         with _LOCK:
             self._write(
-                "INSERT INTO triples (user_id,subject,relation,object,amu_id)"
-                " VALUES (?,?,?,?,?)",
-                (user_id, subject, relation, object_, amu_id))
+                "INSERT INTO triples (user_id,subject,relation,object,amu_id,valid_from,valid_to)"
+                " VALUES (?,?,?,?,?,?,?)",
+                (user_id, subject, relation, object_, amu_id, valid_from, valid_to))
             self._touch_user(user_id)
             self.conn.commit()
 
-    def triples_for_user(self, user_id: str) -> List[Dict]:
+    def triples_for_user(self, user_id: str, include_sensitive=False) -> List[Dict]:
         with _LOCK:
             rows = self.conn.execute(
-                "SELECT * FROM triples WHERE user_id=?", (user_id,)).fetchall()
+                "SELECT t.* FROM triples t JOIN amu a ON a.id=t.amu_id "
+                "WHERE t.user_id=?" +
+                ("" if include_sensitive else " AND a.sensitivity!='sensitive'"),
+                (user_id,)).fetchall()
         return [dict(r) for r in rows]
 
-    def get_amus_by_ids(self, ids: List[str], include_history=False) -> List[Dict]:
+    def get_amus_by_ids(self, ids: List[str], include_history=False,
+                        include_sensitive=False) -> List[Dict]:
         if not ids:
             return []
         ph = ",".join("?" * len(ids))
         with _LOCK:
             rows = self.conn.execute(
                 f"SELECT * FROM amu WHERE id IN ({ph})"
-                + ("" if include_history else " AND valid_to IS NULL"),
+                + ("" if include_history else " AND valid_to IS NULL")
+                + ("" if include_sensitive else " AND sensitivity!='sensitive'"),
                 ids).fetchall()
         return [self._row_to_dict(r) for r in rows]
 
@@ -775,7 +880,31 @@ class Store:
                 sessions.append(session_id)
                 self._write("UPDATE amu SET support_sessions=? WHERE id=?",
                             (json.dumps(sessions), amu_id))
+                if len(sessions) >= config.PROFILE_STABLE_SESSIONS:
+                    self._write(
+                        "UPDATE amu SET profile_status='stable',expires_at=NULL "
+                        "WHERE id=? AND type='preference'", (amu_id,))
                 self.conn.commit()
+
+    def record_experience_feedback(self, amu_id: str, success: bool, session_id: str):
+        with _LOCK:
+            column = "helpful" if success else "harmful"
+            self._write(f"UPDATE amu SET {column}={column}+1 WHERE id=?", (amu_id,))
+            self.add_support_session(amu_id, session_id)
+            self.conn.commit()
+
+    def promote_scene_profiles(self, scene_id: str):
+        """Materialize stable traits once enough distinct sessions support them."""
+        with _LOCK:
+            rows = self.conn.execute(
+                "SELECT id,support_sessions FROM amu WHERE scene_id=? "
+                "AND type='preference' AND valid_to IS NULL", (scene_id,)).fetchall()
+            for row in rows:
+                if len(json.loads(row["support_sessions"] or "[]")) >= config.PROFILE_STABLE_SESSIONS:
+                    self._write(
+                        "UPDATE amu SET profile_status='stable',expires_at=NULL WHERE id=?",
+                        (row["id"],))
+            self.conn.commit()
 
     def record_recall(self, amu_ids: List[str], scene_ids: List[str]):
         """Search-side usage counters. Relative updates only and no revision bump,
@@ -788,10 +917,11 @@ class Store:
                 self.conn.execute(
                     "UPDATE amu SET recall_count=recall_count+1,last_recalled=?,"
                     "strength=strength+?,tier=CASE WHEN tier='cold' THEN 'hot' ELSE tier END"
-                    " WHERE id=?", (now, config.FORGET_RECALL_BONUS_DAYS, amu_id))
+                    " WHERE id=?", (now, config.FORGET_RECALL_BONUS_DAYS /
+                                     config.FORGET_STRENGTH_DAYS, amu_id))
             for scene_id in scene_ids:
                 self.conn.execute(
-                    "UPDATE scenes SET visit_count=visit_count+1,last_access=? WHERE id=?",
+                    "UPDATE scenes SET visit_count=visit_count+1,last_access=?,tier='hot' WHERE id=?",
                     (now, scene_id))
             self.conn.commit()
 

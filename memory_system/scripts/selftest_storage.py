@@ -89,6 +89,20 @@ class IntegrityTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(calls, 1)
         self.assertEqual(self.st.get_amus('u')[0]['content'], 'Alice lives elsewhere.')
 
+    async def test_rejected_merge_keeps_both_memories_instead_of_failing(self):
+        await add.run_add(self.st, request())
+        old = self.st.get_amus('u')[0]
+        decision = AsyncMock(return_value=('UPDATE', {
+            'target_id': old['id'], 'merged_content': 'Alice lives in Paris and Berlin.'}))
+        with patch.object(add, '_govern_one', decision), patch.object(
+                add, '_verify_semantics', AsyncMock(side_effect=ValueError('misattributed'))):
+            await add.run_add(self.st, request('r2', 'Bob lives in Berlin.'))
+        contents = sorted(a['content'] for a in self.st.get_amus('u'))
+        self.assertEqual(len(contents), 2)
+        self.assertEqual(contents[0], old['content'])
+        self.assertNotIn('Alice lives in Paris and Berlin.', contents)
+        self.assertTrue(self.st.request_seen('r2'))
+
     async def test_same_entity_is_in_governance_candidates(self):
         vec = (await embed(['unrelated words']))[0]
         self.st.insert_amu(user_id='u', session_id='s', content='Alice old state',

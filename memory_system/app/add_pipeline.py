@@ -333,16 +333,26 @@ async def _persist_fact(st: store.Store, req: schemas.AddRequest,
         old_triples = [{"subject": t["subject"], "relation": t["relation"], "object": t["object"]}
                        for t in st.triples_for_user(req.user_id) if t["amu_id"] == target]
         final["triples"] = _union(old_triples, fact.get("triples", []))
-        final_vec = (await embed([_embed_text(final)], stage="add.embed_update"))[0]
-        await _verify_semantics([final], st.sources_for_amu(target) + [
-            dict(message_index=j, request_id=req.request_id, role=m.role, content=m.content)
-            for j, m in enumerate(req.messages)])
-        st.replace_fact(target, final, final_vec)
-        for t in final["triples"]:
-            st.insert_triple(req.user_id, t["subject"], t["relation"], t["object"], target)
-        st.link_sources(target, req.request_id, fact.get("_sources", []))
-        st.add_support_session(target, req.session_id)
-        return None  # refreshed triples already persisted against final content
+        # Verify only what the checker can judge; internal keys would be read as
+        # "missing metadata" by small models.
+        checked = {k: final.get(k) for k in ("content", "type", "state", "triples", "evidence")}
+        try:
+            await _verify_semantics([checked], st.sources_for_amu(target) + [
+                dict(message_index=j, request_id=req.request_id, role=m.role, content=m.content)
+                for j, m in enumerate(req.messages)])
+        except ValueError as exc:
+            # A rejected merge must not fail the Add; keep both memories instead.
+            log.warning("Merged memory rejected target=%s; storing new fact separately (%s)",
+                        target, exc)
+            op, target = "ADD", None
+        else:
+            final_vec = (await embed([_embed_text(final)], stage="add.embed_update"))[0]
+            st.replace_fact(target, final, final_vec)
+            for t in final["triples"]:
+                st.insert_triple(req.user_id, t["subject"], t["relation"], t["object"], target)
+            st.link_sources(target, req.request_id, fact.get("_sources", []))
+            st.add_support_session(target, req.session_id)
+            return None  # refreshed triples already persisted against final content
     supersedes = None
     # Unknown/coarse event times are not invented state-transition instants.
     valid_from = fact.get("event_time") or _ref_time(req.messages)

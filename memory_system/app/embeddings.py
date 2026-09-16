@@ -19,9 +19,13 @@ async def embed(texts: List[str], stage: str = "embedding") -> np.ndarray:
     if config.EMBED_API_KEY:
         kwargs["api_key"] = config.EMBED_API_KEY
     # Matryoshka-capable models shorten natively; slicing other models' vectors
-    # would distort the similarity space (REVIEW P0-1).
+    # would distort the similarity space (REVIEW P0-1). LiteLLM recognizes the
+    # OpenAI parameter directly, while Qwen3 needs it forwarded to compatible
+    # providers as an extra request-body field.
     if "text-embedding-3" in config.EMBED_MODEL:
         kwargs["dimensions"] = config.EMBED_DIM
+    elif "qwen3-embedding" in config.EMBED_MODEL.lower():
+        kwargs["extra_body"] = {"dimensions": config.EMBED_DIM}
     async def _call(_attempt):
         return await litellm.aembedding(
             model=config.EMBED_MODEL, input=texts,

@@ -121,6 +121,18 @@ class IntegrityTests(unittest.IsolatedAsyncioTestCase):
             with self.assertRaises(RuntimeError):
                 await embeddings.embed(['must not hash'], stage='test.embedding')
 
+    async def test_qwen3_requests_configured_native_dimension(self):
+        import litellm
+        response = {'data': [{'embedding': [1.0] * config.EMBED_DIM}]}
+        call = AsyncMock(return_value=response)
+        with patch.object(config, 'FAKE', False), patch.object(
+                config, 'EMBED_MODEL', 'openai/Qwen/Qwen3-Embedding-8B'), patch.object(
+                litellm, 'aembedding', call):
+            vecs = await embeddings.embed(['dimension probe'], stage='test.embedding')
+        self.assertEqual(vecs.shape, (1, config.EMBED_DIM))
+        self.assertEqual(call.await_args.kwargs['extra_body'],
+                         {'dimensions': config.EMBED_DIM})
+
     def test_embedding_dimension_mismatch_is_never_sliced_or_padded(self):
         with self.assertRaisesRegex(ValueError, 'returned 3 dimensions'):
             embeddings._fit_dim(np.ones((1, 3), dtype=np.float32))

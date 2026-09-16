@@ -20,13 +20,43 @@ from .embeddings import embed
 log = logging.getLogger("aml.search")
 
 
+def _parse_iso(value) -> Optional[datetime]:
+    if not value or not isinstance(value, str):
+        return None
+    try:
+        return datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+
+
+def _readable_range(temporal: Dict) -> str:
+    """Spell the event range as 'D Month YYYY' so the answer model never has
+    to parse ISO 'YYYY-MM-DD' (qwen-14b read 2023-05-07 as 5 July)."""
+    start = _parse_iso(temporal.get("start"))
+    end = _parse_iso(temporal.get("end"))
+    if not start:
+        return "unknown"
+    precision = (temporal.get("precision") or "").lower()
+    if precision == "year":
+        return start.strftime("%Y")
+    if precision == "month":
+        return start.strftime("%B %Y")
+    if end and end.date() != start.date():
+        if start.year != end.year:
+            return f"{start.day} {start.strftime('%B %Y')} - {end.day} {end.strftime('%B %Y')}"
+        if start.month != end.month:
+            return f"{start.day} {start.strftime('%B')} - {end.day} {end.strftime('%B %Y')}"
+        return f"{start.day}-{end.day} {start.strftime('%B %Y')}"
+    return f"{start.day} {start.strftime('%B %Y')}"
+
+
 def _time_prefix(a: Dict) -> str:
     vf = a.get("valid_from") or "unknown"
     vt = a.get("valid_to") or "open"
     temporal = a.get("temporal")
     if temporal:
-        return (f"[valid: {vf} ~ {vt}] [event range: {temporal.get('start')} ~ "
-                f"{temporal.get('end')}; precision: {temporal.get('precision')}; "
+        return (f"[valid: {vf} ~ {vt}] [event: {_readable_range(temporal)}; "
+                f"precision: {temporal.get('precision')}; "
                 f"original: {temporal.get('raw')}; reference: {temporal.get('reference_time')}] ")
     event = a.get("event_time")
     return f"[valid: {vf} ~ {vt}] " + (f"[event: {event}] " if event else "")

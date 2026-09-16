@@ -233,6 +233,37 @@ class EvidenceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(integrity.cited_indices(dict(evidence=[dict(message_index=9, quote='x')]), batch), [])
         self.assertEqual(integrity.cited_indices(dict(), batch), [])
 
+    def test_find_time_expressions(self):
+        self.assertEqual(integrity.find_time_expressions(
+            'I went to the group Yesterday and it was great'), ['yesterday'])
+        self.assertEqual(integrity.find_time_expressions(
+            'we camped last weekend and last week too'), ['last weekend', 'last week'])
+        self.assertEqual(integrity.find_time_expressions('a few weeks ago; last night'), [])
+        self.assertEqual(integrity.find_time_expressions('我们上周三见面'), ['上周三'])
+
+    async def test_null_time_expression_backfilled_from_own_quote(self):
+        text = 'I attended an LGBTQ support group yesterday.'
+        fact = self.fact('Alice attended an LGBTQ support group.')
+        fact.update(type='event', state=None, triples=[],
+                    evidence=[dict(message_index=0, quote=text)])
+        with patch.object(llm, 'complete_json', AsyncMock(return_value={'facts': [fact]})):
+            result = await add._extract(self.st, self.req(text, timestamp=1683554160000))
+        saved = result['facts'][0]
+        self.assertEqual(saved['type'], 'event')
+        self.assertEqual(saved['time_expression'], 'yesterday')
+        self.assertEqual(saved['temporal']['precision'], 'day')
+        self.assertTrue(saved['temporal']['start'].startswith('2023-05-07'))
+
+    async def test_ambiguous_quote_times_are_not_backfilled(self):
+        text = 'I painted this last year and framed it yesterday.'
+        fact = self.fact('Alice painted a picture.')
+        fact.update(type='event', state=None, triples=[],
+                    evidence=[dict(message_index=0, quote=text)])
+        with patch.object(llm, 'complete_json', AsyncMock(return_value={'facts': [fact]})):
+            result = await add._extract(self.st, self.req(text))
+        self.assertIsNone(result['facts'][0]['time_expression'])
+        self.assertEqual(result['facts'][0]['temporal']['precision'], 'unknown')
+
     def test_quote_in_normalization(self):
         self.assertTrue(integrity.quote_in('\u201cLast Friday\u201d', 'we met last friday.'))
         self.assertTrue(integrity.quote_in('周五 见', '我们周五 见面'))

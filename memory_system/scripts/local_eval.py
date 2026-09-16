@@ -48,6 +48,8 @@ def parse_args():
     p.add_argument("--inspect", action="store_true", help="Validate/count only; no model calls")
     p.add_argument("--chunk-messages", type=int, default=20)
     p.add_argument("--chunk-words", type=int, default=2000)
+    p.add_argument("--answer-top-k", type=int, default=50,
+                   help="memories handed to the answer model (search still recalls top_k=100)")
     p.add_argument("--no-graph", action="store_true")
     p.add_argument("--no-governance", action="store_true")
     p.add_argument("--no-rerank", action="store_true")
@@ -280,7 +282,7 @@ async def main():
                 pred, score, diagnostics = await progress.run(
                     eval_scoring.evaluate(
                         qa,
-                        [d.dict() for d in resp.data]),
+                        [d.dict() for d in resp.data[:args.answer_top_k]]),
                     f"Answer/Judge conv {ci}/{conv_count} QA {qi}/{len(qas)}")
                 n_qa += 1
                 score_sum += score

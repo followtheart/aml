@@ -42,6 +42,21 @@ class ContextTests(unittest.TestCase):
                                         {"content": "two"}]), "one\ntwo")
         self.assertEqual(context.build([]), "(no memories)")
 
+    def test_episode_covered_by_ranked_facts_is_dropped(self):
+        src = lambda i: {"request_id": "r", "message_index": i, "content": f"m{i}",
+                         "timestamp": 1, "role": "user"}
+        memories = [
+            {"content": "fact A", "memory_type": "fact", "sources": [src(0)]},
+            {"content": "fact B", "memory_type": "fact", "sources": [src(1)]},
+            {"content": "episode AB", "memory_type": "episode", "sources": [src(0), src(1)]},
+            {"content": "episode BC", "memory_type": "episode", "sources": [src(1), src(2)]},
+            {"content": "fact A again", "memory_type": "fact", "sources": [src(0)]},
+        ]
+        result = context.build(memories)
+        self.assertNotIn("episode AB", result)
+        self.assertIn("episode BC", result)
+        self.assertIn("fact A again", result)
+
     def test_question_options_and_instructions_outside_budget(self):
         qa = {"question": "QUESTION_END", "question_date": "2023-05-25",
               "scoring": "choice", "qa_type": "single_choice",

@@ -80,6 +80,14 @@ def _validate_fact(raw, batch, start, req):
     indices = integrity.verify_quotes(fact, batch)
     fact["_sources"] = [start + j for j in indices]
     expression = fact.get("time_expression")
+    if not expression:
+        # Small models often leave time_expression null although the quote
+        # they cited says "yesterday"/"last year". Backfill only from this
+        # fact's own verified quotes and only when they name exactly one
+        # resolvable expression; the semantic check still has to accept it.
+        found = {e for entry in fact["evidence"]
+                 for e in integrity.find_time_expressions(entry["quote"])}
+        expression = fact["time_expression"] = found.pop() if len(found) == 1 else None
     if expression:
         if not isinstance(expression, str):
             raise ValueError("Time expression must be text or null")
@@ -347,6 +355,11 @@ async def _persist_fact(st: store.Store, req: schemas.AddRequest,
         final["evidence"] = previous.get("evidence", []) + fact.get("evidence", [])
         if previous.get("state") != fact.get("state"):
             final["state"] = None
+        # A complementary detail without its own time must not erase the
+        # resolved time of the memory it is merged into.
+        if not (fact.get("temporal") or {}).get("raw") and (previous.get("temporal") or {}).get("raw"):
+            final["temporal"] = previous["temporal"]
+            final["event_time"] = previous.get("event_time")
         old_triples = [{"subject": t["subject"], "relation": t["relation"], "object": t["object"]}
                        for t in st.triples_for_user(req.user_id) if t["amu_id"] == target]
         final["triples"] = _union(old_triples, fact.get("triples", []))

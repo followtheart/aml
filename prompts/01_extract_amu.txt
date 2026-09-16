@@ -43,6 +43,12 @@ Extract atomic memory units from the NEW messages only. Rules:
    that this fact answers (e.g. "When did Dave start photography?").
 5. Extract knowledge-graph triples (subject, relation, object) for entities
    mentioned in the facts. Normalize relation labels to lowercase snake_case.
+6. Keep every concrete place, venue, organization and institution noun from
+   the source in content ("gave a speech at a school", "the café", "an
+   adoption agency"); never generalize it into "an event" or "somewhere".
+7. Relocation and origin statements ("moved from Sweden 4 years ago", "grew
+   up in Ohio") are always their own atomic fact carrying the place name and
+   the source duration or time phrase, even when mentioned in passing.
 
 Call the provided emit_json_result function with the episode and extracted
 facts. Fill every required field from the NEW messages. Never copy schema

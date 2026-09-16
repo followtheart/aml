@@ -143,6 +143,27 @@ def resolve_time(expression, reference):
     return result
 
 
+# Only expressions resolve_time() can turn into a range; longest alternatives first.
+_TIME_EXPRESSIONS = re.compile(
+    r'\b(?:last weekend|this past weekend'
+    r'|(?:last|next) (?:monday|tuesday|wednesday|thursday|friday|saturday|sunday'
+    r'|mon|tues|tue|wed|thu|thur|fri|sat|sun)'
+    r'|(?:last|this|next) (?:week|month|year)'
+    r'|(?:\d+|one|two|three|four|five|six|seven|eight|nine|ten) (?:days?|months?|years?) ago'
+    r'|yesterday|today|tomorrow)\b'
+    r'|[上下](?:周|星期)[一二三四五六日天]'
+    r'|昨天|今天|明天|上周|本周|下周|上个月|这个月|下个月|去年|今年|明年', re.IGNORECASE)
+
+
+def find_time_expressions(text):
+    """Distinct resolvable relative time expressions present in text, in order."""
+    found = []
+    for match in _TIME_EXPRESSIONS.finditer(normalize_text(text)):
+        if match[0] not in found:
+            found.append(match[0])
+    return found
+
+
 def verify_quotes(fact, batch):
     evidence = fact.get('evidence')
     if not isinstance(evidence, list) or not evidence:

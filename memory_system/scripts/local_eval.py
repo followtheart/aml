@@ -268,7 +268,7 @@ async def main():
                     session_id=f"{uid}:session:{sid}")
                 await progress.run(
                     add_pipeline.run_add(st, req),
-                    f"Add conv {ci}/{conv_count} session {sid} chunk {chunk_id}")
+                    f"Add conv {ci}/{conv_count} session {sid} chunk {chunk_id}\n")
             for qi, qa in enumerate(qas, 1):
                 resp = await progress.run(
                     search_pipeline.run_search(

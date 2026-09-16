@@ -133,6 +133,18 @@ def _fake_available() -> bool:
     return config.FAKE
 
 
+def _provider_kwargs() -> dict:
+    """Endpoint credentials plus model-specific request-body switches."""
+    kwargs = {}
+    if config.LLM_API_BASE:
+        kwargs["api_base"] = config.LLM_API_BASE
+    if config.LLM_API_KEY:
+        kwargs["api_key"] = config.LLM_API_KEY
+    if config.LLM_DISABLE_THINKING and "qwen3" in config.LLM_MODEL.lower():
+        kwargs["extra_body"] = {"enable_thinking": False}
+    return kwargs
+
+
 async def complete(prompt: str, system: Optional[str] = None,
                    response_format: Optional[dict] = None,
                    max_tokens: Optional[int] = None,
@@ -147,11 +159,7 @@ async def complete(prompt: str, system: Optional[str] = None,
         if system:
             messages.append({"role": "system", "content": system})
         messages.append({"role": "user", "content": prompt})
-        kwargs = {}
-        if config.LLM_API_BASE:
-            kwargs["api_base"] = config.LLM_API_BASE
-        if config.LLM_API_KEY:
-            kwargs["api_key"] = config.LLM_API_KEY
+        kwargs = _provider_kwargs()
         if response_format:
             kwargs["response_format"] = response_format
         async def _call(_attempt):
@@ -268,11 +276,7 @@ async def _complete_tool_json(prompt: str, schema: dict,
                     "Call emit_json_result now. Fill every required field "
                     "from the original input; do not return prose."),
             })
-        kwargs = {}
-        if config.LLM_API_BASE:
-            kwargs["api_base"] = config.LLM_API_BASE
-        if config.LLM_API_KEY:
-            kwargs["api_key"] = config.LLM_API_KEY
+        kwargs = _provider_kwargs()
         resp = await litellm.acompletion(
             model=config.LLM_MODEL,
             messages=messages,

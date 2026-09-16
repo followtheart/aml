@@ -29,7 +29,7 @@ class SearchRequest(BaseModel):
     user_id: str = Field(min_length=1)
     top_k: int = Field(default=100, ge=1, le=100)
     include_history: Optional[bool] = None
-    include_sensitive: bool = False
+    include_sensitive: bool = True
     # ISO-8601 question/evaluation time used to resolve relative expressions.
     reference_time: Optional[str] = None
 

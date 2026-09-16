@@ -4,6 +4,7 @@ triples) -> novelty gate -> item-level governance -> multi-index write ->
 scene consolidation / heat / forgetting -> rolling summary.
 Synchronous from the caller's point of view.
 """
+import asyncio
 import json
 import logging
 import re
@@ -84,12 +85,11 @@ def _validate_fact(raw, batch, start, req):
             raise ValueError("Time expression must be text or null")
         # Expand only an already verified quote's own message. Never borrow
         # time from another message or infer a date to make validation pass.
-        if not any(expression.casefold() in e["quote"].casefold()
-                   for e in fact["evidence"]):
+        if not any(integrity.quote_in(expression, e["quote"]) for e in fact["evidence"]):
             evidence = [dict(e) for e in fact["evidence"]]
             for entry in evidence:
                 source = batch[entry["message_index"]].content
-                if expression.casefold() in source.casefold():
+                if integrity.quote_in(expression, source):
                     entry["quote"] = source
                     break
             else:
@@ -141,94 +141,103 @@ async def _segments(req: schemas.AddRequest) -> List[List[int]]:
 
 async def _extract(st: store.Store, req: schemas.AddRequest) -> Dict:
     summary = st.get_summary(req.user_id, req.session_id)
-    facts = []
     segments = await _segments(req)
-
-    for seg_index, indices in enumerate(segments):
-        start = indices[0]
-        batch = [req.messages[i] for i in indices]
-        prior = req.messages[max(0, start - 4):start]
-        prompt = prompts.render(
-            "01_extract_amu.txt",
-            session_summary=summary or "(none yet)",
-            recent_messages=_format_messages(prior) or "(none)",
-            chunk_messages="\n".join(f"[{i}] {m.role}: {m.content}"
-                                     for i, m in enumerate(batch)),
-            reference_time=_ref_time(batch),
-        )
-        try:
-            data = await llm.complete_json(
-                prompt, json.dumps(llm.STRUCTURED_SCHEMAS["extraction"]),
-                schema=llm.STRUCTURED_SCHEMAS["extraction"],
-                stage=f"add.extract.segment_{seg_index + 1}")
-            if not isinstance(data, dict):
-                raise ValueError("extraction result is not a JSON object")
-            grounded = []
-            rejected_sources = set()
-            raw_facts = data.get("facts") or []
-            if not isinstance(raw_facts, list):
-                raise ValueError("Extraction facts must be an array")
-            for fact_index, raw in enumerate(raw_facts):
-                try:
-                    fact = _validate_fact(raw, batch, start, req)
-                    fact["_segment"] = seg_index
-                    grounded.append(fact)
-                except Exception as exc:
-                    # Invalid citations cannot reliably locate the failed fact;
-                    # preserve the entire batch in that case, plus valid facts.
-                    try:
-                        indices_hit = integrity.verify_quotes(raw, batch)
-                    except Exception:
-                        indices_hit = range(len(batch))
-                    rejected_sources.update(start + j for j in indices_hit)
-                    log.warning("extraction fact rejected segment_start=%d fact_index=%d "
-                                "source_indices=%s reason=%s", start, fact_index,
-                                [start + j for j in indices_hit], exc)
-            messages = [dict(message_index=start+j, role=m.role, content=m.content)
-                        for j, m in enumerate(batch)]
-            if grounded:
-                try:
-                    await _verify_semantics(grounded, messages)
-                except ValueError as exc:
-                    if len(grounded) == 1:
-                        log.warning("semantic fact rejected segment_start=%d "
-                                    "source_indices=%s reason=%s", start,
-                                    grounded[0]["_sources"], exc)
-                        rejected_sources.update(grounded[0]["_sources"])
-                        grounded = []
-                    # The normal path costs one check. Isolate semantic failures
-                    # only when the batch-level check actually rejects the facts.
-                    verified = []
-                    for fact_index, fact in enumerate(grounded):
-                        try:
-                            await _verify_semantics([fact], messages)
-                            verified.append(fact)
-                        except ValueError as exc:
-                            rejected_sources.update(fact["_sources"])
-                            log.warning("semantic fact rejected segment_start=%d "
-                                        "fact_index=%d source_indices=%s reason=%s",
-                                        start, fact_index, fact["_sources"], exc)
-                    grounded = verified
-            if not grounded and not rejected_sources:
-                rejected_sources.update(indices)
-            facts.extend(grounded)
-            # §2.1 MemCell keeps the raw chunk (E) next to its atomic facts (F);
-            # a single fully-extracted message would only duplicate its fact.
-            # Without episodes only rejected sources fall back to a chunk.
-            if config.STORE_EPISODES and (len(indices) > 1 or not grounded or rejected_sources):
-                sensitivity = ("sensitive" if rejected_sources or any(
-                    fact.get("sensitivity") == "sensitive" for fact in grounded) else "normal")
-                facts.append(_episode(req, indices, seg_index, data.get("episode"), sensitivity))
-            elif rejected_sources:
-                facts.append(_episode(req, sorted(rejected_sources), seg_index,
-                                      data.get("episode"), "sensitive"))
-        except Exception as e:
-            log.warning(
-                "extraction segment %d-%d failed (%s); storing that segment as "
-                "an episode", start, indices[-1], e)
-            facts.append(_episode(req, indices, seg_index, sensitivity="sensitive"))
-
+    # Segments are independent read-only LLM work; run them concurrently and
+    # keep segment order so downstream cells and episodes stay deterministic.
+    per_segment = await asyncio.gather(*(
+        _extract_segment(req, summary, seg_index, indices)
+        for seg_index, indices in enumerate(segments)))
+    facts = [fact for group in per_segment for fact in group]
     return {"facts": facts, "segments": segments}
+
+
+async def _extract_segment(req: schemas.AddRequest, summary: Optional[str],
+                           seg_index: int, indices: List[int]) -> List[Dict]:
+    facts: List[Dict] = []
+    start = indices[0]
+    batch = [req.messages[i] for i in indices]
+    prior = req.messages[max(0, start - 4):start]
+    prompt = prompts.render(
+        "01_extract_amu.txt",
+        session_summary=summary or "(none yet)",
+        recent_messages=_format_messages(prior) or "(none)",
+        chunk_messages="\n".join(f"[{i}] {m.role}: {m.content}"
+                                 for i, m in enumerate(batch)),
+        reference_time=_ref_time(batch),
+    )
+    try:
+        data = await llm.complete_json(
+            prompt, json.dumps(llm.STRUCTURED_SCHEMAS["extraction"]),
+            schema=llm.STRUCTURED_SCHEMAS["extraction"],
+            stage=f"add.extract.segment_{seg_index + 1}")
+        if not isinstance(data, dict):
+            raise ValueError("extraction result is not a JSON object")
+        grounded = []
+        rejected_sources = set()
+        raw_facts = data.get("facts") or []
+        if not isinstance(raw_facts, list):
+            raise ValueError("Extraction facts must be an array")
+        for fact_index, raw in enumerate(raw_facts):
+            try:
+                fact = _validate_fact(raw, batch, start, req)
+                fact["_segment"] = seg_index
+                grounded.append(fact)
+            except Exception as exc:
+                # Locate the failed fact from any in-range cited message so
+                # one bad quote does not shadow the whole batch; only when
+                # no citation is usable is the entire batch preserved.
+                try:
+                    indices_hit = integrity.verify_quotes(raw, batch)
+                except Exception:
+                    indices_hit = integrity.cited_indices(raw, batch) or range(len(batch))
+                rejected_sources.update(start + j for j in indices_hit)
+                log.warning("extraction fact rejected segment_start=%d fact_index=%d "
+                            "source_indices=%s reason=%s", start, fact_index,
+                            [start + j for j in indices_hit], exc)
+        messages = [dict(message_index=start+j, role=m.role, content=m.content)
+                    for j, m in enumerate(batch)]
+        if grounded:
+            try:
+                await _verify_semantics(grounded, messages)
+            except ValueError as exc:
+                if len(grounded) == 1:
+                    log.warning("semantic fact rejected segment_start=%d "
+                                "source_indices=%s reason=%s", start,
+                                grounded[0]["_sources"], exc)
+                    rejected_sources.update(grounded[0]["_sources"])
+                    grounded = []
+                # The normal path costs one check. Isolate semantic failures
+                # only when the batch-level check actually rejects the facts.
+                verified = []
+                for fact_index, fact in enumerate(grounded):
+                    try:
+                        await _verify_semantics([fact], messages)
+                        verified.append(fact)
+                    except ValueError as exc:
+                        rejected_sources.update(fact["_sources"])
+                        log.warning("semantic fact rejected segment_start=%d "
+                                    "fact_index=%d source_indices=%s reason=%s",
+                                    start, fact_index, fact["_sources"], exc)
+                grounded = verified
+        if not grounded and not rejected_sources:
+            rejected_sources.update(indices)
+        facts.extend(grounded)
+        # §2.1 MemCell keeps the raw chunk (E) next to its atomic facts (F);
+        # a single fully-extracted message would only duplicate its fact.
+        # Without episodes only rejected sources fall back to a chunk.
+        if config.STORE_EPISODES and (len(indices) > 1 or not grounded or rejected_sources):
+            sensitivity = ("sensitive" if rejected_sources or any(
+                fact.get("sensitivity") == "sensitive" for fact in grounded) else "normal")
+            facts.append(_episode(req, indices, seg_index, data.get("episode"), sensitivity))
+        elif rejected_sources:
+            facts.append(_episode(req, sorted(rejected_sources), seg_index,
+                                  data.get("episode"), "sensitive"))
+    except Exception as e:
+        log.warning(
+            "extraction segment %d-%d failed (%s); storing that segment as "
+            "an episode", start, indices[-1], e)
+        facts.append(_episode(req, indices, seg_index, sensitivity="sensitive"))
+    return facts
 
 
 def _same_text(a: str, b: str) -> bool:

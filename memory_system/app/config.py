@@ -6,6 +6,8 @@ AML_LLM_MODEL   : litellm model string for all LLM calls.
                     OpenAI       gpt-4o-mini            (OPENAI_API_KEY)
                     SiliconFlow  siliconflow/Qwen/Qwen2.5-7B-Instruct
                                  (SILICONFLOW_API_KEY)
+                    DashScope    dashscope/qwen3-14b   (DASHSCOPE_API_KEY,
+                                 Alibaba Cloud Bailian OpenAI-compatible mode)
                     DeepSeek     deepseek/deepseek-chat (DEEPSEEK_API_KEY)
                     Ollama       ollama/qwen2.5
                     Any OpenAI-compatible endpoint:
@@ -17,6 +19,7 @@ AML_EXTRACT_BATCH_MESSAGES : maximum messages per extraction request.
                   Default 6 to keep small-model JSON generation reliable.
 AML_EMBED_MODEL : litellm embedding model. Default "text-embedding-3-small".
                   SiliconFlow example: siliconflow/BAAI/bge-m3
+                  DashScope example:   dashscope/text-embedding-v4
                   (or openai/<model> + AML_EMBED_API_BASE).
 AML_EMBED_API_BASE / AML_EMBED_API_KEY : same override for embeddings.
 AML_EMBED_DIM / AML_EMBEDDING_SPACE : stored vector dimension and explicit
@@ -57,21 +60,42 @@ EMBED_API_BASE = os.environ.get("AML_EMBED_API_BASE", "") or None
 EMBED_API_KEY = os.environ.get("AML_EMBED_API_KEY", "") or None
 
 
-def _normalize_siliconflow(model, api_base, api_key):
-    """litellm has no siliconflow provider in some versions; SiliconFlow is
-    OpenAI-compatible, so rewrite `siliconflow/<m>` -> `openai/<m>` with the
-    SiliconFlow base URL and SILICONFLOW_API_KEY."""
-    if model and model.startswith("siliconflow/"):
-        return ("openai/" + model[len("siliconflow/"):],
-                api_base or "https://api.siliconflow.cn/v1",
-                api_key or os.environ.get("SILICONFLOW_API_KEY") or None)
-    return model, api_base, api_key
+# OpenAI-compatible providers that litellm may not know natively. Each prefix
+# maps to its base URL, the environment variable holding the API key, the
+# provider's hard ceiling on max_tokens and on embedding inputs per request
+# (None when unknown/unbounded).
+_COMPATIBLE_PROVIDERS = {
+    "siliconflow/": {"base": "https://api.siliconflow.cn/v1",
+                     "key_env": "SILICONFLOW_API_KEY", "max_output_tokens": None,
+                     "embed_batch": None},
+    "dashscope/": {"base": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+                   "key_env": "DASHSCOPE_API_KEY", "max_output_tokens": 8192,
+                   "embed_batch": 10},
+}
 
 
-LLM_MODEL, LLM_API_BASE, LLM_API_KEY = _normalize_siliconflow(
+def _normalize_compatible(model, api_base, api_key):
+    """Rewrite `<provider>/<m>` -> `openai/<m>` with the provider's base URL
+    and API key so litellm talks to it through its OpenAI client. Also returns
+    the provider spec (limits) or None."""
+    for prefix, spec in _COMPATIBLE_PROVIDERS.items():
+        if model and model.startswith(prefix):
+            return ("openai/" + model[len(prefix):],
+                    api_base or spec["base"],
+                    api_key or os.environ.get(spec["key_env"]) or None,
+                    spec)
+    return model, api_base, api_key, None
+
+
+LLM_MODEL, LLM_API_BASE, LLM_API_KEY, _LLM_SPEC = _normalize_compatible(
     LLM_MODEL, LLM_API_BASE, LLM_API_KEY)
-EMBED_MODEL, EMBED_API_BASE, EMBED_API_KEY = _normalize_siliconflow(
+EMBED_MODEL, EMBED_API_BASE, EMBED_API_KEY, _EMBED_SPEC = _normalize_compatible(
     EMBED_MODEL, EMBED_API_BASE, EMBED_API_KEY)
+_LLM_OUTPUT_CAP = _LLM_SPEC["max_output_tokens"] if _LLM_SPEC else None
+# Inputs per embedding request; larger lists are split into ordered batches.
+EMBED_BATCH_SIZE = max(1, int(os.environ.get(
+    "AML_EMBED_BATCH_SIZE",
+    str((_EMBED_SPEC or {}).get("embed_batch") or 2048))))
 API_KEY = os.environ.get("AML_API_KEY", "")
 DB_PATH = os.environ.get("AML_DB_PATH", os.path.join(os.path.dirname(__file__), "..", "memory.db"))
 FAKE = os.environ.get("AML_FAKE", "") == "1"
@@ -86,8 +110,19 @@ RATE_LIMIT_MAX_BACKOFF_SECONDS = max(
 # Local soft thresholds; set to the account's limits with suitable headroom.
 PROVIDER_SOFT_TPM = max(0, int(os.environ.get("AML_PROVIDER_SOFT_TPM", "60000")))
 PROVIDER_RPM = max(0, int(os.environ.get("AML_PROVIDER_RPM", "30")))
+# In-flight calls allowed per (kind, model); the RPM/TPM window still paces them.
+PROVIDER_CONCURRENCY = max(1, int(os.environ.get("AML_PROVIDER_CONCURRENCY", "4")))
+# Qwen3 chat models reason by default on OpenAI-compatible endpoints; the
+# hidden reasoning tokens multiply latency for structured extraction, and
+# DashScope rejects non-streaming requests while thinking is enabled.
+LLM_DISABLE_THINKING = os.environ.get("AML_LLM_DISABLE_THINKING", "1") == "1"
 LLM_MAX_TOKENS = 1200   # caps runaway repetition from small models
 LLM_JSON_MAX_TOKENS = int(os.environ.get("AML_LLM_JSON_MAX_TOKENS", "2048"))
+# Providers reject max_tokens above their ceiling with HTTP 400 instead of
+# clamping; clamp locally so a generous default does not break every call.
+if _LLM_OUTPUT_CAP:
+    LLM_JSON_MAX_TOKENS = min(LLM_JSON_MAX_TOKENS, _LLM_OUTPUT_CAP)
+    LLM_MAX_TOKENS = min(LLM_MAX_TOKENS, _LLM_OUTPUT_CAP)
 EXTRACT_BATCH_MESSAGES = max(
     1, int(os.environ.get("AML_EXTRACT_BATCH_MESSAGES", "6")))
 EMBED_DIM = max(32, int(os.environ.get("AML_EMBED_DIM", "256")))

@@ -15,10 +15,10 @@ log = logging.getLogger("aml.metrics")
 
 
 class _Pacer:
-    """Serialize a model's calls and pace them using a rolling local window."""
+    """Bound a model's in-flight calls and pace them using a rolling local window."""
 
     def __init__(self):
-        self.lock = asyncio.Lock()
+        self.lock = asyncio.Semaphore(config.PROVIDER_CONCURRENCY)
         self.requests = deque()
         self.usage = deque()
 

@@ -70,8 +70,23 @@ class RetryTests(unittest.IsolatedAsyncioTestCase):
             await metrics.asyncio.sleep(0)
             active -= 1
             return {}
-        await metrics.asyncio.gather(*(self.run_call(provider) for _ in range(3)))
+        with patch.object(metrics.config, "PROVIDER_CONCURRENCY", 1):
+            await metrics.asyncio.gather(*(self.run_call(provider) for _ in range(3)))
         self.assertEqual(peak, 1)
+
+    async def test_concurrency_is_bounded_by_config(self):
+        active = 0
+        peak = 0
+        async def provider(attempt):
+            nonlocal active, peak
+            active += 1
+            peak = max(peak, active)
+            await metrics.asyncio.sleep(0)
+            active -= 1
+            return {}
+        with patch.object(metrics.config, "PROVIDER_CONCURRENCY", 2):
+            await metrics.asyncio.gather(*(self.run_call(provider) for _ in range(5)))
+        self.assertEqual(peak, 2)
 
     async def test_other_models_do_not_share_token_budget(self):
         with patch.object(metrics.asyncio, "sleep", new_callable=AsyncMock) as sleep:

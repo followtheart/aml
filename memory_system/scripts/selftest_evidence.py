@@ -191,6 +191,54 @@ class EvidenceTests(unittest.IsolatedAsyncioTestCase):
             result = await add._extract(self.st, self.req(fact['content']))
         self.assertEqual(result['facts'][0]['type'], 'episode')
 
+    async def test_formatting_only_quote_differences_are_accepted(self):
+        source = 'Well\u2026 I\u2019m moving to  Paris \u2013 next week!'
+        fact = self.fact('Alice is moving to Paris.')
+        fact['evidence'] = [dict(message_index=0, quote="well... i'm moving to Paris - next week")]
+        with patch.object(llm, 'complete_json', AsyncMock(return_value={'facts': [fact]})):
+            result = await add._extract(self.st, self.req(source))
+        self.assertEqual(result['facts'][0]['type'], 'profile')
+        self.assertEqual(result['facts'][0]['_sources'], [0])
+        self.assertEqual(result['facts'][0]['evidence'][0]['quote'],
+                         "well... i'm moving to Paris - next week")
+
+    async def test_paraphrased_quote_still_rejected(self):
+        fact = self.fact('Alice lives in Paris.')
+        fact['evidence'] = [dict(message_index=0, quote='Alice resides in Paris')]
+        with patch.object(llm, 'complete_json', AsyncMock(return_value={'facts': [fact]})):
+            result = await add._extract(self.st, self.req('Alice lives in Paris.'))
+        self.assertEqual(result['facts'][0]['type'], 'episode')
+        self.assertEqual(result['facts'][0]['sensitivity'], 'sensitive')
+
+    async def test_bad_quote_only_shadows_its_cited_message(self):
+        req = self.req('Alice lives in Paris.')
+        req.messages.append(schemas.Message(role='user', content='Bob likes tea.'))
+        req.messages.append(schemas.Message(role='user', content='Carol plays chess.'))
+        good = self.fact('Bob likes tea.', value='tea')
+        good['evidence'] = [dict(message_index=1, quote='Bob likes tea.')]
+        bad = self.fact('Alice lives in Paris.')
+        bad['evidence'] = [dict(message_index=0, quote='Alice resides in Paris')]
+        with patch.object(llm, 'complete_json', AsyncMock(return_value={'facts': [bad, good]})):
+            result = await add._extract(self.st, req)
+        kinds = {f['type']: f for f in result['facts']}
+        self.assertEqual(kinds['profile']['content'], 'Bob likes tea.')
+        self.assertEqual(kinds['episode']['_sources'], [0])
+        self.assertNotIn('Carol', kinds['episode']['content'])
+
+    def test_cited_indices_follow_quote_to_real_message(self):
+        batch = [schemas.Message(role='user', content='Where does Alice live?'),
+                 schemas.Message(role='assistant', content='Alice lives in Paris.')]
+        fact = dict(evidence=[dict(message_index=0, quote='Alice lives in Paris.')])
+        self.assertEqual(integrity.cited_indices(fact, batch), [0, 1])
+        self.assertEqual(integrity.cited_indices(dict(evidence=[dict(message_index=9, quote='x')]), batch), [])
+        self.assertEqual(integrity.cited_indices(dict(), batch), [])
+
+    def test_quote_in_normalization(self):
+        self.assertTrue(integrity.quote_in('\u201cLast Friday\u201d', 'we met last friday.'))
+        self.assertTrue(integrity.quote_in('周五 见', '我们周五 见面'))
+        self.assertFalse(integrity.quote_in('...', 'anything'))
+        self.assertFalse(integrity.quote_in('Friday', 'we met last Thursday'))
+
     async def test_time_in_cited_message_expands_quote_without_mutation(self):
         text = 'Yesterday Alice moved to Paris.'
         fact = self.fact('Alice moved to Paris.')

@@ -1,5 +1,7 @@
 """Embedding abstraction over LiteLLM with a deterministic offline fallback."""
+import asyncio
 import hashlib
+import re
 from typing import List
 
 import numpy as np
@@ -19,28 +21,41 @@ async def embed(texts: List[str], stage: str = "embedding") -> np.ndarray:
     if config.EMBED_API_KEY:
         kwargs["api_key"] = config.EMBED_API_KEY
     # Matryoshka-capable models shorten natively; slicing other models' vectors
-    # would distort the similarity space (REVIEW P0-1). LiteLLM recognizes the
-    # OpenAI parameter directly, while Qwen3 needs it forwarded to compatible
-    # providers as an extra request-body field.
-    if "text-embedding-3" in config.EMBED_MODEL:
+    # would distort the similarity space (REVIEW P0-1). LiteLLM accepts the
+    # top-level parameter only for OpenAI's own text-embedding-3 models and
+    # rejects it for any other `openai/` model, so compatible providers
+    # (Qwen3-Embedding, DashScope text-embedding-v3/v4) get it as a raw
+    # request-body field instead.
+    model_lower = config.EMBED_MODEL.lower()
+    if "text-embedding-3" in model_lower:
         kwargs["dimensions"] = config.EMBED_DIM
-    elif "qwen3-embedding" in config.EMBED_MODEL.lower():
+    elif "qwen3-embedding" in model_lower or re.search(r"text-embedding-v[34]", model_lower):
         kwargs["extra_body"] = {"dimensions": config.EMBED_DIM}
-    async def _call(_attempt):
-        return await litellm.aembedding(
-            model=config.EMBED_MODEL, input=texts,
-            timeout=60, num_retries=0, **kwargs)
 
-    # A real provider failure must fail Add/Search. Hash vectors are only used
-    # in explicit AML_FAKE mode and can never contaminate the real vector space.
-    resp = await metrics.measured_call(
-        kind="embedding", stage=stage, model=config.EMBED_MODEL,
-        call=_call, attempts=2, input_count=len(texts))
-    vecs = np.array([d["embedding"] for d in resp["data"]],
-                    dtype=np.float32)
-    if len(vecs) != len(texts):
-        raise ValueError("Embedding provider returned the wrong number of vectors")
-    return _fit_dim(vecs)
+    async def _embed_batch(batch: List[str]) -> np.ndarray:
+        async def _call(_attempt):
+            return await litellm.aembedding(
+                model=config.EMBED_MODEL, input=batch,
+                timeout=60, num_retries=0, **kwargs)
+
+        # A real provider failure must fail Add/Search. Hash vectors are only
+        # used in explicit AML_FAKE mode and never contaminate the real space.
+        resp = await metrics.measured_call(
+            kind="embedding", stage=stage, model=config.EMBED_MODEL,
+            call=_call, attempts=2, input_count=len(batch))
+        vecs = np.array([d["embedding"] for d in resp["data"]], dtype=np.float32)
+        if len(vecs) != len(batch):
+            raise ValueError("Embedding provider returned the wrong number of vectors")
+        return vecs
+
+    # Providers cap inputs per request (DashScope: 10); split into ordered
+    # batches and let the pacer bound how many are in flight.
+    if not texts:
+        return np.zeros((0, config.EMBED_DIM), dtype=np.float32)
+    size = config.EMBED_BATCH_SIZE
+    batches = [texts[i:i + size] for i in range(0, len(texts), size)]
+    parts = await asyncio.gather(*(_embed_batch(b) for b in batches))
+    return _fit_dim(np.concatenate(parts, axis=0))
 
 
 def _fit_dim(vecs: np.ndarray) -> np.ndarray:

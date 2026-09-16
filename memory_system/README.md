@@ -60,13 +60,19 @@ episode；引用本身无效、无法定位时保留整批原文。语义批次�
 本地评测结果应检查 `error_stage` / `error_type`，避免将调用失败当作答错。
 离线重试测试：`python scripts/selftest_metrics.py`。
 
-主动节流：同一进程、事件循环内，同类同模型调用串行执行。默认最近 60 秒
+主动节流：同一进程、事件循环内，同类同模型的并发在途调用上限由
+`AML_PROVIDER_CONCURRENCY` 控制（默认 4，设为 1 即串行）；同一请求内的多个
+抽取分段会并发执行。默认最近 60 秒
 最多发起 30 次请求（含失败尝试）；已返回的累计 token 达到 60,000 后，
 后续请求等待旧用量退出窗口。分别通过 `AML_PROVIDER_RPM` 和
 `AML_PROVIDER_SOFT_TPM` 配置，0 禁用对应阈值；日志显示 `provider_throttle`。
 这是本地保守阈值，不代表服务商实际额度，也不预估下一次请求的 token；
 请按账户额度留余量调整。其他进程/账户共享用量以及服务商的其他限流仍可能
 触发 429，届时继续使用等待重试。修改后重启评测/服务进程。
+
+Qwen3 对话模型默认开启思考模式，隐藏推理 token 会显著拖慢结构化抽取；
+当 `AML_LLM_MODEL` 含 `qwen3` 时默认在请求体附带 `enable_thinking: false`，
+设 `AML_LLM_DISABLE_THINKING=0` 可恢复思考模式。
 
 文本数据集现已支持 **LoCoMo-Refined、LongMemEval-S、BEAM-100K、CLBench、PersonaMem-v2**，
 并提供 ScriptMem/Refined 授权数据导入入口。下载、转换、评分差异及命令见
@@ -104,6 +110,14 @@ export OPENAI_API_KEY=<...>
 # export AML_EMBED_MODEL=siliconflow/BAAI/bge-m3
 # siliconflow/<model> 会自动使用 https://api.siliconflow.cn/v1
 # 和 SILICONFLOW_API_KEY；无需重复设置 API_BASE/API_KEY。
+
+# 方案 C：阿里云百炼 DashScope（OpenAI 兼容模式）
+# export AML_LLM_MODEL=dashscope/qwen3-14b
+# export DASHSCOPE_API_KEY=<...>
+# export AML_EMBED_MODEL=dashscope/text-embedding-v4   # 支持 dimensions 参数
+# dashscope/<model> 会自动使用 https://dashscope.aliyuncs.com/compatible-mode/v1
+# 和 DASHSCOPE_API_KEY。qwen3 系列默认附带 enable_thinking:false（百炼要求
+# 非流式请求关闭思考模式），设 AML_LLM_DISABLE_THINKING=0 可改回。
 
 uvicorn app.main:app --host 0.0.0.0 --port 8000
 

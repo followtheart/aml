@@ -1,7 +1,29 @@
 """Deterministic evidence and time constraints at the extraction boundary."""
 import calendar
 import re
+import unicodedata
 from datetime import datetime, timedelta, timezone
+
+# Typographic variants small models silently "fix" when quoting.
+_QUOTE_VARIANTS = str.maketrans({
+    '\u2018': "'", '\u2019': "'", '\u201a': "'", '\u201b': "'",
+    '\u201c': '"', '\u201d': '"', '\u201e': '"', '\u201f': '"',
+    '\u2010': '-', '\u2011': '-', '\u2012': '-', '\u2013': '-', '\u2014': '-', '\u2015': '-',
+    '\u2026': '...', '\u00a0': ' ',
+})
+_EDGE_PUNCT = ' \t\r\n.,;:!?\'"-…()[]'
+
+
+def normalize_text(value):
+    """Formatting-insensitive form for containment checks; never changes words."""
+    text = unicodedata.normalize('NFKC', str(value)).translate(_QUOTE_VARIANTS)
+    return ' '.join(text.casefold().split())
+
+
+def quote_in(quote, source):
+    """True when the quote's words appear verbatim (modulo formatting) in source."""
+    needle = normalize_text(quote).strip(_EDGE_PUNCT)
+    return bool(needle) and needle in normalize_text(source)
 
 
 def instant(value):
@@ -129,9 +151,28 @@ def verify_quotes(fact, batch):
         index, quote = item.get('message_index'), item.get('quote')
         if (type(index) is not int or not 0 <= index < len(batch)
                 or not isinstance(quote, str) or not quote.strip()
-                or quote not in batch[index].content):
+                or not quote_in(quote, batch[index].content)):
             raise ValueError('Evidence quote does not match its source message')
     return sorted({item['message_index'] for item in evidence})
+
+
+def cited_indices(fact, batch):
+    """Best-effort sources of a fact whose evidence failed verification: the
+    in-range indices it cites plus every message its quotes actually occur in
+    (catches a right quote filed under a wrong index)."""
+    evidence = fact.get('evidence') if isinstance(fact, dict) else None
+    if not isinstance(evidence, list):
+        return []
+    found = set()
+    for item in evidence:
+        if not isinstance(item, dict):
+            continue
+        index, quote = item.get('message_index'), item.get('quote')
+        if type(index) is int and 0 <= index < len(batch):
+            found.add(index)
+        if isinstance(quote, str) and quote.strip():
+            found.update(i for i, m in enumerate(batch) if quote_in(quote, m.content))
+    return sorted(found)
 
 
 def state_key(fact):

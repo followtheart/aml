@@ -14,7 +14,7 @@ from datetime import datetime, timezone
 from . import search_debug
 from typing import Dict, List, Optional
 
-from . import answer_context, config, graph, integrity, llm, prompts, scenes, schemas, store
+from . import answer_context, config, graph, integrity, llm, profile, prompts, scenes, schemas, store
 from .embeddings import embed
 
 log = logging.getLogger("aml.search")
@@ -69,12 +69,21 @@ def _anchor_time(st: store.Store, req: schemas.SearchRequest) -> str:
             or datetime.now(timezone.utc).isoformat())
 
 
-async def _understand(req: schemas.SearchRequest, anchor: Optional[str] = None) -> Dict:
+async def _understand(st: store.Store, req: schemas.SearchRequest,
+                      anchor: Optional[str] = None) -> Dict:
+    # P3: expansions bind generic questions to known user traits (the profile
+    # digest is compact and never answers the question by itself).
+    digest = "(none)"
+    if config.QUERY_PROFILE_DIGEST:
+        digest = profile.render_digest(
+            st.core_profile(req.user_id, config.CORE_PROFILE_MAX_ITEMS),
+            config.CORE_PROFILE_MAX_CHARS)
     prompt = prompts.render(
         "04_query_understanding.txt",
         query=req.query,
         options="\n".join(req.options or []) or "(none)",
-        current_time=req.reference_time or anchor or datetime.now(timezone.utc).isoformat())
+        current_time=req.reference_time or anchor or datetime.now(timezone.utc).isoformat(),
+        user_profile=digest)
     try:
         return await llm.complete_json(
             prompt,
@@ -137,6 +146,17 @@ def _fold_versions(items: List[Dict], plan: Dict) -> List[Dict]:
 def _select_memory_view(routes: List[List[Dict]], plan: Dict) -> List[List[Dict]]:
     document = plan.get("intent") in ("narrative", "document")
     flat = [item for route in routes for item in route]
+    # P3 Structural Memory: advice/preference intents read the persona view —
+    # first-person traits, rules and episodes; assistant world knowledge is
+    # hidden once the user actually owns persona memories.
+    if (config.PERSONA_VIEW_FILTER
+            and plan.get("intent") in ("preference", "profile")
+            and any(item.get("type") in ("preference", "profile") for item in flat)):
+        persona_types = {"preference", "profile", "rule", "episode",
+                         "session_summary", "event"}
+        plan["_memory_mode"] = "memory_doc"
+        return [[item for item in route if item.get("type") in persona_types]
+                for route in routes]
     has_preferred = any((item.get("type") == "episode") == document for item in flat)
     plan["_memory_mode"] = "memory_doc" if document else "memory_only"
     if not has_preferred:
@@ -268,6 +288,17 @@ def _one_line(text: str) -> str:
     return " / ".join(part.strip() for part in str(text).splitlines() if part.strip())
 
 
+def _options_text(req: schemas.SearchRequest) -> str:
+    return "\n".join(req.options or []) or "(none)"
+
+
+def _personalization_query(req: schemas.SearchRequest, plan: Dict) -> bool:
+    """Advice/choice questions are answered from user traits, not from a fact
+    that literally answers them, so the verifier's answer-presence test does
+    not apply (PersonaMem-style tasks)."""
+    return bool(req.options) or plan.get("intent") in ("preference", "profile")
+
+
 async def _filter_rerank(req: schemas.SearchRequest, plan: Dict,
                          fused: List[Dict], scored: Optional[Dict] = None) -> List[Dict]:
     """§5.4 small-R rerank: LLM-score only the fused head; unscored candidates
@@ -289,6 +320,7 @@ async def _filter_rerank(req: schemas.SearchRequest, plan: Dict,
             for c in cands)
         ts = plan.get("time_scope") or {}
         prompt = prompts.render("05_rerank_filter.txt", query=req.query,
+                                options=_options_text(req),
                                 time_scope=json.dumps(ts, ensure_ascii=False), candidates=cand_text)
         try:
             result = await llm.complete_json(
@@ -330,11 +362,19 @@ async def _filter_rerank(req: schemas.SearchRequest, plan: Dict,
         for c in cands:
             scored[c["id"]] = (float(by_id[c["id"]]["relevance"]),
                                bool(by_id[c["id"]]["keep"]))
+    # P2: personalization queries sort by relevance but never filter
+    # (HippoRAG 2 reports ~26% recall loss from hard recognition filtering).
+    personalization = _personalization_query(req, plan)
+    min_relevance = 0.0 if personalization else config.SEARCH_MIN_RELEVANCE
     kept, unscored = [], []
     for c in head:
         relevance, keep_flag = scored[c["id"]]
         c["_final"] = relevance
-        keep = keep_flag and relevance >= config.SEARCH_MIN_RELEVANCE
+        keep = personalization or (keep_flag and relevance >= min_relevance)
+        # P1: governance memories (forget requests, user instructions) are
+        # rerank-whitelisted: ranked, never dropped.
+        if c.get("type") == "rule":
+            keep = True
         # Cached scores from earlier rounds are not logged again.
         if c["id"] in newly:
             decisions.append({"id": c["id"], "round": round_index, "batch": 1,
@@ -367,6 +407,7 @@ async def _verify(req: schemas.SearchRequest, plan: Dict, ranked: List[Dict]) ->
         return {"sufficient": False, "confidence": 0.0, "missing": "no evidence",
                 "follow_up_queries": list(plan.get("sub_queries") or []), "_fallback": False}
     prompt = prompts.render("08_sufficiency_verify.txt", query=req.query,
+                            options=_options_text(req),
                             time_scope=json.dumps(plan.get("time_scope") or {}, ensure_ascii=False),
                             evidence=_evidence_lines(ranked))
     try:
@@ -478,7 +519,7 @@ async def run_search(st: store.Store,
     try:
         anchor = _anchor_time(st, req)
         trace["anchor_time"] = anchor
-        plan = await _understand(req, anchor)
+        plan = await _understand(st, req, anchor)
         routes_all, scored, rounds = [], {}, []
         ranked, verdict = [], {"sufficient": True, "confidence": 1.0, "_fallback": True}
         tried = set()
@@ -507,9 +548,17 @@ async def run_search(st: store.Store,
         trace["rounds"] = rounds
         ranked = _foresight_filter(ranked, plan)
         trace["pre_rerank_excluded"] = plan.get("_pre_rerank_excluded", [])
-        abstain = (not verdict["sufficient"] and not verdict.get("_fallback")
-                   and verdict["confidence"] < config.ABSTAIN_CONFIDENCE)
+        insufficient = (not verdict["sufficient"] and not verdict.get("_fallback")
+                        and verdict["confidence"] < config.ABSTAIN_CONFIDENCE)
+        abstain = insufficient and (not _personalization_query(req, plan) or not ranked)
         trace["abstained"] = abstain
+        trace["abstain_exempt"] = insufficient and not abstain
+        selected_core = []
+        if config.CORE_PROFILE_INJECT and not abstain:
+            selected_core = st.core_profile(req.user_id, config.CORE_PROFILE_MAX_ITEMS)
+        core_ids = {a["id"] for a in selected_core}
+        # Core Profile never competes for top_k slots: it is always prepended.
+        ranked = [c for c in ranked if c["id"] not in core_ids]
         selected = [] if abstain else ranked[:req.top_k]
         trace["top_k_excluded"] = _snapshot(ranked if abstain else ranked[req.top_k:])
         full_rows = {a["id"]: a for a in st.get_amus_by_ids(
@@ -534,6 +583,18 @@ async def run_search(st: store.Store,
                 source_count=len(raw_sources), temporal=c.get("temporal"),
                 score=round(float(c.get("_final", c.get("_fused", 0.0))), 4),
                 created_at=c.get("created_at")))
+        # P0 (MemGPT/MIRIX core memory): the user's Core Profile is prepended
+        # on every search, outside top_k and outside ranking competition.
+        if selected_core:
+            injected = []
+            for a in selected_core:
+                body = "[core profile] " + _memory_prefix(a, a, anchor) + a["content"]
+                injected.append(schemas.SearchItem(
+                    id=a["id"], content=body, memory_type=a.get("type", "fact"),
+                    sources=[], source_count=0, temporal=a.get("temporal"),
+                    score=None, created_at=a.get("created_at")))
+            trace["core_profile_injected"] = [item.id for item in injected]
+            data = injected + data
         # §4.4/§4.5 usage strengthens memories and heats their scenes.
         st.record_recall(
             [c["id"] for c in selected if c["id"] in full_rows],

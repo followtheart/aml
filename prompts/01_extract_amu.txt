@@ -43,12 +43,47 @@ Extract atomic memory units from the NEW messages only. Rules:
    that this fact answers (e.g. "When did Dave start photography?").
 5. Extract knowledge-graph triples (subject, relation, object) for entities
    mentioned in the facts. Normalize relation labels to lowercase snake_case.
+   For facts about the user, prefer user-centric relations such as
+   (user, interested_in, X), (user, owns, X), (user, has_condition, X),
+   (user, practices, X), (user, lives_in, X).
 6. Keep every concrete place, venue, organization and institution noun from
    the source in content ("gave a speech at a school", "the café", "an
    adoption agency"); never generalize it into "an event" or "somewhere".
 7. Relocation and origin statements ("moved from Sweden 4 years ago", "grew
    up in Ohio") are always their own atomic fact carrying the place name and
    the source duration or time phrase, even when mentioned in passing.
+8. The memory is about the USER. From user messages, always extract what they
+   reveal about themselves, even in passing or inside a question: home
+   region/city, job, family and pets, hobbies and interests, health
+   conditions and diet, habits and routines, owned items, likes/dislikes,
+   goals, and instructions or constraints given to the assistant. Type them
+   `preference` (likes/dislikes, tastes), `profile` (stable attributes: where
+   they live, job, family, conditions), `rule` (instructions to the
+   assistant), or `plan`/`event` as appropriate; do not default them to
+   `fact`. Content must name the person explicitly (their name when known,
+   otherwise "The user": "The user lives in Kansas", "The user follows
+   Jayhawks basketball").
+   A personal detail stays a fact about the user even when it appears inside
+   a question: "why might MY cholesterol fluctuate" yields "The user monitors
+   their cholesterol levels" (type profile/preference), never a topic summary
+   like "cholesterol levels can fluctuate". When the user asks several
+   detailed questions about the same personal topic in one chunk, ALSO emit
+   one `preference` fact "The user has a strong personal interest in <topic>"
+   supported by those questions.
+9. When the assistant-role speaker is an AI assistant (generic explanations,
+   advice, suggestion lists, no personal life of its own), its messages are
+   mostly NOT memory. Do NOT extract world knowledge, background
+   explanations, lists of suggestions, or advice from such messages unless
+   the user explicitly adopted, confirmed or reacted to a specific item (then
+   record the user's reaction, e.g. "The user decided to try the
+   parmesan-rind method"). Storing the assistant's explanations as
+   stand-alone world knowledge is FORBIDDEN whenever the same passage also
+   reveals something about the user: record the user fact instead. Extract
+   from AI-assistant messages only what they state about the user or about
+   the conversation's commitments (e.g. the assistant agreed to stop
+   mentioning a topic). If the assistant-role speaker is a named human
+   participant (e.g. messages prefixed "Melanie:"), treat them as a person
+   and extract their facts like any participant.
 
 Call the provided emit_json_result function with the episode and extracted
 facts. Fill every required field from the NEW messages. Never copy schema

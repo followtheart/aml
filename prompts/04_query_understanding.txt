@@ -17,6 +17,9 @@ Question:
 Answer options (may be empty):
 {options}
 
+Known user profile (compact persona digest; may be "(none)"):
+{user_profile}
+
 Analyze and return ONLY a JSON object:
 {{
   "intent": "fact|multi_hop|temporal|preference|rule|profile|narrative|document|procedural|abstention_check",
@@ -46,6 +49,12 @@ Rules:
   exact wording, or document interpretation is required instead of atomic facts.
 - For multi-hop questions, decompose into atomic sub-questions that each
   retrieve one hop of evidence.
+- For advice/recommendation questions about the user's life (and whenever
+  options are present), prefer intent=preference, and bind sub_queries and
+  expanded_queries to the known user profile: rewrite a generic ask into
+  form it would take for THIS user (e.g. "healthy snacks" plus a profile
+  trait "borderline high cholesterol" -> "snack ideas for someone watching
+  their cholesterol"). Never invent traits absent from the profile.
 - Never output an answer to the question itself.
 
 - Set include_history=true for questions about former states, past dates, or

@@ -199,7 +199,10 @@ The search loop runs up to `AML_SEARCH_MAX_ROUNDS` (default 2): after reranking,
 prompt 08 judges whether the evidence is necessary and sufficient; if not, its
 follow-up queries drive one more recall round. If the final verdict is
 insufficient with confidence below `AML_ABSTAIN_CONFIDENCE`, the search returns an
-empty list. Verifier failures fail open. `plan`-type memories (foresight) are
+empty list. Preference/profile-intent queries and requests carrying answer
+`options` are exempt (trace `abstain_exempt`): they are decided by user traits,
+not by a stored answer, so ranked evidence is always handed over. Verifier
+failures fail open. `plan`-type memories (foresight) are
 prefixed with `[plan; status: pending|expired]` relative to the anchor time and
 are dropped when a query time scope does not intersect their window.
 

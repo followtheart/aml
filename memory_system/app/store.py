@@ -14,6 +14,7 @@ Swap target for production: Postgres + pgvector (same method surface).
 import json
 import asyncio
 from contextlib import contextmanager
+import re
 import sqlite3
 import threading
 import uuid
@@ -26,6 +27,12 @@ import numpy as np
 from . import config, graph, integrity
 
 _LOCK = threading.RLock()
+_FORGET_RULE_RE = re.compile(r"\b(forget|forgot|erase|delete|remove|stop (?:remembering|mentioning))\b"
+                             r"|忘记|忘掉|删除|别记|不要记住", re.I)
+
+# Invalidated ("forgotten") memories are excluded from every retrieval route
+# unconditionally, independently of the sensitive opt-in (Zep edge invalidation).
+_SUPPRESSED = " AND sensitivity!='suppressed'"
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS amu (
@@ -507,6 +514,7 @@ class Store:
                 f"SELECT * FROM amu WHERE user_id=?"
                 + ("" if include_history else " AND valid_to IS NULL")
                 + ("" if include_sensitive else " AND sensitivity!='sensitive'")
+                + _SUPPRESSED
                 + f" AND type IN ({ph})",
                 (user_id, *types)).fetchall()
         return [self._row_to_dict(r) for r in rows]
@@ -524,6 +532,7 @@ class Store:
                " WHERE user_id=? AND embedding NOT NULL AND embedding_space=?"
                + ("" if include_history else " AND valid_to IS NULL")
                + ("" if include_sensitive else " AND sensitivity!='sensitive'")
+               + _SUPPRESSED
                + ("" if include_cold else " AND tier!='cold'"))
         params = [user_id, config.EMBEDDING_SPACE]
         if scene_ids is not None:
@@ -575,7 +584,7 @@ class Store:
             sensitive = "" if include_sensitive else " AND sensitivity!='sensitive'"
             with _LOCK:
                 rows = self.conn.execute(
-                    f"SELECT * FROM amu WHERE user_id=?{history}{sensitive} AND tier!='cold' AND ({clauses}) LIMIT ?",
+                    f"SELECT * FROM amu WHERE user_id=?{history}{sensitive}{_SUPPRESSED} AND tier!='cold' AND ({clauses}) LIMIT ?",
                     (user_id, *params, k)).fetchall()
             out = [self._row_to_dict(r) for r in rows]
             for item in out:
@@ -602,7 +611,8 @@ class Store:
         with _LOCK:
             amu_rows = self.conn.execute(
                 f"SELECT * FROM amu WHERE id IN ({ph}) AND tier!='cold'"
-                + ("" if include_history else " AND valid_to IS NULL"),
+                + ("" if include_history else " AND valid_to IS NULL")
+                + _SUPPRESSED,
                 ids).fetchall()
         if not include_sensitive:
             amu_rows = [row for row in amu_rows if row["sensitivity"] != "sensitive"]
@@ -628,7 +638,7 @@ class Store:
         with _LOCK:
             rows = self.conn.execute(
                 "SELECT * FROM amu WHERE user_id=? "
-                + ("" if include_sensitive else "AND sensitivity!='sensitive' ") + "AND "
+                + ("" if include_sensitive else "AND sensitivity!='sensitive' ") + _SUPPRESSED + " AND "
                 "((json_extract(temporal,'$.start') IS NOT NULL AND "
                 "julianday(json_extract(temporal,'$.start'))<=julianday(?) AND "
                 "julianday(json_extract(temporal,'$.end'))>=julianday(?)) OR "
@@ -674,7 +684,8 @@ class Store:
             rows = self.conn.execute(
                 "SELECT t.* FROM triples t JOIN amu a ON a.id=t.amu_id "
                 "WHERE t.user_id=?" +
-                ("" if include_sensitive else " AND a.sensitivity!='sensitive'"),
+                ("" if include_sensitive else " AND a.sensitivity!='sensitive'")
+                + " AND a.sensitivity!='suppressed'",
                 (user_id,)).fetchall()
         return [dict(r) for r in rows]
 
@@ -687,9 +698,50 @@ class Store:
             rows = self.conn.execute(
                 f"SELECT * FROM amu WHERE id IN ({ph})"
                 + ("" if include_history else " AND valid_to IS NULL")
-                + ("" if include_sensitive else " AND sensitivity!='sensitive'"),
+                + ("" if include_sensitive else " AND sensitivity!='sensitive'")
+                + _SUPPRESSED,
                 ids).fetchall()
         return [self._row_to_dict(r) for r in rows]
+
+    def core_profile(self, user_id: str, limit: int) -> List[Dict]:
+        """MemGPT/MIRIX core memory: the user's active rule/profile/preference
+        AMUs, rules first, then stable traits, then recent transient ones."""
+        with _LOCK:
+            rows = self.conn.execute(
+                "SELECT * FROM amu WHERE user_id=? AND valid_to IS NULL"
+                " AND sensitivity NOT IN ('sensitive','suppressed')"
+                " AND type IN ('rule','profile','preference')"
+                " ORDER BY CASE type WHEN 'rule' THEN 0 WHEN 'profile' THEN 1 ELSE 2 END,"
+                " CASE WHEN profile_status IN ('static','stable','rule') THEN 0 ELSE 1 END,"
+                " created_at DESC LIMIT ?",
+                (user_id, limit * 4)).fetchall()
+        items = [self._row_to_dict(r) for r in rows]
+        # Cap rules and traits separately so one category cannot starve others.
+        # Forget requests are already applied at add time; they carry no trait.
+        rules = [a for a in items if a["type"] == "rule"
+                 and not _FORGET_RULE_RE.search(str(a.get("content") or ""))][: max(1, limit // 3)]
+        traits = [a for a in items if a["type"] != "rule"]
+        return (rules + traits)[:limit]
+
+    def suppress(self, amu_id: str, when: str):
+        """Zep-style invalidation: close validity and hide from all routes."""
+        with _LOCK:
+            row = self.conn.execute(
+                "SELECT user_id,valid_from,valid_to FROM amu WHERE id=?", (amu_id,)).fetchone()
+            if row is None:
+                raise ValueError("Cannot suppress a missing memory")
+            if row["valid_to"] is None:
+                integrity.validate_interval(row["valid_from"], when)
+                self._write("UPDATE amu SET valid_to=? WHERE id=?", (when, amu_id))
+            self._write("UPDATE amu SET sensitivity='suppressed' WHERE id=?", (amu_id,))
+            self._touch_user(row["user_id"])
+            self.conn.commit()
+
+    def session_max_timestamp(self, user_id: str, session_id: str) -> Optional[int]:
+        with _LOCK:
+            return self.conn.execute(
+                "SELECT MAX(timestamp) FROM source_messages "
+                "WHERE user_id=? AND session_id=?", (user_id, session_id)).fetchone()[0]
 
     # ---------------- sessions ----------------
     def get_summary(self, user_id: str, session_id: str) -> str:
@@ -869,15 +921,24 @@ class Store:
                 self._write("UPDATE amu SET tier=? WHERE id=?", (tier, amu_id))
             self.conn.commit()
 
-    def add_support_session(self, amu_id: str, session_id: str):
+    def add_support_keys(self, amu_id: str, keys: List[str]):
+        """Append distinct support keys (session ids, request ids, evidence AMU
+        ids); enough support promotes a preference transient -> stable."""
+        keys = [k for k in keys if k]
+        if not keys:
+            return
         with _LOCK:
             row = self.conn.execute("SELECT support_sessions FROM amu WHERE id=?",
                                     (amu_id,)).fetchone()
             if row is None:
                 return
             sessions = json.loads(row[0] or "[]")
-            if session_id not in sessions:
-                sessions.append(session_id)
+            changed = False
+            for key in keys:
+                if key not in sessions:
+                    sessions.append(key)
+                    changed = True
+            if changed:
                 self._write("UPDATE amu SET support_sessions=? WHERE id=?",
                             (json.dumps(sessions), amu_id))
                 if len(sessions) >= config.PROFILE_STABLE_SESSIONS:
@@ -885,6 +946,9 @@ class Store:
                         "UPDATE amu SET profile_status='stable',expires_at=NULL "
                         "WHERE id=? AND type='preference'", (amu_id,))
                 self.conn.commit()
+
+    def add_support_session(self, amu_id: str, session_id: str):
+        self.add_support_keys(amu_id, [session_id])
 
     def record_experience_feedback(self, amu_id: str, success: bool, session_id: str):
         with _LOCK:

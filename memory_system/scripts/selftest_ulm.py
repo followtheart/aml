@@ -197,6 +197,29 @@ class LifecycleTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.data, [])
         self.assertTrue(self.trace()['abstained'])
 
+    async def test_personalization_queries_never_abstain_with_evidence(self):
+        vec = (await embed(['Alice lives in Kansas']))[0]
+        self.st.insert_amu(user_id='u', session_id='s', content='Alice lives in Kansas', embedding=vec)
+        async def hopeless(prompt, *args, **kwargs):
+            if 'sufficiency verifier' in prompt:
+                return {'sufficient': False, 'confidence': 0.0, 'missing': 'no snack list',
+                        'follow_up_queries': []}
+            return await score_all(prompt)
+        req = schemas.SearchRequest(user_id='u', query='Suggest healthy desk snacks',
+                                    options=['A. nuts', 'B. fruit'])
+        result = await self.run_search(req, side_effect=hopeless)
+        trace = self.trace()
+        self.assertTrue(result.data)
+        self.assertFalse(trace['abstained'])
+        self.assertTrue(trace['abstain_exempt'])
+
+        req = schemas.SearchRequest(user_id='u', query='What snacks would Alice like?')
+        result = await self.run_search(req, side_effect=hopeless,
+                                       plan={'intent': 'preference', 'entities': [],
+                                             'sub_queries': ['Alice snacks']})
+        self.assertTrue(result.data)
+        self.assertFalse(self.trace()['abstained'])
+
     async def test_verifier_failure_is_fail_open(self):
         vec = (await embed(['Alice work']))[0]
         aid = self.st.insert_amu(user_id='u', session_id='s', content='Alice work', embedding=vec)

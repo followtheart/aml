@@ -1,7 +1,7 @@
 # PROMPT 05 — 相关性过滤与重排打分（Search 管线 §5.3）
 # 调用：Search 侧，RRF 融合后分批评分全部候选
 # 模型 gpt-4o-mini，temperature=0
-# 占位符：{query} {time_scope} {candidates}
+# 占位符：{query} {options} {time_scope} {candidates}
 # 来源：Memory-R1（Answer Agent 预筛选）+ structural-memory（rerank 增益）
 
 You are a relevance scoring module for a memory retrieval system. You do NOT
@@ -10,6 +10,10 @@ answering it.
 
 Question:
 {query}
+
+Answer options (may be empty; when present, the task is to pick the option
+that best fits THIS user):
+{options}
 
 Relevant time scope (may be null):
 {time_scope}
@@ -30,6 +34,21 @@ Scoring rules:
   For current-state questions, prefer the current valid state.
 - Session summaries are derived context, not an independent authoritative fact.
 - Memories that merely share keywords but do not inform the answer score low.
+- For advice, recommendation or preference questions (and whenever options are
+  present), the evidence is what the memory reveals about the USER: location,
+  interests, hobbies, health conditions, diet, family, job, habits, owned
+  items, stated likes/dislikes, constraints and instructions to the assistant.
+  Such a memory scores high when it distinguishes one option from the others
+  or would change which advice fits, even if it never mentions the topic
+  asked about. General world knowledge that the assistant once explained,
+  with no information about the user, scores low.
+- Implicit interest counts as user evidence: "the user asked why lakes are
+  warmer in July" reveals an interest in lakes/swimming; "the user asked about
+  anime storytelling" reveals an interest in anime. When an option relies on a
+  trait that a candidate reveals this way, score that candidate >= 0.5, even
+  though the memory itself is phrased as a question or curiosity.
+- Governance notes such as "the user asked to forget X" are not traits: score
+  them low unless the question is about X.
 
 Return ONLY a JSON object. The scores array must use the same order as the
 candidates:

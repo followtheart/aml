@@ -127,6 +127,26 @@ STRUCTURED_SCHEMAS["experience"] = _object({
         "keywords": {"type": "array", "items": _TEXT},
     })}
 })
+STRUCTURED_SCHEMAS["profile_consolidation"] = _object({
+    "items": {"type": "array", "maxItems": 3, "items": _object({
+        "content": _TEXT,
+        "kind": {"type": "string", "enum": ["interest", "habit", "health", "diet",
+                                            "trait", "possession", "relationship", "other"]},
+        "basis": {"type": "string", "enum": ["stated", "inferred"]},
+        "support_ids": {"type": "array", "items": _TEXT},
+    })}
+})
+STRUCTURED_SCHEMAS["choice_align"] = _object({
+    "options": {"type": "array", "items": _object({
+        "letter": _TEXT,
+        "kind": {"type": "string", "enum": ["persona", "generic"]},
+        "supported": {"type": "boolean"},
+        "evidence": _TEXT,
+    })}
+})
+STRUCTURED_SCHEMAS["invalidate"] = _object({
+    "invalidate_ids": {"type": "array", "items": _TEXT},
+})
 
 
 def _fake_available() -> bool:
@@ -344,6 +364,16 @@ class FakeLLM:
                 "description": "Reusable lesson from explicit task feedback",
                 "content": "Review the observed outcome before repeating this task.",
                 "keywords": ["task", "feedback"]}]})
+        if "profile consolidation module" in prompt:
+            return json.dumps({"items": []})
+        if "choice alignment module" in prompt:
+            letters = re.findall(r"^\s*([A-Z])\.\s", prompt, re.M)
+            return json.dumps({"options": [
+                {"letter": l, "kind": "generic", "supported": False, "evidence": ""}
+                for l in letters]})
+        if "memory invalidation module" in prompt:
+            ids = re.findall(r"^(amu_\w+):", prompt, re.M)
+            return json.dumps({"invalidate_ids": ids[:1]})
         if "intelligent memory assistant" in prompt:
             return "fake answer"
         if 'label an answer to a question' in prompt:

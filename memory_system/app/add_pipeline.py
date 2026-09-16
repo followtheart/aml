@@ -13,7 +13,7 @@ from typing import Dict, List, Optional
 
 import numpy as np
 
-from . import config, integrity, llm, memory_debug, prompts, scenes, schemas, segment, store
+from . import config, integrity, llm, memory_debug, profile, prompts, scenes, schemas, segment, store
 from .embeddings import embed
 
 log = logging.getLogger("aml.add")
@@ -452,7 +452,26 @@ async def run_add(st: store.Store, req: schemas.AddRequest) -> None:
             log.info("Retrying Add after concurrent publish request_id=%s", req.request_id)
 
 
+def _with_synthetic_timestamps(st: store.Store,
+                               req: schemas.AddRequest) -> schemas.AddRequest:
+    """Zep dual timeline: histories without any timestamps (PersonaMem) get
+    synthetic monotonic ones continuing the session, so validity ordering
+    follows revelation order instead of the service wall clock."""
+    if not config.SYNTHETIC_TIME_ENABLED:
+        return req
+    if any(m.timestamp is not None for m in req.messages):
+        return req
+    base = st.session_max_timestamp(req.user_id, req.session_id)
+    if base is None:
+        base = config.SYNTHETIC_EPOCH_MS
+    messages = [m.model_copy(update={
+        "timestamp": base + (i + 1) * config.SYNTHETIC_STEP_MS})
+        for i, m in enumerate(req.messages)]
+    return req.model_copy(update={"messages": messages})
+
+
 async def _run_add(st: store.Store, req: schemas.AddRequest) -> None:
+    req = _with_synthetic_timestamps(st, req)
     st.save_messages(req)
     data = await _extract(st, req)
     facts = data.get("facts") or [{
@@ -464,8 +483,10 @@ async def _run_add(st: store.Store, req: schemas.AddRequest) -> None:
     # One MemCell per segment: its memories are consolidated into a scene together.
     cells: Dict[int, Dict] = {}
     surprise = 0.0
+    persisted = []
     for fact, vec in zip(facts, vecs):
         aid = await _persist_fact(st, req, fact, vec)
+        persisted.append((aid, fact))
         novelty = fact.get("_novelty", 1.0)
         surprise = config.SURPRISE_MOMENTUM * surprise + (1 - config.SURPRISE_MOMENTUM) * novelty
         if not aid:
@@ -493,4 +514,8 @@ async def _run_add(st: store.Store, req: schemas.AddRequest) -> None:
     scenes.promote_and_evict(st, req.user_id)
     scenes.forget(st, req.user_id)
     await _update_summary(st, req)
+    # Persona layer: invalidate forgotten memories first, then consolidate
+    # repeated interest signals into first-person preferences (P0/P1).
+    await profile.apply_forget_rules(st, req, persisted)
+    await profile.consolidate(st, req, persisted)
     st.record_request(req.request_id, req.user_id, req.session_id)

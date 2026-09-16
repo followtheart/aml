@@ -215,9 +215,12 @@ class DatasetTests(unittest.TestCase):
     def test_choice_skips_judge(self):
         qa = data.scriptmem(script(), "angry", None)["qa"][0]
         with patch.object(scoring.llm, "complete", AsyncMock(return_value="A")), \
-             patch.object(scoring.llm, "complete_json", AsyncMock()) as judge:
+             patch.object(scoring.llm, "complete_json", AsyncMock(return_value={"options": []})) as judge:
             self.assertEqual(asyncio.run(scoring.evaluate(qa, []))[1], 1)
-            judge.assert_not_called()
+            # Choice questions never reach the judge; the only structured call
+            # allowed is the pre-answer option/persona-evidence alignment.
+            for call in judge.call_args_list:
+                self.assertEqual(call.kwargs.get("stage"), "eval.choice_align")
 
     def test_provider_error_reported(self):
         qa = data.longmemeval(lme(), "longmemeval-s")["qa"][0]

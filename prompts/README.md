@@ -17,6 +17,10 @@
 | `06_eval_answer.txt` | 本地评测 | 模拟平台 Answer 模型 | 仅本地 |
 | `07_eval_judge.txt` | 本地评测 | LLM-as-a-Judge 判分 | 仅本地 |
 | `08_sufficiency_verify.txt` | Search（ULM §5.5） | 证据充分性验证 + 缺口查询改写 + 弃权置信 | 每 Search 每轮 1 次（默认 ≤2 轮） |
+| `09_experience_distill.txt` | 经验记忆 | 任务反馈蒸馏为策略/工作流 | 每次 feedback 1 次 |
+| `10_profile_consolidation.txt` | Add（P0 画像层） | 兴趣信号巩固为第一人称 preference | 每 Add 请求 1 次 |
+| `11_choice_align.txt` | 本地评测（P2） | choice 选项与画像证据对齐 | 每 choice 题 1 次 |
+| `12_forget_invalidate.txt` | Add（P1 治理） | 遗忘请求的目标记忆判定 | 每条遗忘请求 1 次 |
 
 ## 使用约定
 

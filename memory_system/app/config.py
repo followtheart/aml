@@ -178,6 +178,39 @@ ABSTAIN_CONFIDENCE = float(os.environ.get("AML_ABSTAIN_CONFIDENCE", "0.15"))
 # the legacy summary recall route stays available for ablation.
 SUMMARY_ROUTE = os.environ.get("AML_SUMMARY_ROUTE", "0") == "1"
 
+# ---- Persona layer (IMPROVEMENT_PLAN P0-P3; MemoryBank/MIRIX/EverMemOS) ----
+# P0: interest consolidation after each Add promotes repeated "user asked
+# about X" signals into first-person `preference` AMUs.
+PROFILE_CONSOLIDATION_ENABLED = os.environ.get("AML_PROFILE_CONSOLIDATION", "1") == "1"
+# Support keys (Add request ids / supporting AMU ids) needed to confirm a
+# consolidated preference and to promote it transient -> static.
+PROFILE_MIN_SUPPORT = max(1, int(os.environ.get("AML_PROFILE_MIN_SUPPORT", "2")))
+# P0: Core Profile is injected ahead of ranked results on every search,
+# outside top_k (MemGPT/MIRIX core memory). 0 disables for ablation.
+CORE_PROFILE_INJECT = os.environ.get("AML_CORE_PROFILE_INJECT", "1") == "1"
+CORE_PROFILE_MAX_ITEMS = max(1, int(os.environ.get("AML_CORE_PROFILE_MAX_ITEMS", "12")))
+CORE_PROFILE_MAX_CHARS = max(256, int(os.environ.get("AML_CORE_PROFILE_MAX_CHARS", "1600")))
+# P1: a user "forget X" request invalidates the matching memories
+# (Zep edge invalidation) instead of only logging the request.
+INVALIDATE_ENABLED = os.environ.get("AML_INVALIDATE_ENABLED", "1") == "1"
+INVALIDATE_MIN_SIM = float(os.environ.get("AML_INVALIDATE_MIN_SIM", "0.55"))
+INVALIDATE_MAX_TARGETS = max(1, int(os.environ.get("AML_INVALIDATE_MAX_TARGETS", "3")))
+# P1: histories without timestamps get synthetic monotonic ones seeded per
+# session, so validity ordering follows revelation order instead of the
+# service wall clock (Zep dual timeline; PersonaMem carries no timestamps).
+SYNTHETIC_TIME_ENABLED = os.environ.get("AML_SYNTHETIC_TIME", "1") == "1"
+SYNTHETIC_EPOCH_MS = int(os.environ.get("AML_SYNTHETIC_EPOCH_MS", "1577836800000"))  # 2020-01-01
+SYNTHETIC_STEP_MS = max(1, int(os.environ.get("AML_SYNTHETIC_STEP_MS", "60000")))
+# P2: choice questions get an explicit option<->persona-evidence alignment
+# pass before answering (Memory-R1 answer-agent distillation).
+CHOICE_ALIGN_ENABLED = os.environ.get("AML_CHOICE_ALIGN", "1") == "1"
+# P3: query understanding sees a compact profile digest so expansions bind
+# generic questions to known user traits.
+QUERY_PROFILE_DIGEST = os.environ.get("AML_QUERY_PROFILE_DIGEST", "1") == "1"
+# P3: preference/profile intents hide assistant world knowledge once the user
+# actually owns persona memories (Structural Memory: per-task memory views).
+PERSONA_VIEW_FILTER = os.environ.get("AML_PERSONA_VIEW_FILTER", "1") == "1"
+
 # Full stored content for local debugging; empty path disables the JSONL log.
 MEMORY_DEBUG_LOG = os.environ.get(
     "AML_MEMORY_DEBUG_LOG", "")

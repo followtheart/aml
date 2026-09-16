@@ -217,7 +217,7 @@ class SearchTests(unittest.IsolatedAsyncioTestCase):
             'time_scope': None, 'entities': [], 'sub_queries': ['q'],
             'expanded_queries': ['q']})
         with patch.object(search.llm, 'complete_json', complete):
-            await search._understand(self.req('q', reference_time='2020-02-03T04:05:06Z'))
+            await search._understand(self.st, self.req('q', reference_time='2020-02-03T04:05:06Z'))
         self.assertIn('2020-02-03T04:05:06Z', complete.call_args.args[0])
 
     async def test_source_context_is_deduplicated_and_bounded(self):

@@ -60,6 +60,12 @@ check("add 200 + byte-exact id echo", ok, r.text[:120])
 # 3. idempotent replay
 r2 = client.post("/add", json=add_body, headers=H)
 check("add idempotent replay", r2.status_code == 200)
+# ULM §2.5: Add returns the committed write revision; a replay reports the
+# same revision without advancing it.
+check("add returns write_revision",
+      r.json().get("write_revision", 0) >= 1 and "scope_epoch" in r.json())
+check("idempotent replay keeps write_revision",
+      r2.json().get("write_revision") == r.json().get("write_revision"))
 
 # 4. search happy path
 sbody = {"query": "When did the user start photography?",

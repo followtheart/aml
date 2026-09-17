@@ -25,14 +25,20 @@ from typing import Dict, List, Optional
 import numpy as np
 
 from . import config, graph, integrity
+from .provenance import ProvenanceStore, source_identity
 
 _LOCK = threading.RLock()
+
+
+class MemoryDeleted(RuntimeError):
+    """The operation predates a deletion and must not be retried automatically."""
+
 _FORGET_RULE_RE = re.compile(r"\b(forget|forgot|erase|delete|remove|stop (?:remembering|mentioning))\b"
                              r"|忘记|忘掉|删除|别记|不要记住", re.I)
 
 # Invalidated ("forgotten") memories are excluded from every retrieval route
 # unconditionally, independently of the sensitive opt-in (Zep edge invalidation).
-_SUPPRESSED = " AND sensitivity!='suppressed'"
+_SUPPRESSED = " AND sensitivity!='suppressed' AND view_status='ready' AND resolution_status!='retracted'"
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS amu (
@@ -126,6 +132,10 @@ CREATE TABLE IF NOT EXISTS user_revisions (
   user_id TEXT PRIMARY KEY,
   revision INTEGER NOT NULL DEFAULT 0
 );
+CREATE TABLE IF NOT EXISTS deletion_epochs (
+  user_id TEXT PRIMARY KEY,
+  epoch INTEGER NOT NULL DEFAULT 0
+);
 CREATE TABLE IF NOT EXISTS purge_receipts (
     receipt_id TEXT PRIMARY KEY,
     user_id TEXT NOT NULL,
@@ -170,7 +180,7 @@ def _now_dt() -> datetime:
     return datetime.now(timezone.utc)
 
 
-class Store:
+class Store(ProvenanceStore):
     def __init__(self, path: Optional[str] = None):
         self.path = path or config.DB_PATH
         self.conn = sqlite3.connect(self.path, check_same_thread=False)
@@ -209,6 +219,7 @@ class Store:
                     self.conn.execute(f"ALTER TABLE amu ADD COLUMN {column} {decl}")
             self.conn.executescript(FTS_SCHEMA)
             self.conn.executescript(SOURCE_SCHEMA)
+            self._init_provenance()
             triple_columns = {r["name"] for r in self.conn.execute("PRAGMA table_info(triples)")}
             for column in ("valid_from", "valid_to"):
                 if column not in triple_columns:
@@ -248,13 +259,28 @@ class Store:
         copy("sessions", "user_id=?", (user_id,))
         copy("requests", "user_id=?", (user_id,))
         copy("source_messages", "user_id=?", (user_id,))
+        copy("claim_versions", "user_id=?", (user_id,))
+        copy("view_dependencies", "user_id=?", (user_id,))
+        copy("feedback_events", "user_id=?", (user_id,))
         copy("amu_sources", "amu_id IN (SELECT id FROM amu WHERE user_id=?)", (user_id,))
         copy("amu_fts", "user_id=?", (user_id,))
         copy("sessions_fts", "user_id=?", (user_id,))
         work.conn.commit()
 
+    def user_state(self, user_id):
+        with _LOCK:
+            revision = self.conn.execute(
+                "SELECT revision FROM user_revisions WHERE user_id=?", (user_id,)).fetchone()
+            epoch = self.conn.execute(
+                "SELECT epoch FROM deletion_epochs WHERE user_id=?", (user_id,)).fetchone()
+        return {"revision": revision[0] if revision else 0, "epoch": epoch[0] if epoch else 0}
+
+    def assert_epoch(self, user_id, expected_epoch):
+        if self.user_state(user_id)["epoch"] != expected_epoch:
+            raise MemoryDeleted("Memory deleted while request was in progress")
+
     @contextmanager
-    def staged(self, user_id):
+    def staged(self, user_id, expected_epoch=None):
         """Prepare one user's Add privately and publish it in a short transaction.
 
         Different users can prepare and commit independently. A same-user change
@@ -265,6 +291,9 @@ class Store:
             with _LOCK:
                 self.conn.execute("BEGIN")
                 try:
+                    epoch = self.user_state(user_id)["epoch"]
+                    if expected_epoch is not None and epoch != expected_epoch:
+                        raise MemoryDeleted("Request predates memory deletion")
                     revision_row = self.conn.execute(
                         "SELECT revision FROM user_revisions WHERE user_id=?", (user_id,)
                     ).fetchone()
@@ -277,6 +306,7 @@ class Store:
             with _LOCK:
                 self.conn.execute("BEGIN IMMEDIATE")
                 try:
+                    self.assert_epoch(user_id, epoch)
                     current_row = self.conn.execute(
                         "SELECT revision FROM user_revisions WHERE user_id=?", (user_id,)
                     ).fetchone()
@@ -290,6 +320,7 @@ class Store:
                         "ON CONFLICT(user_id) DO UPDATE SET revision=revision+1",
                         (user_id,))
                     self.conn.commit()
+                    work.published_revision = revision + 1
                 except BaseException:
                     self.conn.rollback()
                     raise
@@ -298,9 +329,20 @@ class Store:
 
     def save_messages(self, req):
         for i, message in enumerate(req.messages):
-            self._write("INSERT INTO source_messages VALUES (?,?,?,?,?,?,?)",
+            identity, _ = source_identity(req, message, i)
+            old = self.conn.execute('SELECT content,role,speaker_id FROM source_messages WHERE user_id=? AND message_id=?',
+                                    (req.user_id, identity)).fetchone()
+            if old and (old['content'] != message.content or old['role'] != message.role
+                        or old['speaker_id'] != (message.speaker_id or message.role)):
+                raise ValueError('Source message identity cannot be reused for different content or speaker')
+        for i, message in enumerate(req.messages):
+            identity, event = source_identity(req, message, i)
+            self._write("INSERT INTO source_messages (request_id,message_index,user_id,session_id,role,content,timestamp,"
+                        "message_id,source_event_id,speaker_id,source_kind,trust_scope,ingested_at,sensitivity) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                         (req.request_id, i, req.user_id, req.session_id,
-                         message.role, message.content, message.timestamp))
+                         message.role, message.content, message.timestamp, identity, event,
+                         message.speaker_id or message.role, message.source_kind,
+                         json.dumps(message.trust_scope), _now(), message.sensitivity))
         self._touch_user(req.user_id)
         self.conn.commit()
 
@@ -308,18 +350,42 @@ class Store:
         owner = self.conn.execute("SELECT user_id FROM amu WHERE id=?", (amu_id,)).fetchone()
         if owner is None:
             raise ValueError("Missing source target")
+        existing = self.sources_for_amu(amu_id)
+        existing_events = {s['source_event_id'] for s in existing}
+        existing_links = {(s['request_id'], s['message_index']) for s in existing}
+        new_indices = []
+        new_event = False
         for i in indices:
             source = self.conn.execute("SELECT user_id FROM source_messages WHERE request_id=? AND message_index=?",
                                        (request_id, i)).fetchone()
             if source is None or source[0] != owner[0]:
                 raise ValueError("Missing or cross-user source evidence")
-        for i in indices:
+            event = self.conn.execute('SELECT source_event_id FROM source_messages WHERE request_id=? AND message_index=?', (request_id, i)).fetchone()[0]
+            if (request_id, i) not in existing_links:
+                new_indices.append(i)
+                new_event = new_event or event not in existing_events
+                existing_links.add((request_id, i))
+            existing_events.add(event)
+        if existing and new_indices:
+            self._archive_claim(amu_id, 'reaffirm')
+        for i in new_indices:
             self._write("INSERT OR IGNORE INTO amu_sources VALUES (?,?,?)",
                         (amu_id, request_id, i))
+        sources = self.sources_for_amu(amu_id)
+        if sources:
+            scope = set(json.loads(sources[0]['trust_scope']))
+            for source in sources[1:]:
+                scope.intersection_update(json.loads(source['trust_scope']))
+            current = self.conn.execute('SELECT sensitivity FROM amu WHERE id=?', (amu_id,)).fetchone()[0]
+            sensitivity = max([current] + [s['sensitivity'] for s in sources],
+                              key=lambda s: {'normal': 0, 'sensitive': 1, 'suppressed': 2}.get(s, 2))
+            self._write('UPDATE amu SET sensitivity=?,trust_scope=? WHERE id=?',
+                        (sensitivity, json.dumps(sorted(scope)), amu_id))
         row = self.conn.execute("SELECT user_id FROM amu WHERE id=?", (amu_id,)).fetchone()
         if row:
             self._touch_user(row[0])
         self.conn.commit()
+        return new_event
 
     def sources_for_amu(self, amu_id):
         return [dict(r) for r in self.conn.execute(
@@ -330,6 +396,10 @@ class Store:
     def replace_fact(self, amu_id, fact, embedding):
         """Replace derived representations together; caller supplies final-text vector."""
         integrity.validate_interval((fact.get("temporal") or {}).get("start"), (fact.get("temporal") or {}).get("end"))
+        self._archive_claim(amu_id, 'enrich')
+        previous = self.conn.execute('SELECT sensitivity FROM amu WHERE id=?', (amu_id,)).fetchone()[0]
+        fact = dict(fact, sensitivity=max((previous, fact.get('sensitivity', 'normal')),
+                    key=lambda s: {'normal': 0, 'sensitive': 1, 'suppressed': 2}.get(s, 2)))
         self._write("UPDATE amu SET content=?,retrieval_key=?,type=?,entities=?,"
                     "keywords=?,event_time=?,sensitivity=?,embedding=?,"
                     "embedding_space=? WHERE id=?",
@@ -394,8 +464,12 @@ class Store:
                     "DELETE FROM amu_sources WHERE amu_id IN "
                     "(SELECT id FROM amu WHERE user_id=?)", (user_id,))
                 for table in ("amu_fts", "sessions_fts", "triples", "scenes", "amu",
-                              "sessions", "requests", "source_messages", "user_revisions"):
+                              "sessions", "requests", "source_messages", "claim_versions", "view_dependencies", "feedback_events"):
                     self.conn.execute(f"DELETE FROM {table} WHERE user_id=?", (user_id,))
+                self.conn.execute(
+                    "INSERT INTO deletion_epochs(user_id,epoch) VALUES (?,1) "
+                    "ON CONFLICT(user_id) DO UPDATE SET epoch=epoch+1", (user_id,))
+                self._touch_user(user_id)
                 self.conn.execute(
                     "INSERT INTO purge_receipts VALUES (?,?,?,?)",
                     (receipt_id, user_id, deleted_at, json.dumps(counts, sort_keys=True)))
@@ -416,9 +490,13 @@ class Store:
                    temporal=None, state=None, evidence=None,
                    scene_id=None, cell_id=None, polarity=None,
                    helpful=0, harmful=0, verified=False,
-                   task_signature=None) -> str:
+                   task_signature=None, epistemic_status='asserted', resolution_status='accepted') -> str:
         integrity.validate_interval(valid_from, valid_to)
         integrity.validate_interval((temporal or {}).get("start"), (temporal or {}).get("end"))
+        if epistemic_status not in ('asserted', 'observed', 'inferred', 'planned'):
+            raise ValueError('Invalid epistemic status')
+        if resolution_status not in ('accepted', 'disputed', 'retracted'):
+            raise ValueError('Invalid resolution status')
         amu_id = f"amu_{uuid.uuid4().hex[:16]}"
         blob = (embedding.astype(np.float32).tobytes()
                 if embedding is not None else None)
@@ -449,6 +527,9 @@ class Store:
                 " VALUES (?,?,?,?)",
                 (amu_id, user_id, content, retrieval_key))
             self.set_metadata(amu_id, dict(temporal=temporal, state=state, evidence=evidence))
+            self._write('UPDATE amu SET recorded_from=?,knowledge_status=?,epistemic_status=?,resolution_status=?,valid_from_status=?,valid_to_status=? WHERE id=?',
+                        (_now(), 'known', epistemic_status, resolution_status,
+                         'known' if valid_from else 'unknown', 'known' if valid_to else 'open', amu_id))
             self._touch_user(user_id)
             self.conn.commit()
         return amu_id
@@ -460,10 +541,15 @@ class Store:
                     (json.dumps(fact["temporal"]) if fact.get("temporal") is not None else None,
                      json.dumps(fact["state"]) if fact.get("state") is not None else None,
                      json.dumps(fact.get("evidence") or [], ensure_ascii=False), amu_id))
+        if fact.get('epistemic_status') is not None:
+            if fact['epistemic_status'] not in ('asserted', 'observed', 'inferred', 'planned'):
+                raise ValueError('Invalid epistemic status')
+            self._write('UPDATE amu SET epistemic_status=? WHERE id=?', (fact['epistemic_status'], amu_id))
 
     def update_amu_content(self, amu_id: str, content: str,
                            confidence: Optional[float] = None):
         with _LOCK:
+            self._archive_claim(amu_id, 'correction')
             self._write(
                 "UPDATE amu SET content=?, embedding=NULL, embedding_space=NULL, retrieval_key='', "
                 "entities='[]', keywords='[]', temporal=NULL, state=NULL, evidence=NULL, confidence=COALESCE(?,confidence)"
@@ -486,7 +572,8 @@ class Store:
             integrity.validate_interval(current["valid_from"], valid_to)
             if not valid_to:
                 raise ValueError("Closing validity requires an end time")
-            self._write("UPDATE amu SET valid_to=? WHERE id=?",
+            self._archive_claim(amu_id, 'world_change')
+            self._write("UPDATE amu SET valid_to=?,valid_to_status='known' WHERE id=?",
                               (valid_to, amu_id))
             row = self.conn.execute("SELECT user_id FROM amu WHERE id=?", (amu_id,)).fetchone()
             if row:
@@ -571,7 +658,7 @@ class Store:
             user_id, np.asarray(vec)[None, :], k, include_history)[0]
 
     def fts_search(self, user_id: str, query: str, k: int, include_history=False,
-                   include_sensitive=False) -> List[Dict]:
+                   include_sensitive=False, include_cold=False) -> List[Dict]:
         # OR semantics keeps recall high for keyword-ish queries.
         # FTS5 MATCH is syntax-sensitive: keep only alnum tokens, quote each.
         import re as _re
@@ -582,9 +669,10 @@ class Store:
             params = [value for gram in grams for value in (f"%{gram}%", f"%{gram}%")]
             history = "" if include_history else " AND valid_to IS NULL"
             sensitive = "" if include_sensitive else " AND sensitivity!='sensitive'"
+            cold = "" if include_cold else " AND tier!='cold'"
             with _LOCK:
                 rows = self.conn.execute(
-                    f"SELECT * FROM amu WHERE user_id=?{history}{sensitive}{_SUPPRESSED} AND tier!='cold' AND ({clauses}) LIMIT ?",
+                    f"SELECT * FROM amu WHERE user_id=?{history}{sensitive}{_SUPPRESSED}{cold} AND ({clauses}) LIMIT ?",
                     (user_id, *params, k)).fetchall()
             out = [self._row_to_dict(r) for r in rows]
             for item in out:
@@ -601,16 +689,20 @@ class Store:
             rows = self.conn.execute(
                 """SELECT f.amu_id, bm25(amu_fts) AS rank FROM amu_fts f
                    WHERE amu_fts MATCH ? AND f.user_id=?
-                   AND (? OR EXISTS (SELECT 1 FROM amu a WHERE a.id=f.amu_id AND a.valid_to IS NULL))
+                   AND EXISTS (SELECT 1 FROM amu a WHERE a.id=f.amu_id
+                     AND (? OR a.valid_to IS NULL) AND (? OR a.sensitivity!='sensitive')
+                     AND (? OR a.tier!='cold') AND a.sensitivity!='suppressed'
+                     AND a.view_status='ready' AND a.resolution_status!='retracted')
                    ORDER BY rank LIMIT ?""",
-                (match, user_id, include_history, k)).fetchall()
+                (match, user_id, include_history, include_sensitive, include_cold, k)).fetchall()
         ids = [r["amu_id"] for r in rows]
         if not ids:
             return []
         ph = ",".join("?" * len(ids))
         with _LOCK:
             amu_rows = self.conn.execute(
-                f"SELECT * FROM amu WHERE id IN ({ph}) AND tier!='cold'"
+                f"SELECT * FROM amu WHERE id IN ({ph})"
+                + ("" if include_cold else " AND tier!='cold'")
                 + ("" if include_history else " AND valid_to IS NULL")
                 + _SUPPRESSED,
                 ids).fetchall()
@@ -685,7 +777,7 @@ class Store:
                 "SELECT t.* FROM triples t JOIN amu a ON a.id=t.amu_id "
                 "WHERE t.user_id=?" +
                 ("" if include_sensitive else " AND a.sensitivity!='sensitive'")
-                + " AND a.sensitivity!='suppressed'",
+                + " AND a.sensitivity!='suppressed' AND a.view_status='ready' AND a.resolution_status!='retracted'",
                 (user_id,)).fetchall()
         return [dict(r) for r in rows]
 
@@ -710,6 +802,7 @@ class Store:
             rows = self.conn.execute(
                 "SELECT * FROM amu WHERE user_id=? AND valid_to IS NULL"
                 " AND sensitivity NOT IN ('sensitive','suppressed')"
+                " AND view_status='ready' AND resolution_status='accepted'"
                 " AND type IN ('rule','profile','preference')"
                 " ORDER BY CASE type WHEN 'rule' THEN 0 WHEN 'profile' THEN 1 ELSE 2 END,"
                 " CASE WHEN profile_status IN ('static','stable','rule') THEN 0 ELSE 1 END,"
@@ -730,10 +823,11 @@ class Store:
                 "SELECT user_id,valid_from,valid_to FROM amu WHERE id=?", (amu_id,)).fetchone()
             if row is None:
                 raise ValueError("Cannot suppress a missing memory")
+            self._archive_claim(amu_id, 'retraction')
             if row["valid_to"] is None:
                 integrity.validate_interval(row["valid_from"], when)
                 self._write("UPDATE amu SET valid_to=? WHERE id=?", (when, amu_id))
-            self._write("UPDATE amu SET sensitivity='suppressed' WHERE id=?", (amu_id,))
+            self._write("UPDATE amu SET sensitivity='suppressed',resolution_status='retracted' WHERE id=?", (amu_id,))
             self._touch_user(row["user_id"])
             self.conn.commit()
 

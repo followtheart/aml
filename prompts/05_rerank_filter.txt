@@ -42,11 +42,14 @@ Scoring rules:
   or would change which advice fits, even if it never mentions the topic
   asked about. General world knowledge that the assistant once explained,
   with no information about the user, scores low.
-- Implicit interest counts as user evidence: "the user asked why lakes are
-  warmer in July" reveals an interest in lakes/swimming; "the user asked about
-  anime storytelling" reveals an interest in anime. When an option relies on a
-  trait that a candidate reveals this way, score that candidate >= 0.5, even
-  though the memory itself is phrased as a question or curiosity.
+- User-authored facts, plans, questions and episodes may all carry personal
+  evidence. Do not penalize a useful statement merely because its type is
+  "fact" or "plan". Prefer concise direct user evidence over a long assistant
+  explanation when both cover the same point.
+- A question about a topic can reveal a weak implicit interest. Score that
+  signal for its ability to distinguish the supplied options, but do not
+  rewrite it as a confirmed habit, ownership or medical condition. Location
+  and occupation matter only when the advice actually depends on them.
 - Governance notes such as "the user asked to forget X" are not traits: score
   them low unless the question is about X.
 

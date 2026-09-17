@@ -140,8 +140,14 @@ STRUCTURED_SCHEMAS["choice_align"] = _object({
     "options": {"type": "array", "items": _object({
         "letter": _TEXT,
         "kind": {"type": "string", "enum": ["persona", "generic"]},
-        "supported": {"type": "boolean"},
+        "match": {"type": "string", "enum": ["strong", "weak", "none"]},
+        "option_claim": _TEXT,
+        "evidence_id": _TEXT,
         "evidence": _TEXT,
+        "unsupported_claims": {"type": "array", "items": _TEXT},
+        "forbidden": {"type": "boolean"},
+        "constraint_id": _TEXT,
+        "constraint_span": _TEXT,
     })}
 })
 STRUCTURED_SCHEMAS["invalidate"] = _object({
@@ -369,7 +375,9 @@ class FakeLLM:
         if "choice alignment module" in prompt:
             letters = re.findall(r"^\s*([A-Z])\.\s", prompt, re.M)
             return json.dumps({"options": [
-                {"letter": l, "kind": "generic", "supported": False, "evidence": ""}
+                {"letter": l, "kind": "generic", "match": "none", "option_claim": "",
+                 "evidence_id": "", "evidence": "", "unsupported_claims": [],
+                 "forbidden": False, "constraint_id": "", "constraint_span": ""}
                 for l in letters]})
         if "memory invalidation module" in prompt:
             ids = re.findall(r"^(amu_\w+):", prompt, re.M)

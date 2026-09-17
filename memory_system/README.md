@@ -18,7 +18,7 @@ app/
   experience.py      显式任务反馈→策略/工作流/技能/手册（成功与失败经验）
   graph.py           实体-AMU 二部图 + PPR（HippoRAG 式单步多跳）
   add_pipeline.py    切分→MemCell 抽取(episode+facts+triples)→新颖度门控→治理→多索引→场景巩固→滚动摘要
-  search_pipeline.py 查询理解(锚定用户最新记忆时间)→七路召回(含场景→情景)→RRF→小 R 重排
+  search_pipeline.py 查询理解(显式 reference_time 锚点)→七路召回(含场景→情景)→RRF→小 R 重排
                      →充分性验证/迭代召回/弃权→前瞻时效过滤→top_k
   main.py            FastAPI: /add /search /feedback /memory/{user_id} /health
 scripts/
@@ -42,14 +42,18 @@ data/
 episode；引用本身无效、无法定位时保留整批原文。语义批次校验被拒绝时，
 才追加逐条校验以隔离错误。日志包含批次起点、事实序号和来源消息序号。
 
-回答上下文默认总上限为 24,000 字符，单条上限为 2,400 字符，分别通过
-`AML_ANSWER_CONTEXT_MAX_CHARS`、`AML_ANSWER_CONTEXT_ITEM_MAX_CHARS` 配置。
-预算覆盖所有记忆类型、证据正文及分隔符，按检索顺序保留，截断处标注
-`[truncated]`；问题、选项和任务指令不被截断。这是字符预算而非精确 token
-预算；较长任务可按需调大，以免丢失证据。Memory-Only 只返回原子记忆和
-结构化来源引用；narrative/document 意图切换到 Memory-Doc，优先 episode 并
-在预算内拼接来源正文。来源 ID 等元数据始终保留在 `sources` 字段中。
-`aml.context` 日志记录输入和实际上下文字符数，修改配置后需重启进程。
+Search 的最終證據包預設上限為 32,000 UTF-8 bytes（保守 token 上界，
+不是 32k 個模型 token），可透過 `SearchRequest.evidence_token_budget` 或本地評測
+`--evidence-token-budget` 設定。整條證據在驗證前裝包；回答端核對 packet hash
+後讀取同一包，不再另行截斷。舊格式、沒有 hash 的輸入仍使用 24,000／2,400
+字符的總額／單條上限。
+
+個人化檢索按使用者歸屬與來源選取證據，保留合格的 fact、plan、event、episode。
+來源節錄保留必要原文引用及來源 ID；narrative/document 查詢保留完整來源。
+unknown 時間欄位留在結構化資料，省略無資訊的文字前綴。已召回画像維持檢索
+順位，未召回的相關画像才作補充，最多占 1,600 bytes 且不超過整包的 20%。
+選項對齊要求可驗證的 evidence_id 和原文片段，明示同分，並區分弱興趣與明確習慣。
+詳見 [PersonaMem 修正與驗證](PERSONAMEM_FIX_VALIDATION.md)。
 
 遇到服务端限流（HTTP 429 / `RateLimitError`）时，所有模型调用默认额外重试
 6 次，异步等待约 15、30、60、120、120、120 秒（带随机抖动）。若服务端
@@ -59,6 +63,13 @@ episode；引用本身无效、无法定位时保留整批原文。语义批次�
 修改后需重启评测/服务进程。持续限流或配额不足仍会在重试耗尽后报错，
 本地评测结果应检查 `error_stage` / `error_type`，避免将调用失败当作答错。
 离线重试测试：`python scripts/selftest_metrics.py`。
+
+单次 Search 有硬截止时间与调用/Token 预算（默认 45 秒 / 12 次 / 64k token，
+`AML_SEARCH_DEADLINE_SECONDS`、`AML_SEARCH_MAX_CALLS`、`AML_SEARCH_MAX_TOKENS`）。
+慢模型（如 qwen3-14b）叠加限流退避很容易超过 45 秒；超时的 Search 抛出
+`TimeoutError` 并写入 `status=error` 的 trace，服务端返回 500，本地评测
+把该题记为 `error_stage=search`、得 0 分后继续跑后续题目，不再中断整轮。
+遇到超时请先调大 `AML_SEARCH_DEADLINE_SECONDS`，而不是重跑整批。
 
 主动节流：同一进程、事件循环内，同类同模型的并发在途调用上限由
 `AML_PROVIDER_CONCURRENCY` 控制（默认 4，设为 1 即串行）；同一请求内的多个

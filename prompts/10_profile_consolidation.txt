@@ -28,6 +28,8 @@ Rules:
 - support_ids must come from the ids listed above; never invent ids.
 - Do NOT restate world knowledge, explanations, or advice from the assistant.
 - Do NOT duplicate anything already covered by the existing profile.
+- State interests directly: "The user is interested in <topic>", never
+  "The user is interested in understanding or learning why <topic>".
 - Each assertion names the user explicitly ("The user ...") and stays true
   out of context. At most 3 items; use an empty array when nothing qualifies.
 

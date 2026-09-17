@@ -2,44 +2,11 @@
 import json
 import re
 
-from . import answer_context, config, llm, prompts
+from . import answer_context, choice_alignment as alignment_policy, config, llm, prompts
+from .choice_alignment import align as choice_alignment, rank_alignment
 
 PROTOCOL = "local-text-proxy-v1"
 REFINED_POLICY = "locomo-refined-local-v1"
-
-
-async def choice_alignment(qa, memories):
-    """P2 (Memory-R1 answer-agent distillation): align every option with the
-    persona evidence BEFORE answering, so a generic option is only chosen
-    when no persona option has support. Fails open (returns None)."""
-    profile_lines = []
-    for m in memories:
-        if m.get("memory_type") in ("preference", "profile", "rule"):
-            text = str(m.get("content") or "").split("\n[source evidence", 1)[0]
-            profile_lines.append(" ".join(text.split()))
-    prompt = prompts.render(
-        "11_choice_align.txt",
-        question=qa["question"],
-        options="\n".join(qa.get("options") or []) or "(none)",
-        profile_memories="\n".join(f"- {l[:400]}" for l in profile_lines[:24])
-        or "(none)")
-    result = await llm.complete_json(
-        prompt, '{"options": []}',
-        schema=llm.STRUCTURED_SCHEMAS["choice_align"], stage="eval.choice_align")
-    entries = result.get("options")
-    if not isinstance(entries, list) or not entries:
-        return None
-    lines = []
-    for entry in entries:
-        if not isinstance(entry, dict) or not entry.get("letter"):
-            continue
-        mark = "SUPPORTED" if entry.get("supported") else "unsupported"
-        evidence = str(entry.get("evidence") or "").strip()
-        line = f"- {entry['letter']}: {entry.get('kind', 'generic')}, {mark}"
-        if evidence:
-            line += f' (evidence: "{evidence[:200]}")'
-        lines.append(line)
-    return "\n".join(lines) or None
 
 
 def refined_judge_prompt(question, gold, prediction):
@@ -116,14 +83,18 @@ def answer_prompt(qa, memories, alignment=None):
                          "required item. If the history lacks evidence, explicitly say so.")
     if qa.get("scoring") == "choice":
         question += "\n\nOptions:\n" + "\n".join(qa["options"])
+        instructions += (
+            " Selection policy: prefer advice supported by this user's evidence. "
+            "A related topic is not proof of a habit, condition, possession or personal "
+            "history. Weigh weak relevant interest against unsupported premises; do not "
+            "automatically prefer it over generic advice. Use generic advice when the "
+            "personalized alternatives invent key facts. Apply forget constraints to "
+            "their stated scope, not all adjacent topics. Location and occupation only "
+            "support advice that actually depends on them.")
         if alignment:
-            instructions += (
-                " Persona evidence alignment (pre-computed from the user's "
-                "profile memories):\n" + alignment + "\n"
-                "Choose among SUPPORTED persona options; pick a generic or "
-                "unsupported option only when no persona option is supported. "
-                "Memories marked '[core profile]' describe persistent user "
-                "traits and outrank one-off topic discussions.")
+            instructions += (" Persona evidence alignment (cited judgements; tied tiers "
+                             "have no winner, and citations establish provenance rather "
+                             "than logical entailment):\n" + alignment + "\n")
         if qa["qa_type"] == "single_choice":
             instructions += (" Return exactly one uppercase option letter and nothing "
                              "else; do not repeat the option text.")
@@ -160,19 +131,31 @@ def aggregate_rubrics(payload, count, mode):
 async def evaluate(qa, memories):
     """Return prediction, score [0,1], and explicit failure diagnostics."""
     scoring = qa.get("scoring", "binary")
+    diagnostics = {}
+    alignment, entries = None, None
+    if (config.CHOICE_ALIGN_ENABLED and scoring == "choice"
+            and qa.get("qa_type") == "single_choice"):
+        try:
+            alignment, entries = await choice_alignment(qa, memories, diagnostics)
+        except Exception as exc:
+            alignment, entries = None, None  # fail open: plain choice prompt
+            diagnostics["choice_align_error"] = type(exc).__name__
+        else:
+            if entries:
+                diagnostics["choice_alignment"] = entries
+        # Opt-in only: require one uniquely strong, cited, complete premise.
+        if config.CHOICE_AUTOPICK and entries:
+            best = alignment_policy.unique_supported_choice(entries)
+            if best:
+                diagnostics["choice_autopick"] = best["letter"]
+                return best["letter"], choice_score(best["letter"], qa["gold_labels"],
+                                                    qa["qa_type"]), diagnostics
     try:
-        alignment = None
-        if (config.CHOICE_ALIGN_ENABLED and scoring == "choice"
-                and qa.get("qa_type") == "single_choice"):
-            try:
-                alignment = await choice_alignment(qa, memories)
-            except Exception:
-                alignment = None  # fail open: plain choice prompt
         pred = (await llm.complete(answer_prompt(qa, memories, alignment), stage="eval.answer")).strip()
     except Exception as exc:
-        return "", 0.0, {"error_stage": "answer", "error_type": type(exc).__name__}
+        return "", 0.0, {**diagnostics, "error_stage": "answer", "error_type": type(exc).__name__}
     if scoring == "choice":
-        return pred, choice_score(pred, qa["gold_labels"], qa["qa_type"]), {}
+        return pred, choice_score(pred, qa["gold_labels"], qa["qa_type"]), diagnostics
     try:
         if scoring == "refined_binary":
             if pred in qa["answer"]:

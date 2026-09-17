@@ -28,13 +28,15 @@ def health():
           dependencies=[Depends(auth)])
 async def add(req: schemas.AddRequest):
     try:
-        await add_pipeline.run_add(_store, req)
+        result = await add_pipeline.run_add(_store, req)
     except Exception as e:  # never return 202; retryable 5xx only
         raise HTTPException(status_code=500,
                             detail={"reason": f"add failed: {e}"})
-    # contract: echo ids byte-for-byte
+    # contract: echo ids byte-for-byte; ULM §2.5: return the write revision
     return schemas.AddResponse(success=True, request_id=req.request_id,
-                               user_id=req.user_id, session_id=req.session_id)
+                               user_id=req.user_id, session_id=req.session_id,
+                               write_revision=result["write_revision"],
+                               scope_epoch=result["scope_epoch"])
 
 
 @app.post("/search", response_model=schemas.SearchResponse,

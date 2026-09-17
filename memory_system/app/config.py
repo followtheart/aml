@@ -174,6 +174,12 @@ PROFILE_TRANSIENT_TTL_DAYS = max(
 SEARCH_MAX_ROUNDS = max(1, int(os.environ.get("AML_SEARCH_MAX_ROUNDS", "2")))
 VERIFY_EVIDENCE_ITEMS = 15
 ABSTAIN_CONFIDENCE = float(os.environ.get("AML_ABSTAIN_CONFIDENCE", "0.15"))
+# §9.4 hard per-search request budget: wall-clock deadline plus provider
+# call/token caps. Slow models and rate-limit backoffs can exceed 45s;
+# raise the deadline instead of letting a search die mid-flight.
+SEARCH_DEADLINE_SECONDS = max(1.0, float(os.environ.get("AML_SEARCH_DEADLINE_SECONDS", "45")))
+SEARCH_MAX_CALLS = max(1, int(os.environ.get("AML_SEARCH_MAX_CALLS", "12")))
+SEARCH_MAX_TOKENS = max(1024, int(os.environ.get("AML_SEARCH_MAX_TOKENS", "64000")))
 # §3.1 the rolling session summary is extraction context only (ACE collapse);
 # the legacy summary recall route stays available for ablation.
 SUMMARY_ROUTE = os.environ.get("AML_SUMMARY_ROUTE", "0") == "1"
@@ -185,30 +191,30 @@ PROFILE_CONSOLIDATION_ENABLED = os.environ.get("AML_PROFILE_CONSOLIDATION", "1")
 # Support keys (Add request ids / supporting AMU ids) needed to confirm a
 # consolidated preference and to promote it transient -> static.
 PROFILE_MIN_SUPPORT = max(1, int(os.environ.get("AML_PROFILE_MIN_SUPPORT", "2")))
-# P0: Core Profile is injected ahead of ranked results on every search,
-# outside top_k (MemGPT/MIRIX core memory). 0 disables for ablation.
+# Supplemental core memories share top_k and the final evidence budget.
 CORE_PROFILE_INJECT = os.environ.get("AML_CORE_PROFILE_INJECT", "1") == "1"
 CORE_PROFILE_MAX_ITEMS = max(1, int(os.environ.get("AML_CORE_PROFILE_MAX_ITEMS", "12")))
 CORE_PROFILE_MAX_CHARS = max(256, int(os.environ.get("AML_CORE_PROFILE_MAX_CHARS", "1600")))
+CORE_PROFILE_TOKEN_BUDGET = max(0, int(os.environ.get("AML_CORE_PROFILE_TOKEN_BUDGET", "1600")))
+SEARCH_SOURCE_EXCERPT_CHARS = max(128, int(os.environ.get("AML_SEARCH_SOURCE_EXCERPT_CHARS", "800")))
 # P1: a user "forget X" request invalidates the matching memories
 # (Zep edge invalidation) instead of only logging the request.
 INVALIDATE_ENABLED = os.environ.get("AML_INVALIDATE_ENABLED", "1") == "1"
 INVALIDATE_MIN_SIM = float(os.environ.get("AML_INVALIDATE_MIN_SIM", "0.55"))
 INVALIDATE_MAX_TARGETS = max(1, int(os.environ.get("AML_INVALIDATE_MAX_TARGETS", "3")))
-# P1: histories without timestamps get synthetic monotonic ones seeded per
-# session, so validity ordering follows revelation order instead of the
-# service wall clock (Zep dual timeline; PersonaMem carries no timestamps).
-SYNTHETIC_TIME_ENABLED = os.environ.get("AML_SYNTHETIC_TIME", "1") == "1"
-SYNTHETIC_EPOCH_MS = int(os.environ.get("AML_SYNTHETIC_EPOCH_MS", "1577836800000"))  # 2020-01-01
-SYNTHETIC_STEP_MS = max(1, int(os.environ.get("AML_SYNTHETIC_STEP_MS", "60000")))
+# P1: histories without timestamps stay undated (ULM §2.1): no synthetic
+# timeline is fabricated, and relative times resolve to unknown instead of
+# being anchored to the service wall clock.
 # P2: choice questions get an explicit option<->persona-evidence alignment
 # pass before answering (Memory-R1 answer-agent distillation).
 CHOICE_ALIGN_ENABLED = os.environ.get("AML_CHOICE_ALIGN", "1") == "1"
+# Experimental opt-in: only one uniquely strong, cited option without missing
+# premises may bypass the answer model. Ties/weak matches never autopick.
+CHOICE_AUTOPICK = os.environ.get("AML_CHOICE_AUTOPICK", "0") == "1"
 # P3: query understanding sees a compact profile digest so expansions bind
 # generic questions to known user traits.
 QUERY_PROFILE_DIGEST = os.environ.get("AML_QUERY_PROFILE_DIGEST", "1") == "1"
-# P3: preference/profile intents hide assistant world knowledge once the user
-# actually owns persona memories (Structural Memory: per-task memory views).
+# Preference/profile intents use source-aware personal evidence of all types.
 PERSONA_VIEW_FILTER = os.environ.get("AML_PERSONA_VIEW_FILTER", "1") == "1"
 
 # Full stored content for local debugging; empty path disables the JSONL log.
@@ -226,7 +232,7 @@ SEARCH_SOURCE_REFS_PER_ITEM = max(
     SEARCH_SOURCE_MESSAGES_PER_ITEM,
     int(os.environ.get("AML_SEARCH_SOURCE_REFS_PER_ITEM", "20")))
 SEARCH_SOURCE_CONTEXT_CHARS = max(
-    0, int(os.environ.get("AML_SEARCH_SOURCE_CONTEXT_CHARS", "12000")))
+    0, int(os.environ.get("AML_SEARCH_SOURCE_CONTEXT_CHARS", "32000")))
 
 # Answer memory budget includes all memory types and their rendered evidence.
 # These are character limits, not estimates of a provider-specific token count.

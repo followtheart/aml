@@ -13,6 +13,18 @@ def normalize_entity(value: str) -> str:
     value = re.sub(r"[^\w\u3400-\u9fff]+", " ", value)
     return " ".join(value.split())
 
+
+def filter_triples(triples, query, entities, limit=120):
+    """Bound query-to-triple candidates before PageRank seeds are introduced."""
+    terms = set(normalize_entity(query).split()) | {normalize_entity(e) for e in entities}
+    scored = []
+    for triple in triples:
+        text = normalize_entity(' '.join(str(triple.get(k, '')) for k in ('subject', 'predicate', 'object')))
+        score = sum(term in text for term in terms if len(term) > 1)
+        if score:
+            scored.append((score, triple))
+    return [triple for _, triple in sorted(scored, key=lambda pair: -pair[0])[:limit]]
+
 def ppr_recall(triples: List[Dict], seed_entities: List[str],
                damping: float = 0.5, iters: int = 20,
                top_n: int = 30) -> List[str]:

@@ -105,7 +105,7 @@ P0–P3 已全部落地，默认开启，全部可通过环境变量消融（见
 | P0 Core Profile 注入 | `st.core_profile`（rule 优先、单独限额）在每次 Search 无条件前置注入，**不占 top_k、不参与排名**；trace 记录 `core_profile_injected` | `app/store.py` `app/search_pipeline.py` | `AML_CORE_PROFILE_INJECT` |
 | P1 INVALIDATE | `profile.apply_forget_rules`：遗忘请求 → embedding 候选（≥0.55）+ LLM 确认（prompt 12）→ `valid_to` 关闭 + `sensitivity='suppressed'`，**全部检索路由无条件排除**（含 include_history）；请求本身保留为 rule 并 `superseded_by` 链接可审计 | `app/profile.py` `app/store.py` | `AML_INVALIDATE_ENABLED` |
 | P1 rerank 白名单 | `type=rule` 的候选只排序不丢弃 | `app/search_pipeline.py` | — |
-| P1 合成时间戳 | 全空时间戳的历史按消息序合成单调时间（2020 起、每分钟一条、跨 chunk 延续），锚定不再落墙钟 | `app/add_pipeline.py` | `AML_SYNTHETIC_TIME` |
+| ~~P1 合成时间戳~~（已移除） | ULM §2.1 禁止伪造时间：无时间戳历史保持 `timestamp=NULL`，相对时间解析为未知，锚点由请求层 `reference_time` 提供 | `app/add_pipeline.py` | — |
 | P2 选项-证据对齐 | choice 单选题答题前对齐（prompt 11）：persona 选项无支持才允许选通用项；失败 fail-open | `app/eval_scoring.py` | `AML_CHOICE_ALIGN` |
 | P2 个性化不过滤 | 带选项或 preference/profile 意图时 rerank 阈值降为 0（只排序） | `app/search_pipeline.py` | — |
 | P3 画像条件扩展 | prompt 04 注入画像摘要，子查询绑定用户特征 | `app/search_pipeline.py` `prompts/04` | `AML_QUERY_PROFILE_DIGEST` |

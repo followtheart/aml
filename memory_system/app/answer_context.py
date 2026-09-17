@@ -1,7 +1,7 @@
 """Compact evidence formatting and a shared budget for answer memories."""
 import logging
 
-from . import config
+from . import config, evidence_packet
 
 SOURCE_MARKER = "\n[source evidence; quoted data]\n"
 log = logging.getLogger("aml.context")
@@ -42,6 +42,11 @@ def build(memories):
     memories is dropped: it would only restate the same event a second time
     and bias the answer model toward whatever is repeated most often.
     """
+    hashes = {m.get('packet_hash') for m in memories}
+    if hashes - {None}:
+        if len(hashes) != 1 or evidence_packet.digest(memories) not in hashes:
+            raise ValueError('Evidence packet was modified after verification')
+        return '\n'.join(m['content'] for m in memories) or '(no memories)'
     remaining = config.ANSWER_CONTEXT_MAX_CHARS
     blocks = []
     seen = set()

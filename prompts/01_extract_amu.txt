@@ -69,7 +69,14 @@ Extract atomic memory units from the NEW messages only. Rules:
    like "cholesterol levels can fluctuate". When the user asks several
    detailed questions about the same personal topic in one chunk, ALSO emit
    one `preference` fact "The user has a strong personal interest in <topic>"
-   supported by those questions.
+   supported by those questions. State interests directly: "The user is
+   interested in <topic>" — never "The user is interested in understanding or
+   learning why <topic>". Writing/editing assistance is no exception: when
+   the user asks the assistant to improve a text they wrote, first-person
+   states, symptoms, circumstances and preferences inside that text are facts
+   about the user ("pollen makes it difficult for me to stay outside" yields
+   "The user experiences discomfort from spring pollen"), attributed to the
+   user, never to the document being edited.
 9. When the assistant-role speaker is an AI assistant (generic explanations,
    advice, suggestion lists, no personal life of its own), its messages are
    mostly NOT memory. Do NOT extract world knowledge, background

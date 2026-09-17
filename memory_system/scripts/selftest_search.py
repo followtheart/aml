@@ -1,4 +1,5 @@
 """Offline regressions for historical recall, summary evidence and search tracing."""
+import asyncio
 import json
 import os
 import re
@@ -16,6 +17,8 @@ from app.embeddings import embed
 
 
 async def score_all(prompt, *args, **kwargs):
+    if 'sufficiency verifier' in prompt:
+        return {'sufficient': True, 'confidence': .9, 'missing': '', 'follow_up_queries': []}
     ids = re.findall(r'^(amu_[^:]+|summary_[^:]+):', prompt, re.M)
     return {'scores': [{'id': aid, 'relevance': 0.9, 'keep': True} for aid in ids]}
 
@@ -52,9 +55,15 @@ class SearchTests(unittest.IsolatedAsyncioTestCase):
         current = await self.memory('Alice work Hangzhou', valid_from='2024-01-01')
         self.st.insert_triple('u', 'Alice', 'works_in', 'Shanghai', old)
         self.st.insert_triple('u', 'Alice', 'works_in', 'Hangzhou', current)
-        response = await self.run_search(self.req('Alice work previously'))
+        response = await self.run_search(self.req('Alice work previously'), {'intent': 'multi_hop', 'entities': ['Alice']})
         self.assertEqual({x.id for x in response.data}, {old, current})
         trace = json.loads(self.path.read_text().splitlines()[-1])
+        self.assertEqual(response.search_id, trace['search_id'])
+        self.assertEqual(trace['evidence_token_budget'], 32000)
+        self.assertEqual(trace['coverage_manifest']['included_ids'], [m.id for m in response.data])
+        self.assertEqual(trace['packet_hash'], response.packet_hash)
+        self.assertIn('pipeline_version', trace['versions'])
+        self.assertIn('ranked', trace)
         self.assertTrue(trace['include_history'])
         for channel in ['vector', 'full_text', 'graph']:
             ids = {c['id'] for r in trace['routes'] if r['channel'] == channel for c in r['candidates']}
@@ -78,10 +87,10 @@ class SearchTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(result.data), 1)
         self.assertEqual(result.data[0].memory_type, 'session_summary')
         self.assertEqual(result.data[0].sources[0]['timestamp'], 123)
-        self.assertEqual(result.data[0].sources[0]['content_omitted'], 'memory_only')
+        self.assertEqual(result.data[0].sources[0]['content'], 'Original evidence about Alice work')
         prompt = eval_scoring.answer_prompt({'question': 'Alice work?'},
                                             [x.model_dump() for x in result.data])
-        self.assertNotIn('Original evidence about Alice work', prompt)
+        self.assertIn('Original evidence about Alice work', prompt)
         self.assertIn('Hangzhou', prompt)
         self.st.set_summary('u', 's', 'Bob hobbies')
         self.assertEqual(self.st.summary_search('u', 'Hangzhou', 10), [])
@@ -165,9 +174,9 @@ class SearchTests(unittest.IsolatedAsyncioTestCase):
         self.st.save_messages(req)
         self.st.link_sources(aid, 'r', [0])
         result = await self.run_search(self.req())
-        self.assertNotIn('Evidence text', result.data[0].content)
+        self.assertIn('Evidence text', result.data[0].content)
         self.assertEqual(result.data[0].sources[0]['request_id'], 'r')
-        self.assertEqual(result.data[0].sources[0]['content_omitted'], 'memory_only')
+        self.assertEqual(result.data[0].sources[0]['content'], 'Evidence text')
         self.assertNotIn('request_id', result.data[0].content)
         result = await self.run_search(schemas.SearchRequest(user_id='other', query='Alice work'))
         self.assertEqual(result.data, [])
@@ -181,6 +190,21 @@ class SearchTests(unittest.IsolatedAsyncioTestCase):
         with patch.object(config, 'SEARCH_DEBUG_LOG', ''):
             await self.run_search(self.req())
         self.assertEqual(self.path.read_text(), before)
+
+    async def test_search_deadline_is_configurable_and_bounded(self):
+        await self.memory('Alice work')
+        async def hang(*args, **kwargs):
+            await asyncio.sleep(30)
+        with patch.object(config, 'SEARCH_DEADLINE_SECONDS', 0.2), patch.object(
+                search, '_understand', AsyncMock(return_value={'intent': 'fact'})), patch.object(
+                search, '_filter_rerank', side_effect=hang):
+            with self.assertRaises(TimeoutError):
+                await search.run_search(self.st, self.req())
+        trace = json.loads(self.path.read_text().splitlines()[-1])
+        self.assertEqual(trace['status'], 'error')
+        # The timeout arrives as CancelledError inside the pipeline and is
+        # re-raised as TimeoutError at the deadline boundary.
+        self.assertIn(trace['error_type'], ('CancelledError', 'TimeoutError'))
 
     async def test_summary_index_rollback(self):
         self.st.set_summary('u', 's', 'Alice work')
@@ -230,10 +254,10 @@ class SearchTests(unittest.IsolatedAsyncioTestCase):
         self.st.link_sources(second, 'source', [0])
         result = await self.run_search(self.req(top_k=2))
         bodies = '\n'.join(item.content for item in result.data)
-        self.assertEqual(bodies.count('shared source evidence'), 0)
+        self.assertEqual(bodies.count('shared source evidence'), 1)
         self.assertNotIn('content_omitted', bodies)
-        self.assertTrue(all(source.get('content_omitted') == 'memory_only'
-                            for item in result.data for source in item.sources))
+        self.assertEqual(sum(source.get('content_omitted') == 'duplicate'
+                             for item in result.data for source in item.sources), 1)
 
     async def test_memory_doc_prefers_episode_and_includes_sources(self):
         fact = await self.memory('Alice work fact')

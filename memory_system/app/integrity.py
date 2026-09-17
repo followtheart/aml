@@ -169,11 +169,23 @@ def verify_quotes(fact, batch):
     if not isinstance(evidence, list) or not evidence:
         raise ValueError('Fact has no source evidence')
     for item in evidence:
+        if not isinstance(item, dict):
+            raise ValueError('Evidence item must be an object')
         index, quote = item.get('message_index'), item.get('quote')
         if (type(index) is not int or not 0 <= index < len(batch)
                 or not isinstance(quote, str) or not quote.strip()
                 or not quote_in(quote, batch[index].content)):
             raise ValueError('Evidence quote does not match its source message')
+        if 'start' in item or 'end' in item:
+            start, end = item.get('start'), item.get('end')
+            if (type(start) is not int or type(end) is not int
+                    or not 0 <= start < end <= len(batch[index].content)
+                    or batch[index].content[start:end] != quote):
+                raise ValueError('Evidence span does not match its source message')
+        else:
+            start = batch[index].content.find(quote)
+            if start >= 0:
+                item.update(start=start, end=start + len(quote))
     return sorted({item['message_index'] for item in evidence})
 
 
@@ -204,10 +216,20 @@ def state_key(fact):
     if not all(isinstance(state.get(k), str) and state[k].strip()
                for k in ('subject', 'attribute', 'value')):
         return None
-    return tuple(' '.join(state[k].casefold().split()) for k in ('subject', 'attribute'))
+    return tuple(' '.join(state[k].casefold().split()) for k in ('subject', 'attribute')) + (state.get('scope', 'personal'),)
 
 
 def may_supersede(old, new):
     key = state_key(new)
     return bool(key and key == state_key(old)
+                and (old.get('state') or {}).get('cardinality', 'single') == 'single'
+                and (new.get('state') or {}).get('cardinality', 'single') == 'single'
                 and old['state']['value'].casefold() != new['state']['value'].casefold())
+
+
+def state_boundary(fact):
+    """A day is a valid transition boundary; a month or missing time is not."""
+    temporal = fact.get('temporal') or {}
+    if temporal.get('precision') in ('day', 'instant'):
+        return temporal.get('start')
+    return fact.get('event_time')

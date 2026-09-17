@@ -9,7 +9,7 @@ from collections import deque
 from email.utils import parsedate_to_datetime
 from typing import Awaitable, Callable, Optional
 
-from . import config
+from . import budget, config
 
 log = logging.getLogger("aml.metrics")
 
@@ -130,6 +130,9 @@ async def _measured_call(
     rate_retries = 0
     while True:
         await pacer.wait(kind, stage, model)
+        limits = budget.current.get()
+        if limits:
+            limits.before_call()
         attempt += 1
         started = time.perf_counter()
         try:
@@ -137,6 +140,8 @@ async def _measured_call(
             duration = time.perf_counter() - started
             response = response_getter(result) if response_getter else result
             prompt_tokens, completion_tokens, total_tokens = _usage(response)
+            if limits:
+                limits.tokens += total_tokens
             pacer.record(total_tokens)
             parts = [
                 "provider_call",

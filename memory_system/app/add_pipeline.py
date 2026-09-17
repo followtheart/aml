@@ -23,11 +23,14 @@ def _format_messages(msgs: List[schemas.Message]) -> str:
     return "\n".join(f"{m.role}: {m.content}" for m in msgs)
 
 
-def _ref_time(msgs: List[schemas.Message]) -> str:
+def _ref_time(msgs: List[schemas.Message]) -> Optional[str]:
+    """Message-time anchor for extraction. ULM §2.1/§3.3: when the source
+    messages carry no timestamp there is no anchor — return None instead of
+    fabricating one from the service wall clock."""
     ts = next((m.timestamp for m in reversed(msgs) if m.timestamp), None)
     if ts:
         return datetime.fromtimestamp(ts / 1000, tz=timezone.utc).isoformat()
-    return datetime.now(timezone.utc).isoformat()
+    return None
 
 
 def _embed_text(fact: Dict) -> str:
@@ -77,7 +80,18 @@ def _validate_fact(raw, batch, start, req):
     if not _is_grounded_fact(raw, _format_messages(batch)):
         raise ValueError("Ungrounded extraction result")
     fact = dict(raw)
+    if isinstance(raw.get('evidence'), list):
+        fact['evidence'] = [dict(e) if isinstance(e, dict) else e for e in raw['evidence']]
+    if fact.get('epistemic_status', 'asserted') not in ('asserted', 'observed', 'inferred', 'planned'):
+        raise ValueError('Invalid epistemic status')
     indices = integrity.verify_quotes(fact, batch)
+    source_messages = [batch[j] for j in indices]
+    if any(m.source_kind in ('document', 'import', 'unknown') or m.role == 'assistant' for m in source_messages):
+        fact['epistemic_status'] = 'inferred'
+    elif all(m.source_kind == 'tool' or m.role == 'tool' for m in source_messages):
+        fact['epistemic_status'] = 'observed'
+    elif fact.get('type') == 'foresight':
+        fact['epistemic_status'] = 'planned'
     fact["_sources"] = [start + j for j in indices]
     expression = fact.get("time_expression")
     if not expression:
@@ -171,7 +185,7 @@ async def _extract_segment(req: schemas.AddRequest, summary: Optional[str],
         recent_messages=_format_messages(prior) or "(none)",
         chunk_messages="\n".join(f"[{i}] {m.role}: {m.content}"
                                  for i, m in enumerate(batch)),
-        reference_time=_ref_time(batch),
+        reference_time=_ref_time(batch) or "(unknown: source messages carry no timestamps)",
     )
     try:
         data = await llm.complete_json(
@@ -274,10 +288,17 @@ async def _govern_one(st: store.Store, user_id: str, fact: Dict,
                             "novelty": novelty}
     by_id = {item["id"]: item for item in neighbors}
     by_id.update({item["id"]: item for item in entity_neighbors})
+    slot = integrity.state_key(fact)
+    slot_ids = set()
+    if slot:
+        for item in st.get_amus(user_id):
+            if integrity.state_key(item) == slot and item.get('resolution_status') != 'retracted':
+                by_id[item['id']] = item
+                slot_ids.add(item['id'])
     # restrict to confident near-duplicates / same-entity items
     entity_ids = {item["id"] for item in entity_neighbors}
     cand = [n for n in by_id.values()
-            if n["id"] in entity_ids or n["_score"] > 0.55]
+            if n["id"] in entity_ids or n['id'] in slot_ids or n.get("_score", 0) > 0.55]
     if not cand:
         op = {"operation": "ADD", "target_id": None, "merged_content": None,
               "reason": "novelty_gate_new"}
@@ -338,10 +359,10 @@ async def _persist_fact(st: store.Store, req: schemas.AddRequest,
     if op == "NOOP":
         if target:
             previous = candidates[0]
-            previous["evidence"] = previous.get("evidence", []) + fact.get("evidence", [])
-            st.set_metadata(target, previous)
-            st.link_sources(target, req.request_id, fact.get("_sources", []))
-            st.add_support_session(target, req.session_id)
+            if st.link_sources(target, req.request_id, fact.get("_sources", [])):
+                previous["evidence"] = previous.get("evidence", []) + fact.get("evidence", [])
+                st.set_metadata(target, previous)
+                st.add_support_session(target, req.session_id)
         return None
     if op == "UPDATE" and target:
         # Complementary detail: merge text, keep the union of both memories'
@@ -387,15 +408,28 @@ async def _persist_fact(st: store.Store, req: schemas.AddRequest,
             return None  # refreshed triples already persisted against final content
     supersedes = None
     # Unknown/coarse event times are not invented state-transition instants.
-    valid_from = fact.get("event_time") or _ref_time(req.messages)
+    valid_from = integrity.state_boundary(fact)
+    resolution_status = fact.get('resolution_status', 'accepted')
     if op == "SUPERSEDE" and target:
         old = candidates[0]
+        correction = any(re.search(r'\b(?:previously|earlier|before).{0,40}\b(?:wrong|mistaken)|\b(?:correction|I was wrong)\b|之前.{0,12}(?:说错|錯|错了)|更正',
+                                   e.get('quote', ''), re.I) for e in fact.get('evidence', []))
         try:
-            integrity.validate_interval(old.get("valid_from"), valid_from)
+            if correction:
+                valid_from = valid_from or old.get('valid_from')
+            elif not valid_from:
+                raise ValueError('Unknown transition boundary')
+            if not correction:
+                integrity.validate_interval(old.get("valid_from"), valid_from)
         except ValueError:
             log.warning("Rejected backdated SUPERSEDE target=%s; preserving both memories", target)
+            resolution_status = 'disputed'
+            st.mark_resolution(target, 'disputed')
         else:
-            st.close_validity(target, valid_from)
+            if correction:
+                st.mark_resolution(target, 'retracted', reason='correction')
+            else:
+                st.close_validity(target, valid_from)
             supersedes = target
     amu_id = st.insert_amu(
         user_id=req.user_id, session_id=req.session_id,
@@ -405,7 +439,9 @@ async def _persist_fact(st: store.Store, req: schemas.AddRequest,
         valid_from=valid_from, supersedes=supersedes, confidence=0.9,
         sensitivity=fact.get("sensitivity", "normal"), embedding=vec,
         temporal=fact.get("temporal"), state=fact.get("state"),
-        evidence=fact.get("evidence", []))
+        evidence=fact.get("evidence", []),
+        epistemic_status=fact.get('epistemic_status', 'planned' if fact.get('type') == 'foresight' else 'asserted'),
+        resolution_status=resolution_status)
     if supersedes:
         st.link_supersession(supersedes, amu_id)
     return amu_id
@@ -424,19 +460,22 @@ async def _update_summary(st: store.Store, req: schemas.AddRequest):
     st.set_summary(req.user_id, req.session_id, summary)
 
 
-async def run_add(st: store.Store, req: schemas.AddRequest) -> None:
+async def run_add(st: store.Store, req: schemas.AddRequest) -> Dict:
     """Publish a complete Add atomically; failures leave the live store unchanged."""
+    epoch = st.user_state(req.user_id)["epoch"]
     for attempt in range(3):
         debug_record = None
         try:
             async with st.add_lock(req.user_id):
+                st.assert_epoch(req.user_id, epoch)
                 owner = st.request_owner(req.request_id)
                 if owner and (owner["user_id"] != req.user_id
                               or owner["session_id"] != req.session_id):
                     raise ValueError("request_id already belongs to another user or session")
                 if owner:
-                    return
-                with st.staged(req.user_id) as work:
+                    st.assert_epoch(req.user_id, epoch)
+                    return dict(write_revision=st.user_state(req.user_id)['revision'], scope_epoch=epoch)
+                with st.staged(req.user_id, expected_epoch=epoch) as work:
                     await _run_add(work, req)
                     if config.MEMORY_DEBUG_LOG:
                         try:
@@ -444,39 +483,25 @@ async def run_add(st: store.Store, req: schemas.AddRequest) -> None:
                         except Exception:
                             log.warning("Could not capture memory debug snapshot", exc_info=True)
             if debug_record is not None:
+                st.assert_epoch(req.user_id, epoch)
                 memory_debug.append(debug_record)
-            return
+            st.assert_epoch(req.user_id, epoch)
+            return dict(write_revision=work.published_revision, scope_epoch=epoch)
         except RuntimeError as exc:
             if "Memory changed during Add" not in str(exc) or attempt == 2:
                 raise
             log.info("Retrying Add after concurrent publish request_id=%s", req.request_id)
 
 
-def _with_synthetic_timestamps(st: store.Store,
-                               req: schemas.AddRequest) -> schemas.AddRequest:
-    """Zep dual timeline: histories without any timestamps (PersonaMem) get
-    synthetic monotonic ones continuing the session, so validity ordering
-    follows revelation order instead of the service wall clock."""
-    if not config.SYNTHETIC_TIME_ENABLED:
-        return req
-    if any(m.timestamp is not None for m in req.messages):
-        return req
-    base = st.session_max_timestamp(req.user_id, req.session_id)
-    if base is None:
-        base = config.SYNTHETIC_EPOCH_MS
-    messages = [m.model_copy(update={
-        "timestamp": base + (i + 1) * config.SYNTHETIC_STEP_MS})
-        for i, m in enumerate(req.messages)]
-    return req.model_copy(update={"messages": messages})
-
-
 async def _run_add(st: store.Store, req: schemas.AddRequest) -> None:
-    req = _with_synthetic_timestamps(st, req)
+    # Preserve original message times. Synthetic order cannot establish world time.
     st.save_messages(req)
     data = await _extract(st, req)
     facts = data.get("facts") or [{
         "content": _format_messages(req.messages), "type": "episode",
         "_sources": list(range(len(req.messages))), "_segment": 0}]
+    # Deletion requests must be remembered even when the extractor drops them.
+    facts = profile.ensure_forget_rules(req, facts, data.get("segments") or [])
     vecs = await embed([_embed_text(f) for f in facts], stage="add.embed_facts")
     if len(vecs) != len(facts):
         raise ValueError("Embedding count does not match extracted facts")

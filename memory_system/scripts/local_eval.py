@@ -33,7 +33,7 @@ from pathlib import Path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from app import add_pipeline, prompts, schemas, search_pipeline, store, llm
-from app import config, eval_data, eval_scoring
+from app import config, eval_data, eval_scoring, run_metadata
 
 
 def parse_args():
@@ -50,6 +50,8 @@ def parse_args():
     p.add_argument("--chunk-words", type=int, default=2000)
     p.add_argument("--answer-top-k", type=int, default=50,
                    help="memories handed to the answer model (search still recalls top_k=100)")
+    p.add_argument('--evidence-token-budget', type=int, default=32000,
+                   help='Final packet budget, measured conservatively in UTF-8 bytes (256..32000)')
     p.add_argument("--no-graph", action="store_true")
     p.add_argument("--no-governance", action="store_true")
     p.add_argument("--no-rerank", action="store_true")
@@ -272,18 +274,34 @@ async def main():
                     add_pipeline.run_add(st, req),
                     f"Add conv {ci}/{conv_count} session {sid} chunk {chunk_id}\n")
             for qi, qa in enumerate(qas, 1):
-                resp = await progress.run(
-                    search_pipeline.run_search(
-                        st, schemas.SearchRequest(query=qa["question"],
-                                                  options=qa.get("options"),
-                                                  user_id=uid, top_k=100,
-                                                  reference_time=qa.get("question_date"))),
-                    f"Search conv {ci}/{conv_count} QA {qi}/{len(qas)}")
-                pred, score, diagnostics = await progress.run(
-                    eval_scoring.evaluate(
-                        qa,
-                        [d.dict() for d in resp.data[:args.answer_top_k]]),
-                    f"Answer/Judge conv {ci}/{conv_count} QA {qi}/{len(qas)}")
+                try:
+                    resp = await progress.run(
+                        search_pipeline.run_search(
+                            st, schemas.SearchRequest(query=qa["question"],
+                                                      options=qa.get("options"),
+                                                      user_id=uid, top_k=args.answer_top_k,
+                                                      evidence_token_budget=args.evidence_token_budget,
+                                                      reference_time=qa.get("question_date"))),
+                        f"Search conv {ci}/{conv_count} QA {qi}/{len(qas)}")
+                except Exception as exc:
+                    # One timed-out or failed search must not abort the
+                    # whole run hours in; record it and score 0. Check
+                    # error_stage/error_type in the output before trusting
+                    # the aggregate scores.
+                    pred, score, diagnostics = "", 0.0, {
+                        "error_stage": "search", "error_type": type(exc).__name__}
+                    progress.write(
+                        f"[search error: {type(exc).__name__}] "
+                        f"{qa['question'][:60]}")
+                else:
+                    pred, score, diagnostics = await progress.run(
+                        eval_scoring.evaluate(
+                            qa,
+                            [d.model_dump() for d in resp.data]),
+                        f"Answer/Judge conv {ci}/{conv_count} QA {qi}/{len(qas)}")
+                    diagnostics.update(search_id=resp.search_id, packet_hash=resp.packet_hash,
+                                       evidence_status=resp.evidence_status,
+                                       coverage_manifest=resp.coverage_manifest)
                 n_qa += 1
                 score_sum += score
                 cat = f"{dataset}/{qa.get('category', 'unknown')}"
@@ -296,7 +314,7 @@ async def main():
                               "score": score, "scoring": qa.get("scoring", "binary"),
                               "category": qa.get("category", "unknown"),
                               "protocol": eval_scoring.PROTOCOL, "fake": config.FAKE,
-                              "model": config.LLM_MODEL, **diagnostics}
+                              "model": config.LLM_MODEL, 'versions': run_metadata.versions(), **diagnostics}
                     output.write(json.dumps(result, ensure_ascii=False) + "\n")
                     output.flush()
                 progress.write(

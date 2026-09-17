@@ -30,18 +30,24 @@ class ExperienceTests(unittest.IsolatedAsyncioTestCase):
         item = self.st.get_amus_by_ids(ids)[0]
         self.assertEqual(item["type"], "strategy")
         self.assertEqual(item["polarity"], "failure")
-        self.assertEqual(item["harmful"], 1)
+        self.assertEqual(item["harmful"], 0)
+        self.assertEqual(item["epistemic_status"], "inferred")
         self.assertFalse(item["verified"])
 
     async def test_repeated_feedback_updates_counter(self):
         first = await experience.run_feedback(self.st, self.request())
         req = self.request()
         req.session_id = "s2"
+        req.feedback_event_id = "event-2"
+        req.used_memory_ids = first
+        req.attribution_reason = "Applied this strategy in the traced attempt"
         second = await experience.run_feedback(self.st, req)
         self.assertEqual(first, second)
         item = self.st.get_amus_by_ids(first)[0]
-        self.assertEqual(item["helpful"], 2)
-        self.assertEqual(sorted(item["support_sessions"]), ["s1", "s2"])
+        self.assertEqual(item["helpful"], 1)
+        await experience.run_feedback(self.st, req)
+        self.assertEqual(self.st.get_amus_by_ids(first)[0]["helpful"], 1)
+        self.assertIn("event-2", item["support_sessions"])
 
 
 if __name__ == "__main__":

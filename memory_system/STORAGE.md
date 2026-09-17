@@ -145,8 +145,11 @@ request field `include_history` overrides this decision (`true` includes history
 `false` uses current AMUs). Defaults in Store remain current-only for governance.
 Temporal bounds also drive a dedicated event/validity interval recall route and
 are passed to the reranker. `reference_time` anchors relative dates; local eval
-passes the dataset's `question_date`, while online requests default to the user's
-latest known memory time (`Store.latest_time`), not the service wall clock.
+passes the dataset's `question_date`, and online requests without it fall back
+to the receive-time wall clock — never to the user's latest memory time
+(ULM §5.1: the anchor must not be inferred from future messages). Undated
+histories stay undated: no synthetic timeline is fabricated and messages keep
+`timestamp=NULL` (ULM §2.1).
 An explicit time scope removes versions whose validity interval does not overlap;
 an unbounded change-history question retains the chain so changes can be explained.
 

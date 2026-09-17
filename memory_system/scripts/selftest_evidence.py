@@ -87,6 +87,7 @@ class EvidenceTests(unittest.IsolatedAsyncioTestCase):
         req = self.req('Alice lives in Berlin.')
         self.st.save_messages(req)
         fact = self.fact(req.messages[0].content, 'Berlin')
+        fact['temporal'] = {'start': '2023-06-01T00:00:00Z', 'precision': 'day'}
         with patch.object(add, '_govern_one', AsyncMock(return_value=('SUPERSEDE', {'target_id': target}))):
             aid = await add._persist_fact(self.st, req, fact, (await embed(['Berlin']))[0])
         self.assertEqual(self.st.get_amus_by_ids([aid])[0]['supersedes'], target)
@@ -222,8 +223,8 @@ class EvidenceTests(unittest.IsolatedAsyncioTestCase):
             result = await add._extract(self.st, req)
         kinds = {f['type']: f for f in result['facts']}
         self.assertEqual(kinds['profile']['content'], 'Bob likes tea.')
-        self.assertEqual(kinds['episode']['_sources'], [0])
-        self.assertNotIn('Carol', kinds['episode']['content'])
+        self.assertEqual(next(f for f in result['facts'] if f['type'] == 'episode' and f['_sources'] == [0])['_sources'], [0])
+        self.assertNotIn('Carol', next(f for f in result['facts'] if f['_sources'] == [0])['content'])
 
     def test_cited_indices_follow_quote_to_real_message(self):
         batch = [schemas.Message(role='user', content='Where does Alice live?'),
@@ -312,7 +313,7 @@ class EvidenceTests(unittest.IsolatedAsyncioTestCase):
         req.messages.append(schemas.Message(role='user', content=bad['content']))
         responses = [{'facts': [good, bad]}, {'valid': False},
                      {'valid': True}, {'valid': False, 'reason': 'unsupported triple'}]
-        with patch.object(config, 'FAKE', False), patch.object(
+        with patch.object(add, '_segments', AsyncMock(return_value=[[0, 1]])), patch.object(config, 'FAKE', False), patch.object(
                 llm, 'complete_json', AsyncMock(side_effect=responses)):
             result = await add._extract(self.st, req)
         self.assertEqual([f['type'] for f in result['facts']], ['profile', 'episode'])

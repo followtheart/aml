@@ -74,6 +74,7 @@ class DebugLogTests(unittest.IsolatedAsyncioTestCase):
         async def state_extract(st, req):
             data = await original(st, req)
             for fact in data['facts']:
+                fact['temporal'] = {'start': '2023-06-01T00:00:00Z' if 'Berlin' in fact['content'] else '2023-05-01T00:00:00Z', 'precision': 'day'}
                 fact['state'] = dict(subject='Alice', attribute='primary_residence',
                                      value='Berlin' if 'Berlin' in fact['content'] else 'Paris')
             return data

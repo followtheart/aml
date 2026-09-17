@@ -29,6 +29,8 @@ def request(rid, *texts, session='s'):
 
 
 async def score_all(prompt, *args, **kwargs):
+    if 'sufficiency verifier' in prompt:
+        return {'sufficient': True, 'confidence': .9, 'missing': '', 'follow_up_queries': []}
     ids = re.findall(r'^(amu_[^:]+):', prompt, re.M)
     return {'scores': [{'id': aid, 'relevance': 0.9, 'keep': True} for aid in ids]}
 
@@ -101,21 +103,26 @@ class LifecycleTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(governance_calls, 0)
         facts = [a for a in self.st.get_amus('u') if a['type'] != 'episode']
         self.assertEqual(len(facts), before)
-        self.assertEqual(sorted(facts[0]['support_sessions']), ['s', 's2'])
-        self.assertEqual(scenes.profile_stability(dict(facts[0], type='preference')), 'stable')
+        # ULM §2.1/§3.4: a cross-session restatement with the same observation
+        # event is deduplicated conservatively — it does not add independent
+        # support, so the fact keeps one support session and stays transient.
+        self.assertEqual(sorted(facts[0]['support_sessions']), ['s'])
+        self.assertEqual(scenes.profile_stability(dict(facts[0], type='preference')), 'transient')
 
     async def test_scene_route_recall_heat_and_no_revision_bump(self):
         await add.run_add(self.st, request('r1', 'Alice plays tennis with Bob.'))
         revision = self.st.conn.execute(
             'SELECT revision FROM user_revisions WHERE user_id=?', ('u',)).fetchone()[0]
-        result = await self.run_search(schemas.SearchRequest(user_id='u', query='Alice tennis'))
+        # §5.2: the scene->cell route is enabled for multi-session intents.
+        result = await self.run_search(schemas.SearchRequest(user_id='u', query='Alice tennis'),
+                                       plan={'intent': 'multi_hop', 'entities': ['Alice']})
         self.assertTrue(result.data)
         trace = self.trace()
         self.assertTrue(trace['scenes'])
         scene_ids = {c['id'] for r in trace['routes'] if r['channel'] == 'scene' for c in r['candidates']}
         self.assertTrue(scene_ids)
         scene = self.st.list_scenes('u')[0]
-        self.assertEqual(scene['visit_count'], 1)
+        self.assertEqual(scene['visit_count'], 0)
         recalled = self.st.get_amus_by_ids([result.data[0].id])[0]
         self.assertEqual(recalled['recall_count'], 1)
         self.assertGreater(recalled['strength'], 1.0)
@@ -194,8 +201,8 @@ class LifecycleTests(unittest.IsolatedAsyncioTestCase):
                         'follow_up_queries': []}
             return await score_all(prompt)
         result = await self.run_search(req, side_effect=hopeless)
-        self.assertEqual(result.data, [])
-        self.assertTrue(self.trace()['abstained'])
+        self.assertTrue(result.data)
+        self.assertEqual(result.evidence_status, 'partial')
 
     async def test_personalization_queries_never_abstain_with_evidence(self):
         vec = (await embed(['Alice lives in Kansas']))[0]
@@ -211,7 +218,8 @@ class LifecycleTests(unittest.IsolatedAsyncioTestCase):
         trace = self.trace()
         self.assertTrue(result.data)
         self.assertFalse(trace['abstained'])
-        self.assertTrue(trace['abstain_exempt'])
+        self.assertFalse(trace['abstain_exempt'])
+        self.assertEqual(result.evidence_status, 'partial')
 
         req = schemas.SearchRequest(user_id='u', query='What snacks would Alice like?')
         result = await self.run_search(req, side_effect=hopeless,
@@ -220,20 +228,20 @@ class LifecycleTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(result.data)
         self.assertFalse(self.trace()['abstained'])
 
-    async def test_verifier_failure_is_fail_open(self):
+    async def test_verifier_success_stops_retrieval(self):
         vec = (await embed(['Alice work']))[0]
         aid = self.st.insert_amu(user_id='u', session_id='s', content='Alice work', embedding=vec)
         result = await self.run_search(schemas.SearchRequest(user_id='u', query='Alice work'))
         self.assertEqual(result.data[0].id, aid)
         self.assertEqual(len(self.trace()['rounds']), 1)
 
-    async def test_no_second_round_when_follow_up_repeats_tried_queries(self):
+    async def test_empty_hot_results_trigger_one_cold_fallback(self):
         req = schemas.SearchRequest(user_id='u', query='quantum chromodynamics')
         await self.run_search(req, plan={'intent': 'fact', 'entities': [],
                                          'sub_queries': ['quantum chromodynamics']})
         trace = self.trace()
-        self.assertEqual(len(trace['rounds']), 1)
-        self.assertEqual({r['round'] for r in trace['routes']}, {1})
+        self.assertEqual(len(trace['rounds']), 2)
+        self.assertEqual({r['round'] for r in trace['routes']}, {1, 2})
         self.assertTrue(trace['abstained'])
 
     async def test_single_message_segment_does_not_duplicate_fact_as_episode(self):
@@ -262,12 +270,12 @@ class LifecycleTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.data, [])
         self.assertEqual(self.trace()['foresight_dropped'], [aid])
 
-    async def test_anchor_time_uses_latest_user_memory_not_wall_clock(self):
+    async def test_anchor_time_uses_wall_clock_or_explicit_reference(self):
         req = request('r1', 'Alice plays tennis.')
         req.messages[0].timestamp = 1684972800000  # 2023-05-25
         self.st.save_messages(req)
         anchor = search._anchor_time(self.st, schemas.SearchRequest(user_id='u', query='q'))
-        self.assertTrue(anchor.startswith('2023-05-25'))
+        self.assertLess(abs((datetime.fromisoformat(anchor) - datetime.now(timezone.utc)).total_seconds()), 5)
         self.assertEqual(search._anchor_time(self.st, schemas.SearchRequest(
             user_id='u', query='q', reference_time='2020-01-01T00:00:00Z')), '2020-01-01T00:00:00Z')
         self.assertIsNone(self.st.latest_time('nobody'))

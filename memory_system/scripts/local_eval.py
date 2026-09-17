@@ -49,7 +49,7 @@ def parse_args():
     p.add_argument("--chunk-messages", type=int, default=20)
     p.add_argument("--chunk-words", type=int, default=2000)
     p.add_argument("--answer-top-k", type=int, default=50,
-                   help="memories handed to the answer model (search still recalls top_k=100)")
+                   help="maximum memories in the shared search/answer evidence packet")
     p.add_argument('--evidence-token-budget', type=int, default=32000,
                    help='Final packet budget, measured conservatively in UTF-8 bytes (256..32000)')
     p.add_argument("--no-graph", action="store_true")
@@ -150,32 +150,13 @@ def build_plan(data, args):
     return list(eval_data.iter_plan(data, args.limit, args.convs))
 
 
-class Ablate:
-    """Monkey-patch level ablation, applied once per run."""
-    graph = governance = rerank = keyexp = True
-
-
-_orig_govern = add_pipeline._govern_one
-_orig_recall = search_pipeline._recall
-_orig_rerank = search_pipeline._filter_rerank
-
-
 async def _govern_passthrough(st, user_id, fact, vec):
     return "ADD", {"operation": "ADD", "target_id": None}
 
 
-async def _recall_no_graph(st, req, plan):
-    routes = await _orig_recall(st, req, plan)
-    return [r for r in routes if r and not _looks_graph(r)] or routes
-
-
-def _looks_graph(route):  # heuristic: graph route items lack _score/_fused
-    return all("_score" not in i for i in route)
-
-
 async def _rerank_passthrough(req, plan, fused, scored=None):
-    # Preserve the requested result capacity during the no-rerank ablation.
-    return [dict(c, _final=c.get("_fused", 0)) for c in fused[:req.top_k]]
+    # Packing applies top_k after prioritizing explicit forget constraints.
+    return [dict(c, _final=c.get("_fused", 0)) for c in fused]
 
 
 def apply_ablations(args):
@@ -186,7 +167,7 @@ def apply_ablations(args):
     if args.no_rerank:
         search_pipeline._filter_rerank = _rerank_passthrough
     if args.no_keyexp:
-        async def _plain(req, anchor=None):
+        async def _plain(st, req, anchor=None):
             return {"intent": "fact", "time_scope": None, "entities": [],
                     "sub_queries": [req.query],
                     "expanded_queries": [req.query]}

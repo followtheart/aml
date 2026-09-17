@@ -1,8 +1,8 @@
-"""Search pipeline (ULM design §5 "reconstructive recall"):
-query understanding (explicit reference_time anchor) -> multi-route
-recall (dense / sparse / graph PPR / temporal / scene->cell / profile) -> RRF
--> small-R rerank -> sufficiency verification with bounded iterative retrieval
--> foresight validity filter -> abstention -> top_k. Never generates answers.
+"""Single-pass search: plan -> multi-route recall -> rank -> immutable packet.
+
+Only the answering model decides whether evidence supports an answer. Search
+keeps provenance and deterministic storage/time/epoch checks, without a second
+semantic verifier or an iterative retrieval loop.
 """
 import logging
 import asyncio
@@ -146,35 +146,6 @@ def _fold_versions(items: List[Dict], plan: Dict) -> List[Dict]:
     return [item for item in items if _overlaps_scope(item, scope)]
 
 
-def _select_memory_view(routes: List[List[Dict]], plan: Dict, st=None) -> List[List[Dict]]:
-    document = plan.get("intent") in ("narrative", "document")
-    flat = [item for route in routes for item in route]
-    # P3 Structural Memory: advice/preference intents read the persona view —
-    # first-person traits, rules and episodes; assistant world knowledge is
-    # hidden once the user actually owns persona memories.
-    if (config.PERSONA_VIEW_FILTER
-            and (plan.get("intent") in ("preference", "profile") or plan.get('_personalization'))):
-        plan["_memory_mode"] = "personal_evidence"
-        cache = {}
-        for item in flat:
-            if item['id'] in cache:
-                continue
-            sources = (st.sources_for_amu(item['id']) if st and item.get('type') != 'session_summary'
-                       else item.get('sources', []))
-            cache[item['id']] = personal_evidence.personal(item, sources)
-            if not cache[item['id']]:
-                plan.setdefault('_view_excluded', []).append(
-                    {'id': item['id'], 'round': plan.get('_round', 1), 'reason': 'not_user_evidence'})
-        return [[item for item in route if cache[item['id']]] for route in routes]
-    has_preferred = any((item.get("type") == "episode") == document for item in flat)
-    plan["_memory_mode"] = "memory_doc" if document else "memory_only"
-    if not has_preferred:
-        return routes
-    return [[item for item in route
-             if item.get("type") == "rule"
-             or (item.get("type") == "episode") == document] for route in routes]
-
-
 def _profile_not_expired(item: Dict, anchor: str, include_history: bool) -> bool:
     expires = item.get("expires_at")
     if include_history or not expires:
@@ -224,15 +195,15 @@ def _merge_query_results(routes: List[List[Dict]], limit: int) -> List[Dict]:
 
 async def _recall(st: store.Store, req: schemas.SearchRequest,
                   plan: Dict) -> List[List[Dict]]:
-    # A follow-up round (§5.5) supplies its own queries via plan["_queries"].
+    # Options are hypotheses to retrieve evidence for, never evidence themselves.
+    # Allocate one slot per option before generic rewrites can consume the budget.
     queries = list(dict.fromkeys(
-        plan.get("_queries") or
-        ([req.query] + (plan.get("sub_queries") or []) +
-         (plan.get("expanded_queries") or []))))[:6]
+        [req.query] + list(req.options or []) +
+        (plan.get("sub_queries") or []) + (plan.get("expanded_queries") or [])))
+    queries = queries[:6]
     plan["_used_queries"] = queries
     vecs = await embed(queries, stage="search.embed_queries")
     routes = []
-    plan["_round_channels"] = []
     history = _historical(req, plan)
     plan["_include_history"] = history
     sensitive = bool(config.SENSITIVE_RECALL_ENABLED and req.include_sensitive)
@@ -241,7 +212,6 @@ async def _recall(st: store.Store, req: schemas.SearchRequest,
 
     def route(name, items, query=None):
         routes.append(items)
-        plan["_round_channels"].append(name)
         plan.setdefault("_routes", []).append({
             "channel": name, "round": plan.get("_round", 1), "query": query,
             "candidates": _snapshot(items)})
@@ -282,9 +252,10 @@ async def _recall(st: store.Store, req: schemas.SearchRequest,
             include_history=history, scene_ids=[s["id"] for s in top_scenes],
             include_sensitive=sensitive)[0]
         route("scene", per_scene, queries[0])
-    # §2.3 rules are always injected; other profile memories on matching intents.
+    # Rules always join recall. Choice questions also recall profiles, even
+    # when the planner classifies a generic recommendation as a fact query.
     profile_types = ["rule"]
-    if plan.get("intent") in ("preference", "rule", "profile"):
+    if req.options or plan.get("intent") in ("preference", "rule", "profile"):
         profile_types += ["preference", "profile", "workflow"]
     route("profile_rule", st.get_by_type(req.user_id, profile_types,
                                          include_history=history,
@@ -307,13 +278,6 @@ def _options_text(req: schemas.SearchRequest) -> str:
     return "\n".join(req.options or []) or "(none)"
 
 
-def _personalization_query(req: schemas.SearchRequest, plan: Dict) -> bool:
-    """Advice/choice questions are answered from user traits, not from a fact
-    that literally answers them, so the verifier's answer-presence test does
-    not apply (PersonaMem-style tasks)."""
-    return bool(req.options) or plan.get("intent") in ("preference", "profile")
-
-
 async def _filter_rerank(req: schemas.SearchRequest, plan: Dict,
                          fused: List[Dict], scored: Optional[Dict] = None) -> List[Dict]:
     """§5.4 small-R rerank: LLM-score only the fused head; unscored candidates
@@ -323,7 +287,6 @@ async def _filter_rerank(req: schemas.SearchRequest, plan: Dict,
     head = list(fused[:head_limit])
     tail = list(fused[head_limit:])
     candidates = [c for c in head if c["id"] not in scored]
-    plan["_pre_rerank_excluded"] = _snapshot(tail)
     decisions = plan.setdefault("_rerank", [])
     round_index = plan.get("_round", 1)
     batch_size = max(1, config.RERANK_CANDIDATES)
@@ -383,27 +346,21 @@ async def _filter_rerank(req: schemas.SearchRequest, plan: Dict,
         for c in cands:
             scored[c["id"]] = (float(by_id[c["id"]]["relevance"]),
                                bool(by_id[c["id"]]["keep"]))
-    # P2: personalization queries sort by relevance but never filter
-    # (HippoRAG 2 reports ~26% recall loss from hard recognition filtering).
-    personalization = _personalization_query(req, plan)
-    min_relevance = 0.0 if personalization else config.SEARCH_MIN_RELEVANCE
+    # Relevance changes order only. A model's low score/keep=false must not
+    # irreversibly erase evidence before the answer model sees the packet.
     kept, unscored = [], []
     for c in head:
         relevance, keep_flag = scored[c["id"]]
         c["_final"] = relevance
-        keep = personalization or (keep_flag and relevance >= min_relevance)
-        # P1: governance memories (forget requests, user instructions) are
-        # rerank-whitelisted: ranked, never dropped.
-        if c.get("type") == "rule":
-            keep = True
-        # Cached scores from earlier rounds are not logged again.
         if c["id"] in newly:
-            decisions.append({"id": c["id"], "round": round_index, "batch": 1,
-                              "content": c["content"], "keep": keep, "score": relevance,
-                              "reason": "kept" if keep else "rerank_rejected", "error": None})
-        if keep:
-            kept.append(c)
-    kept.sort(key=lambda x: (-x["_final"], x.get('type') in ('episode', 'session_summary')))
+            decisions.append({"id": c["id"], "round": round_index,
+                              "content": c["content"], "keep": True,
+                              "model_keep": keep_flag, "score": relevance,
+                              "reason": "kept", "error": None})
+        kept.append(c)
+    document = plan.get('intent') in ('narrative', 'document')
+    kept.sort(key=lambda x: (-x["_final"],
+                            (x.get('type') in ('episode', 'session_summary')) != document))
     for c in tail:
         c.pop("_final", None)
         decisions.append({"id": c["id"], "round": round_index, "content": c["content"],
@@ -411,40 +368,6 @@ async def _filter_rerank(req: schemas.SearchRequest, plan: Dict,
                           "reason": "unscored_fused", "error": None})
         unscored.append(c)
     return kept + unscored
-
-
-def _evidence_lines(ranked: List[Dict]) -> str:
-    return "\n".join(c['content'] for c in ranked)
-
-
-async def _verify(req: schemas.SearchRequest, plan: Dict, ranked: List[Dict]) -> Dict:
-    """§5.5 sufficiency verifier. Fails open: an invalid verdict never
-    suppresses evidence."""
-    fallback = {"sufficient": False, "confidence": 0.0, "missing": "verification failed",
-                "follow_up_queries": [], "_fallback": True, "verification_status": "error"}
-    if not ranked:
-        return {"sufficient": False, "confidence": 0.0, "missing": "no evidence",
-                "follow_up_queries": list(plan.get("sub_queries") or []), "_fallback": False}
-    prompt = prompts.render("08_sufficiency_verify.txt", query=req.query,
-                            options=_options_text(req),
-                            time_scope=json.dumps(plan.get("time_scope") or {}, ensure_ascii=False),
-                            evidence=_evidence_lines(ranked))
-    try:
-        verdict = await llm.complete_json(
-            prompt, '{"sufficient":true,"confidence":0.0,"missing":"","follow_up_queries":[]}',
-            schema=llm.STRUCTURED_SCHEMAS["verify"], stage="search.verify")
-        if (not isinstance(verdict, dict) or type(verdict.get("sufficient")) is not bool
-                or type(verdict.get("confidence")) not in (int, float)):
-            raise ValueError("verifier returned an invalid verdict")
-        follow = [q for q in verdict.get("follow_up_queries") or []
-                  if isinstance(q, str) and q.strip()]
-        return {"sufficient": verdict["sufficient"],
-                "confidence": max(0.0, min(1.0, float(verdict["confidence"]))),
-                "missing": str(verdict.get("missing") or ""),
-                "follow_up_queries": follow[:3], "_fallback": False, "verification_status": "verified"}
-    except Exception as exc:
-        log.warning("sufficiency verification failed (%s); returning partial evidence", exc)
-        return fallback
 
 
 def _foresight_status(item: Dict, anchor: str) -> Optional[str]:
@@ -489,31 +412,6 @@ def _foresight_filter(ranked: List[Dict], plan: Dict) -> List[Dict]:
     return kept
 
 
-def _answer_sources(raw_sources, seen, remaining_chars):
-    """Deduplicate and budget source bodies while retaining stable references."""
-    selected = []
-    for index, source in enumerate(raw_sources[:config.SEARCH_SOURCE_REFS_PER_ITEM]):
-        key = (source.get("request_id"), source.get("message_index"))
-        item = dict(source)
-        text = str(item.get("content") or "")
-        if index >= config.SEARCH_SOURCE_MESSAGES_PER_ITEM:
-            item.pop("content", None)
-            item["content_omitted"] = "item_limit"
-        elif key in seen:
-            item.pop("content", None)
-            item["content_omitted"] = "duplicate"
-        elif remaining_chars[0] <= 0:
-            item.pop("content", None)
-            item["content_omitted"] = "context_budget"
-        else:
-            text = text[:remaining_chars[0]]
-            item["content"] = text
-            remaining_chars[0] -= len(text)
-            seen.add(key)
-        selected.append(item)
-    return selected
-
-
 def _memory_prefix(c: Dict, full: Optional[Dict], anchor: str) -> str:
     item = full or c
     prefix = _time_prefix(c)
@@ -522,6 +420,8 @@ def _memory_prefix(c: Dict, full: Optional[Dict], anchor: str) -> str:
         prefix += f"[plan; status: {status}] "
     if item.get("type") in ("preference", "profile", "rule"):
         prefix += f"[profile: {scenes.profile_stability(item)}] "
+    if item.get("epistemic_status") == "inferred":
+        prefix += "[evidence: inferred; check source attribution] "
     if profile.is_forget_rule(item):
         # Negative constraint: the forgotten trait must not be used or
         # recommended, even if other memories still mention it.
@@ -532,21 +432,10 @@ def _memory_prefix(c: Dict, full: Optional[Dict], anchor: str) -> str:
 
 
 def _pack_evidence(st, req, plan, ranked, anchor):
-    candidates = list(_foresight_filter(ranked, plan))
-    injected = set()
-    if config.CORE_PROFILE_INJECT:
-        core = [a for a in st.core_profile(req.user_id, config.CORE_PROFILE_MAX_ITEMS)
-                if _profile_not_expired(a, anchor, False)]
-        ids = {a['id'] for a in candidates}
-        terms = personal_evidence.terms(req.query + ' ' + _options_text(req))
-        core = [a for a in core if a['id'] not in ids and
-                (a.get('type') == 'rule' or personal_evidence.terms(a['content']) & terms)]
-        core.sort(key=lambda a: (a.get('type') != 'rule',
-                                -len(personal_evidence.terms(a['content']) & terms)))
-        injected = {a['id'] for a in core}
-        candidates = core + candidates
+    # Rules are already recalled through profile_rule. Avoid a second injection
+    # path that bypasses ranking and can add assistant advice as user rules.
+    candidates = sorted(_foresight_filter(ranked, plan), key=lambda c: not profile.is_forget_rule(c))
     document = plan.get('intent') in ('document', 'narrative')
-    persona = plan.get('intent') in ('preference', 'profile') or plan.get('_personalization', False)
     items = []
     for candidate in candidates:
         if candidate.get('view_status') == 'stale':
@@ -555,7 +444,10 @@ def _pack_evidence(st, req, plan, ranked, anchor):
         sources = (st.sources_for_session(req.user_id, candidate['session_id']) if is_summary
                    else st.sources_for_amu(candidate['id']))
         sources = [dict(source) for source in sources]
-        body = _memory_prefix(candidate, candidate, anchor) + candidate['content']
+        full = st.get_amus_by_ids([candidate['id']], include_history=True,
+                                 include_sensitive=bool(config.SENSITIVE_RECALL_ENABLED and req.include_sensitive))
+        grounded = dict(full[0] if full else candidate)
+        body = _memory_prefix(candidate, grounded, anchor) + candidate['content']
         support_queue = list(st.dependencies_for(candidate['id']))
         support_evidence = []
         visited = {candidate['id']}
@@ -581,24 +473,18 @@ def _pack_evidence(st, req, plan, ranked, anchor):
         is_personal = personal_evidence.personal(candidate, sources)
         if not document:
             # Fetch validated support quotes omitted from lightweight recall rows.
-            full = st.get_amus_by_ids([candidate['id']], include_history=True,
-                                     include_sensitive=bool(config.SENSITIVE_RECALL_ENABLED and req.include_sensitive))
-            grounded = dict(full[0] if full else candidate)
             grounded['evidence'] = list(grounded.get('evidence') or []) + support_evidence
             sources = personal_evidence.compact_sources(
                 grounded, sources, req.query + ' ' + _options_text(req),
-                config.SEARCH_SOURCE_EXCERPT_CHARS, config.SEARCH_SOURCE_MESSAGES_PER_ITEM,
-                persona=persona)
+                config.SEARCH_SOURCE_EXCERPT_CHARS, config.SEARCH_SOURCE_MESSAGES_PER_ITEM)
         body = answer_context.with_evidence(body, sources)
         items.append(dict(id=candidate['id'], content=body,
-                          _core_injected=candidate['id'] in injected,
                           personal_evidence=is_personal,
                           memory_type=candidate.get('type', 'fact'), sources=sources,
                           source_count=len(sources), temporal=candidate.get('temporal'),
                           created_at=candidate.get('created_at'),
                           score=round(float(candidate.get('_final', candidate.get('_fused', 0))), 4)))
-    return evidence_packet.pack(items, req.top_k, req.evidence_token_budget,
-                                min(config.CORE_PROFILE_TOKEN_BUDGET, req.evidence_token_budget // 5))
+    return evidence_packet.pack(items, req.top_k, req.evidence_token_budget)
 
 
 async def _run_search(st: store.Store,
@@ -615,50 +501,27 @@ async def _run_search(st: store.Store,
         anchor = _anchor_time(st, req)
         trace["anchor_time"] = anchor
         plan = await _understand(st, req, anchor)
-        plan['_personalization'] = plan.get('intent') in ('preference', 'profile')
-        routes_all, scored, rounds = [], {}, []
-        channels = {}
-        ranked, verdict = [], {"sufficient": True, "confidence": 1.0, "_fallback": True}
-        tried = set()
-        for round_index in range(1, config.SEARCH_MAX_ROUNDS + 1):
-            plan["_round"] = round_index
-            round_routes = _select_memory_view(await _recall(st, req, plan), plan, st)
-            history = bool(plan.get("_include_history"))
-            round_routes = [[item for item in route
-                             if _profile_not_expired(item, anchor, history)]
-                            for route in round_routes]
-            names = plan.get('_round_channels') or [str(i) for i in range(len(round_routes))]
-            for name, items in zip(names, round_routes):
-                channels[name] = _merge_query_results([channels.get(name, []), items], max(config.RECALL_PER_ROUTE, req.top_k))
-            routes_all = list(channels.values())
-            tried.update(q.strip().casefold() for q in plan.get("_used_queries", []))
-            fused = _fold_versions(_rrf(routes_all), plan)
-            ranked = await _filter_rerank(req, plan, fused, {})
-            packed, packet_hash, manifest = _pack_evidence(st, req, plan, ranked, anchor)
-            verdict = await _verify(req, plan, packed)
-            rounds.append({"round": round_index, "queries": plan.get("_queries"),
-                           "fused": len(fused), "ranked": len(ranked),
-                           "verdict": {k: v for k, v in verdict.items() if not k.startswith("_")}})
-            # Another round only pays off when it brings queries not yet tried.
-            fresh = [q for q in verdict.get("follow_up_queries") or []
-                     if q.strip().casefold() not in tried]
-            if verdict['sufficient']:
-                break
-            if not plan.get('_cold'):
-                plan['_cold'] = True
-                plan['_expand'] = True
-                plan['_queries'] = fresh or [req.query]
-            elif fresh:
-                plan['_queries'] = fresh
-            else:
-                break
-        trace["fused"] = _snapshot(_fold_versions(_rrf(routes_all), plan))
-        trace["rounds"] = rounds
+        # Include cold memories and expansion routes in the same pass, instead of
+        # waiting for an LLM to declare the first packet insufficient.
+        plan.update(_round=1, _cold=True, _expand=True)
+        routes = await _recall(st, req, plan)
+        history = bool(plan.get("_include_history"))
+        routes = [[item for item in route if _profile_not_expired(item, anchor, history)]
+                  for route in routes]
+        fused = _fold_versions(_rrf(routes), plan)
+        ranked = await _filter_rerank(req, plan, fused)
+        packed, packet_hash, manifest = _pack_evidence(st, req, plan, ranked, anchor)
+        trace["pipeline"] = "single_pass_v1"
+        trace["fused"] = _snapshot(fused)
+        trace["rounds"] = [{"round": 1, "queries": plan.get("_used_queries", []),
+                            "fused": len(fused), "ranked": len(ranked),
+                            "verification_status": "not_run"}]
+        trace["verification_status"] = "not_run"
         data = [schemas.SearchItem(**item) for item in packed]
         conflicts = [c['id'] for c in ranked if c.get('resolution_status') == 'disputed'
                      and c['id'] in manifest['included_ids']]
         status = ('not_found' if not data else 'conflicting' if conflicts else
-                  'complete' if verdict['sufficient'] else 'partial')
+                  'retrieved')
         manifest['conflicting_ids'] = conflicts
         trace['top_k_excluded'] = [x for x in manifest['omitted'] if x['reason'] == 'top_k']
         trace['status'] = status
@@ -672,10 +535,10 @@ async def _run_search(st: store.Store,
         return schemas.SearchResponse(
             search_id=trace['search_id'],
             data=data, evidence_status=status, packet_hash=packet_hash,
-            verification_status=verdict.get('verification_status', 'verified'),
+            verification_status='not_run',
             read_revision=getattr(st, 'read_revision', st.user_state(req.user_id)['revision']),
             read_epoch=epoch, coverage_manifest=manifest,
-            missing_evidence=[verdict['missing']] if verdict.get('missing') else [])
+            missing_evidence=[])
     except BaseException as exc:
         # Includes CancelledError from the hard deadline in run_search: a
         # timed-out search is still logged as an error trace, then re-raised.

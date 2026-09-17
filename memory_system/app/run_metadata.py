@@ -13,10 +13,11 @@ def versions():
     hashes = {str(p.relative_to(app.parents[1])).replace('\\', '/'):
               hashlib.sha256(p.read_bytes()).hexdigest() for p in files}
     fingerprint = hashlib.sha256(repr(sorted(hashes.items())).encode()).hexdigest()
-    return {'pipeline_version': fingerprint, 'file_hashes': hashes,
+    return {'pipeline_version': fingerprint, 'search_policy': 'single_pass_v1',
+            'answer_policy': 'direct_evidence_v1', 'file_hashes': hashes,
             'model': config.LLM_MODEL, 'embedding_model': config.EMBED_MODEL,
             'settings': {key: getattr(config, key) for key in (
-                'CORE_PROFILE_INJECT', 'CORE_PROFILE_TOKEN_BUDGET', 'CORE_PROFILE_MAX_ITEMS',
+                'CORE_PROFILE_MAX_ITEMS', 'QUERY_PROFILE_DIGEST',
                 'SEARCH_SOURCE_EXCERPT_CHARS', 'SEARCH_SOURCE_MESSAGES_PER_ITEM',
-                'RERANK_MAX_CANDIDATES', 'PERSONA_VIEW_FILTER', 'CHOICE_ALIGN_ENABLED',
-                'CHOICE_AUTOPICK', 'SEARCH_MAX_ROUNDS')}}
+                'RERANK_MAX_CANDIDATES', 'SEARCH_DEADLINE_SECONDS',
+                'SEARCH_MAX_CALLS', 'SEARCH_MAX_TOKENS')}}

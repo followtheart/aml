@@ -1,7 +1,7 @@
 """Immutable, whole-item evidence packing shared with answer consumption.
 
 UTF-8 bytes provide a conservative token upper bound for byte-based tokenizers;
-no text or supporting quote is silently clipped after verification.
+no text or supporting quote is silently clipped after packing.
 """
 import hashlib
 import json

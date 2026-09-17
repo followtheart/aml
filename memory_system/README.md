@@ -18,12 +18,12 @@ app/
   experience.py      显式任务反馈→策略/工作流/技能/手册（成功与失败经验）
   graph.py           实体-AMU 二部图 + PPR（HippoRAG 式单步多跳）
   add_pipeline.py    切分→MemCell 抽取(episode+facts+triples)→新颖度门控→治理→多索引→场景巩固→滚动摘要
-  search_pipeline.py 查询理解(显式 reference_time 锚点)→七路召回(含场景→情景)→RRF→小 R 重排
-                     →充分性验证/迭代召回/弃权→前瞻时效过滤→top_k
+  search_pipeline.py 查询规划→单轮多路召回(含冷记忆、图、场景)→RRF→一次重排→来源证据包
+  eval_scoring.py    直接基于同一证据包回答；选择题确定性计分
   main.py            FastAPI: /add /search /feedback /memory/{user_id} /health
 scripts/
   selftest_contract.py   契约自测 11 项（幂等/回显/隔离/422/health…）
-  selftest_ulm.py        ULM 生命周期自测（切分/场景/门控/热度/遗忘/验证器/前瞻）
+  selftest_ulm.py        ULM 生命周期自测（切分/场景/门控/热度/遗忘/单轮召回/前瞻）
   convert_locomo.py      locomo10.json → 评测格式（1542 QA）
   local_eval.py          本地代理评测 + 消融开关
 data/
@@ -44,16 +44,29 @@ episode；引用本身无效、无法定位时保留整批原文。语义批次�
 
 Search 的最終證據包預設上限為 32,000 UTF-8 bytes（保守 token 上界，
 不是 32k 個模型 token），可透過 `SearchRequest.evidence_token_budget` 或本地評測
-`--evidence-token-budget` 設定。整條證據在驗證前裝包；回答端核對 packet hash
+`--evidence-token-budget` 設定。整條證據在搜尋結束時裝包；回答端核對 packet hash
 後讀取同一包，不再另行截斷。舊格式、沒有 hash 的輸入仍使用 24,000／2,400
 字符的總額／單條上限。
 
-個人化檢索按使用者歸屬與來源選取證據，保留合格的 fact、plan、event、episode。
-來源節錄保留必要原文引用及來源 ID；narrative/document 查詢保留完整來源。
-unknown 時間欄位留在結構化資料，省略無資訊的文字前綴。已召回画像維持檢索
-順位，未召回的相關画像才作補充，最多占 1,600 bytes 且不超過整包的 20%。
-選項對齊要求可驗證的 evidence_id 和原文片段，明示同分，並區分弱興趣與明確習慣。
-詳見 [PersonaMem 修正與驗證](PERSONAMEM_FIX_VALIDATION.md)。
+读取链路使用 `single_pass_v1`：一次查询规划、一次多路召回、一次重排和打包。
+选项作为待验证假设参与检索，最多 6 个查询，原问题和选项优先于泛化扩展。
+冷记忆、图和场景在同一轮参与召回；不再运行充分性验证或第二轮检索。
+重排仅调整顺序，不按 keep=false 或低分删除候选，也不再用 persona 正则过滤。
+画像通过正常召回路由参与排序，不再在打包时额外注入；遗忘规则优先装包。
+来源节录按相关性选取，保留引文和消息角色，不因 assistant 角色直接丢弃草稿正文。
+推断型记忆显示来源归属提示；主体、个人前提和遗忘范围由回答模型统一判断。
+
+选择题使用 `direct_evidence_v1`，直接基于证据包回答，取消线上独立 alignment 和
+autopick。正常四选一、默认重排大小且无重试时，LLM 阶段从原双轮的 7 次降到
+3 次（规划、重排、回答），embedding 调用另计。`choice_alignment.py` 和其 replay
+脚本只作为离线诊断工具保留；`validate_choice_alignment.py --answer` 重放直接回答。
+
+`SearchResponse.evidence_status` 使用 `retrieved` / `conflicting` / `not_found`，
+`verification_status=not_run`；`retrieved` 不声明证据充分。旧的
+`AML_SEARCH_MAX_ROUNDS`、`AML_CHOICE_ALIGN`、`AML_CHOICE_AUTOPICK`、
+`AML_PERSONA_VIEW_FILTER`、`AML_CORE_PROFILE_INJECT`、`AML_CORE_PROFILE_TOKEN_BUDGET`、
+`AML_SEARCH_MIN_RELEVANCE` 和 `AML_ABSTAIN_CONFIDENCE` 已停用，旧环境变量不再改变链路。
+写入侧的来源校验、治理、敏感数据与版本/删除一致性约束继续执行。
 
 遇到服务端限流（HTTP 429 / `RateLimitError`）时，所有模型调用默认额外重试
 6 次，异步等待约 15、30、60、120、120、120 秒（带随机抖动）。若服务端

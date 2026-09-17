@@ -28,7 +28,7 @@ log = logging.getLogger("aml.profile")
 _MERGE_SIM = 0.80
 
 FORGET_RE = re.compile(
-    r"\b(forget(?:ting)?\s+(?:that|this|about|it|the|my|everything|they|he|she|I|we)\b|do(?:es)? not remember\b|"
+    r"\b(forget(?:ting)?\s+(?:that|this|about|it|the|my|their|his|her|our|everything|they|he|she|I|we)\b|do(?:es)? not remember\b|"
     r"don'?t remember\b|erase\b|stop (?:remembering|mentioning)\b|"
     r"delete (?:that|this|the)\b|remove\b.{0,30}\bfrom (?:your )?memory\b)"
     r"|忘记|忘掉|删除.{0,6}记忆|别记|不要记住", re.I)

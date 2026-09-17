@@ -36,14 +36,12 @@ class SafetyTests(unittest.IsolatedAsyncioTestCase):
     async def test_search_cannot_return_deleted_candidate(self):
         aid = self.st.insert_amu(user_id='u', session_id='s', content='private')
         rows = self.st.get_amus('u')
-        async def deleting_verify(*args):
+        async def deleting_rerank(*args):
             self.st.purge_user('u')
-            return {'sufficient': True, 'confidence': 1.0, 'follow_up_queries': []}
-        with patch.object(config, 'CORE_PROFILE_INJECT', False), patch.object(
-                search_pipeline, '_understand', AsyncMock(return_value={'intent': 'fact'})), patch.object(
+            return rows
+        with patch.object(search_pipeline, '_understand', AsyncMock(return_value={'intent': 'fact'})), patch.object(
                 search_pipeline, '_recall', AsyncMock(return_value=[rows])), patch.object(
-                search_pipeline, '_filter_rerank', AsyncMock(return_value=rows)), patch.object(
-                search_pipeline, '_verify', side_effect=deleting_verify):
+                search_pipeline, '_filter_rerank', side_effect=deleting_rerank):
             with self.assertRaises(store.MemoryDeleted):
                 await search_pipeline.run_search(self.st, schemas.SearchRequest(user_id='u', query='private'))
 

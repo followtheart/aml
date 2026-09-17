@@ -111,9 +111,9 @@ class SearchTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(trace['returned']), 100)
         returned_ids = [x['id'] for x in trace['returned']]
         self.assertEqual(returned_ids[:len(scored)], [x['id'] for x in scored])
-        self.assertEqual(trace['rounds'][0]['verdict']['sufficient'], True)
+        self.assertEqual(trace['rounds'][0]['verification_status'], 'not_run')
 
-    async def test_rerank_rejection_and_topk_logged_separately(self):
+    async def test_low_rerank_score_only_changes_order_and_topk_is_logged(self):
         ids = [await self.memory(f'Alice work {i}') for i in range(3)]
         async def reject_one(prompt, *args, **kwargs):
             result = await score_all(prompt)
@@ -126,10 +126,11 @@ class SearchTests(unittest.IsolatedAsyncioTestCase):
             response = await search.run_search(self.st, self.req(top_k=1))
         self.assertEqual(len(response.data), 1)
         trace = json.loads(self.path.read_text())
-        rejected = [d for d in trace['rerank'] if not d['keep']]
-        self.assertEqual(rejected[0]['id'], ids[0])
-        self.assertEqual(rejected[0]['reason'], 'rerank_rejected')
-        self.assertEqual(len(trace['top_k_excluded']), 1)
+        demoted = [d for d in trace['rerank'] if not d['model_keep']]
+        self.assertEqual(demoted[0]['id'], ids[0])
+        self.assertTrue(demoted[0]['keep'])
+        self.assertNotEqual(response.data[0].id, ids[0])
+        self.assertEqual(len(trace['top_k_excluded']), 2)
         self.assertTrue(all('content' in c for r in trace['routes'] for c in r['candidates']))
 
     async def test_rerank_error_retains_candidates_and_logs_fallback(self):
@@ -141,7 +142,7 @@ class SearchTests(unittest.IsolatedAsyncioTestCase):
         trace = json.loads(self.path.read_text())
         self.assertEqual(trace['rerank'][0]['reason'], 'global_rrf_fallback')
 
-    async def test_low_score_abstains_even_if_model_keep_is_true(self):
+    async def test_low_score_does_not_erase_the_only_evidence(self):
         await self.memory('weak candidate')
         async def weak(prompt, *args, **kwargs):
             ids = re.findall(r'^(amu_[^:]+):', prompt, re.M)
@@ -151,7 +152,8 @@ class SearchTests(unittest.IsolatedAsyncioTestCase):
                 'intent': 'fact'})), patch.object(
                 search.llm, 'complete_json', side_effect=weak):
             result = await search.run_search(self.st, self.req('weak'))
-        self.assertEqual(result.data, [])
+        self.assertEqual(len(result.data), 1)
+        self.assertEqual(result.evidence_status, 'retrieved')
 
     async def test_incomplete_batch_falls_back_entire_ranking(self):
         ids = [await self.memory(f'Alice work {i}') for i in range(2)]
@@ -268,8 +270,7 @@ class SearchTests(unittest.IsolatedAsyncioTestCase):
         self.st.link_sources(episode, 'doc-source', [0])
         result = await self.run_search(self.req('Tell the story'),
                                        {'intent': 'narrative', 'entities': []})
-        self.assertEqual([item.id for item in result.data], [episode])
-        self.assertNotIn(fact, [item.id for item in result.data])
+        self.assertEqual([item.id for item in result.data], [episode, fact])
         self.assertIn('Full narrative source', result.data[0].content)
 
     async def test_explicit_time_scope_folds_versions(self):

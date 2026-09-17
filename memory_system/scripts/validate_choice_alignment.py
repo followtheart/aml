@@ -89,7 +89,7 @@ async def main():
                     entries = diagnostics.get('choice_alignment') or []
                     correct += score
                 else:
-                    _, entries = await scoring.choice_alignment(qa, memories, row)
+                    _, entries = await alignment.align(qa, memories, row)
                     row['choice_alignment'] = entries
                 ranked = alignment.rank_alignment(entries or [])
                 best = alignment.unique_supported_choice(entries or [])

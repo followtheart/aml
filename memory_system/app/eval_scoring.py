@@ -2,8 +2,7 @@
 import json
 import re
 
-from . import answer_context, choice_alignment as alignment_policy, config, llm, prompts
-from .choice_alignment import align as choice_alignment, rank_alignment
+from . import answer_context, llm, prompts
 
 PROTOCOL = "local-text-proxy-v1"
 REFINED_POLICY = "locomo-refined-local-v1"
@@ -49,7 +48,7 @@ def choice_score(prediction, gold, kind):
     raise ValueError(f"Unsupported choice type: {kind}")
 
 
-def answer_prompt(qa, memories, alignment=None):
+def answer_prompt(qa, memories):
     context = answer_context.build(memories)
     question = qa["question"]
     if qa.get("question_date"):
@@ -84,17 +83,17 @@ def answer_prompt(qa, memories, alignment=None):
     if qa.get("scoring") == "choice":
         question += "\n\nOptions:\n" + "\n".join(qa["options"])
         instructions += (
-            " Selection policy: prefer advice supported by this user's evidence. "
-            "A related topic is not proof of a habit, condition, possession or personal "
-            "history. Weigh weak relevant interest against unsupported premises; do not "
-            "automatically prefer it over generic advice. Use generic advice when the "
-            "personalized alternatives invent key facts. Apply forget constraints to "
-            "their stated scope, not all adjacent topics. Location and occupation only "
-            "support advice that actually depends on them.")
-        if alignment:
-            instructions += (" Persona evidence alignment (cited judgements; tied tiers "
-                             "have no winner, and citations establish provenance rather "
-                             "than logical entailment):\n" + alignment + "\n")
+            " Selection policy: choose the option whose personal premises are "
+            "supported by source evidence. Check all premises, not just proposed "
+            "advice. Distinguish the speaker from people in pasted emails or "
+            "third-party stories; assistant suggestions do not prove user history. "
+            "Drafts and rewrites can carry evidence, but verify whose experience "
+            "they describe. Infer activities from concrete descriptions without "
+            "turning topical questions into habits, conditions or possessions. "
+            "Location and occupation matter only for directly dependent advice. "
+            "Prefer generic advice when personalized options invent key facts. "
+            "Honor explicit forget constraints even if older evidence repeats the "
+            "trait; apply only their stated scope.")
         if qa["qa_type"] == "single_choice":
             instructions += (" Return exactly one uppercase option letter and nothing "
                              "else; do not repeat the option text.")
@@ -132,26 +131,10 @@ async def evaluate(qa, memories):
     """Return prediction, score [0,1], and explicit failure diagnostics."""
     scoring = qa.get("scoring", "binary")
     diagnostics = {}
-    alignment, entries = None, None
-    if (config.CHOICE_ALIGN_ENABLED and scoring == "choice"
-            and qa.get("qa_type") == "single_choice"):
-        try:
-            alignment, entries = await choice_alignment(qa, memories, diagnostics)
-        except Exception as exc:
-            alignment, entries = None, None  # fail open: plain choice prompt
-            diagnostics["choice_align_error"] = type(exc).__name__
-        else:
-            if entries:
-                diagnostics["choice_alignment"] = entries
-        # Opt-in only: require one uniquely strong, cited, complete premise.
-        if config.CHOICE_AUTOPICK and entries:
-            best = alignment_policy.unique_supported_choice(entries)
-            if best:
-                diagnostics["choice_autopick"] = best["letter"]
-                return best["letter"], choice_score(best["letter"], qa["gold_labels"],
-                                                    qa["qa_type"]), diagnostics
+    if scoring == "choice":
+        diagnostics["answer_policy"] = "direct_evidence_v1"
     try:
-        pred = (await llm.complete(answer_prompt(qa, memories, alignment), stage="eval.answer")).strip()
+        pred = (await llm.complete(answer_prompt(qa, memories), stage="eval.answer")).strip()
     except Exception as exc:
         return "", 0.0, {**diagnostics, "error_stage": "answer", "error_type": type(exc).__name__}
     if scoring == "choice":

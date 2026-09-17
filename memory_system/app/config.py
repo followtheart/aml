@@ -29,8 +29,7 @@ AML_API_KEY     : Bearer token required on /add and /search. Empty = no auth
 AML_DB_PATH     : SQLite file path. Default ./memory.db
 AML_FAKE        : "1" forces offline FakeLLM/FakeEmbedding (no network, for
                   plumbing tests and CI).
-AML_RERANK_MAX_CANDIDATES / AML_SEARCH_MIN_RELEVANCE : bounded rerank cost
-                  and the minimum accepted relevance score.
+AML_RERANK_MAX_CANDIDATES : bounded rerank cost (ordering only).
 """
 import os
 from pathlib import Path
@@ -136,12 +135,10 @@ SENSITIVE_RECALL_ENABLED = os.environ.get("AML_SENSITIVE_RECALL_ENABLED", "0") =
 GOVERNANCE_NEIGHBORS = 5
 RECALL_PER_ROUTE = 100
 RERANK_CANDIDATES = 40
-RERANK_SCORED = 30
 # ULM §5.4: score only a small head of the fused list; the rest keeps its
 # fusion order below the scored items instead of being penalised.
 RERANK_MAX_CANDIDATES = max(
     10, int(os.environ.get("AML_RERANK_MAX_CANDIDATES", "40")))
-SEARCH_MIN_RELEVANCE = float(os.environ.get("AML_SEARCH_MIN_RELEVANCE", "0.3"))
 
 # ---- ULM lifecycle knobs (llm-memory-survey/memory-system-design.md) ----
 # §3.2 semantic boundary segmentation (embedding drop between adjacent windows)
@@ -170,10 +167,7 @@ FORGET_RECALL_BONUS_DAYS = 15.0
 PROFILE_STABLE_SESSIONS = max(1, int(os.environ.get("AML_PROFILE_STABLE_SESSIONS", "2")))
 PROFILE_TRANSIENT_TTL_DAYS = max(
     1, int(os.environ.get("AML_PROFILE_TRANSIENT_TTL_DAYS", "90")))
-# §5.5 sufficiency verifier + iterative retrieval + abstention
-SEARCH_MAX_ROUNDS = max(1, int(os.environ.get("AML_SEARCH_MAX_ROUNDS", "2")))
-VERIFY_EVIDENCE_ITEMS = 15
-ABSTAIN_CONFIDENCE = float(os.environ.get("AML_ABSTAIN_CONFIDENCE", "0.15"))
+# Search is single-pass; evidence sufficiency is decided by the answer model.
 # §9.4 hard per-search request budget: wall-clock deadline plus provider
 # call/token caps. Slow models and rate-limit backoffs can exceed 45s;
 # raise the deadline instead of letting a search die mid-flight.
@@ -191,11 +185,9 @@ PROFILE_CONSOLIDATION_ENABLED = os.environ.get("AML_PROFILE_CONSOLIDATION", "1")
 # Support keys (Add request ids / supporting AMU ids) needed to confirm a
 # consolidated preference and to promote it transient -> static.
 PROFILE_MIN_SUPPORT = max(1, int(os.environ.get("AML_PROFILE_MIN_SUPPORT", "2")))
-# Supplemental core memories share top_k and the final evidence budget.
-CORE_PROFILE_INJECT = os.environ.get("AML_CORE_PROFILE_INJECT", "1") == "1"
+# Core memories provide a compact query-planning digest only.
 CORE_PROFILE_MAX_ITEMS = max(1, int(os.environ.get("AML_CORE_PROFILE_MAX_ITEMS", "12")))
 CORE_PROFILE_MAX_CHARS = max(256, int(os.environ.get("AML_CORE_PROFILE_MAX_CHARS", "1600")))
-CORE_PROFILE_TOKEN_BUDGET = max(0, int(os.environ.get("AML_CORE_PROFILE_TOKEN_BUDGET", "1600")))
 SEARCH_SOURCE_EXCERPT_CHARS = max(128, int(os.environ.get("AML_SEARCH_SOURCE_EXCERPT_CHARS", "800")))
 # P1: a user "forget X" request invalidates the matching memories
 # (Zep edge invalidation) instead of only logging the request.
@@ -205,17 +197,9 @@ INVALIDATE_MAX_TARGETS = max(1, int(os.environ.get("AML_INVALIDATE_MAX_TARGETS",
 # P1: histories without timestamps stay undated (ULM §2.1): no synthetic
 # timeline is fabricated, and relative times resolve to unknown instead of
 # being anchored to the service wall clock.
-# P2: choice questions get an explicit option<->persona-evidence alignment
-# pass before answering (Memory-R1 answer-agent distillation).
-CHOICE_ALIGN_ENABLED = os.environ.get("AML_CHOICE_ALIGN", "1") == "1"
-# Experimental opt-in: only one uniquely strong, cited option without missing
-# premises may bypass the answer model. Ties/weak matches never autopick.
-CHOICE_AUTOPICK = os.environ.get("AML_CHOICE_AUTOPICK", "0") == "1"
 # P3: query understanding sees a compact profile digest so expansions bind
 # generic questions to known user traits.
 QUERY_PROFILE_DIGEST = os.environ.get("AML_QUERY_PROFILE_DIGEST", "1") == "1"
-# Preference/profile intents use source-aware personal evidence of all types.
-PERSONA_VIEW_FILTER = os.environ.get("AML_PERSONA_VIEW_FILTER", "1") == "1"
 
 # Full stored content for local debugging; empty path disables the JSONL log.
 MEMORY_DEBUG_LOG = os.environ.get(

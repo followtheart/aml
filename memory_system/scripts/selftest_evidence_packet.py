@@ -1,4 +1,4 @@
-"""Final evidence must be identical at verification and consumption."""
+"""Single-pass packets stay immutable and only returned memories strengthen."""
 import asyncio
 import sys
 from pathlib import Path
@@ -9,23 +9,19 @@ from app import answer_context, config, schemas, search_pipeline, store
 
 
 class PacketTests(unittest.IsolatedAsyncioTestCase):
-    async def test_verifier_sees_only_final_packet_and_only_used_memory_strengthens(self):
+    async def test_answer_sees_final_packet_and_only_used_memory_strengthens(self):
         st = store.Store(':memory:')
         try:
             for i in range(3):
                 st.insert_amu(user_id='u', session_id='s', content=f'fact {i}')
             rows = st.get_amus('u')
-            verifier = AsyncMock(return_value={'sufficient': False, 'confidence': 1,
-                                               'missing': 'missing proof', 'follow_up_queries': []})
-            with patch.object(config, 'CORE_PROFILE_INJECT', False), patch.object(
-                    search_pipeline, '_understand', AsyncMock(return_value={'intent': 'fact'})), patch.object(
+            with patch.object(search_pipeline, '_understand', AsyncMock(return_value={'intent': 'fact'})), patch.object(
                     search_pipeline, '_recall', AsyncMock(return_value=[rows])), patch.object(
                     search_pipeline, '_filter_rerank', AsyncMock(return_value=rows)), patch.object(
-                    search_pipeline, '_verify', verifier):
+                    search_pipeline.llm, 'complete_json', AsyncMock(side_effect=AssertionError('extra model call'))):
                 result = await search_pipeline.run_search(st, schemas.SearchRequest(user_id='u', query='q', top_k=1))
-            self.assertEqual(len(verifier.call_args.args[2]), 1)
-            self.assertEqual(verifier.call_args.args[2][0]['content'], result.data[0].content)
-            self.assertEqual(result.evidence_status, 'partial')
+            self.assertEqual(result.evidence_status, 'retrieved')
+            self.assertEqual(result.verification_status, 'not_run')
             self.assertEqual(answer_context.build([x.model_dump() for x in result.data]), result.data[0].content)
             # §4.5: only the memory in the final packet records one actual use;
             # candidates that were merely recalled never gain strength.
@@ -38,12 +34,6 @@ class PacketTests(unittest.IsolatedAsyncioTestCase):
         finally:
             st.conn.close()
 
-    async def test_verification_failure_is_not_complete(self):
-        with patch.object(search_pipeline.llm, 'complete_json', AsyncMock(side_effect=ValueError('bad'))):
-            verdict = await search_pipeline._verify(schemas.SearchRequest(user_id='u', query='q'), {},
-                                                     [{'id': 'a', 'content': 'evidence'}])
-        self.assertFalse(verdict['sufficient'])
-        self.assertEqual(verdict['verification_status'], 'error')
 
 
 if __name__ == '__main__':

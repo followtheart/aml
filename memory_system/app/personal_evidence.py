@@ -84,14 +84,14 @@ def excerpt(text, query, limit, quotes=()):
     return text[start:end], start, end
 
 
-def compact_sources(candidate, sources, query, limit, max_messages, persona=False):
+def compact_sources(candidate, sources, query, limit, max_messages):
     """Keep source references; only selected verbatim spans enter the packet.
 
-    User sources are preferred for personalization. Assistant-only evidence
-    remains available for other tasks. Documentary reads bypass this helper.
+    Select relevant spans regardless of message role: an assistant turn may
+    contain a user draft or resolve a short reply. Roles remain explicit so
+    the answer model can distinguish quoted context from user assertions.
     """
     out = []
-    has_user = any(s.get('role') == 'user' for s in sources)
     by_source = {}
     for s in sources:
         key = (s.get('request_id'), s.get('message_index'))
@@ -102,18 +102,15 @@ def compact_sources(candidate, sources, query, limit, max_messages, persona=Fals
     required = {key for key, quotes in by_source.items() if quotes}
     needles = terms(query + ' ' + candidate['content'])
     extras = sorted((s for s in sources if s.get('content') and
-                     (not persona or not has_user or s.get('role') == 'user') and
                      (s.get('request_id'), s.get('message_index')) not in required),
-                    key=lambda s: -len(terms(s['content']) & needles))
+                    key=lambda s: (-len(terms(s['content']) & needles), s.get('role') != 'user'))
     chosen = required | {(s.get('request_id'), s.get('message_index'))
                          for s in extras[:max(0, max_messages - len(required))]}
     for source in sources:
         s = dict(source)
         text = s.pop('content', '')
         key = (s.get('request_id'), s.get('message_index'))
-        if key not in chosen and persona and has_user and s.get('role') != 'user':
-            s['content_omitted'] = 'assistant_context'
-        elif key not in chosen:
+        if key not in chosen:
             s['content_omitted'] = 'source_limit'
         elif text:
             quotes = by_source[key]

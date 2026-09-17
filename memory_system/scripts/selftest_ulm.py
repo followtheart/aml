@@ -1,5 +1,5 @@
 """Offline regressions for the ULM lifecycle: segmentation, MemCell/MemScene
-consolidation, novelty gate, heat/forgetting, verifier loop, foresight filter."""
+consolidation, novelty gate, heat/forgetting, single-pass retrieval, foresight filter."""
 import json
 import math
 import os
@@ -175,34 +175,21 @@ class LifecycleTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.st.nearest_by_embedding('u', vec, 10)[0]['id'], aid)
         self.assertEqual(self.st.list_scenes('u')[0]['id'], scene_id)
 
-    async def test_verifier_triggers_follow_up_round_and_abstention(self):
+    async def test_single_pass_keeps_evidence_without_sufficiency_call(self):
         vec = (await embed(['Alice sister Carol']))[0]
         self.st.insert_amu(user_id='u', session_id='s', content='Alice sister Carol', embedding=vec)
-        calls = []
-        async def staged(prompt, *args, **kwargs):
-            if 'sufficiency verifier' in prompt:
-                calls.append('verify')
-                if len(calls) == 1:
-                    return {'sufficient': False, 'confidence': 0.8, 'missing': 'where Carol lives',
-                            'follow_up_queries': ['Carol lives where']}
-                return {'sufficient': True, 'confidence': 0.9, 'missing': '', 'follow_up_queries': []}
+        stages = []
+        async def rank_only(prompt, *args, **kwargs):
+            stages.append(kwargs.get('stage'))
+            self.assertNotIn('sufficiency verifier', prompt)
             return await score_all(prompt)
-        req = schemas.SearchRequest(user_id='u', query='Where does Alice sister live?')
-        result = await self.run_search(req, side_effect=staged)
-        trace = self.trace()
-        self.assertEqual(len(trace['rounds']), 2)
-        self.assertEqual(trace['rounds'][1]['queries'], ['Carol lives where'])
+        result = await self.run_search(schemas.SearchRequest(
+            user_id='u', query='Where does Alice sister live?'), side_effect=rank_only)
         self.assertTrue(result.data)
-        self.assertFalse(trace['abstained'])
-
-        async def hopeless(prompt, *args, **kwargs):
-            if 'sufficiency verifier' in prompt:
-                return {'sufficient': False, 'confidence': 0.05, 'missing': 'never mentioned',
-                        'follow_up_queries': []}
-            return await score_all(prompt)
-        result = await self.run_search(req, side_effect=hopeless)
-        self.assertTrue(result.data)
-        self.assertEqual(result.evidence_status, 'partial')
+        self.assertEqual(result.evidence_status, 'retrieved')
+        self.assertEqual(result.verification_status, 'not_run')
+        self.assertEqual(len(self.trace()['rounds']), 1)
+        self.assertEqual(stages, ['search.rerank.batch_1'])
 
     async def test_personalization_queries_never_abstain_with_evidence(self):
         vec = (await embed(['Alice lives in Kansas']))[0]
@@ -219,7 +206,7 @@ class LifecycleTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(result.data)
         self.assertFalse(trace['abstained'])
         self.assertFalse(trace['abstain_exempt'])
-        self.assertEqual(result.evidence_status, 'partial')
+        self.assertEqual(result.evidence_status, 'retrieved')
 
         req = schemas.SearchRequest(user_id='u', query='What snacks would Alice like?')
         result = await self.run_search(req, side_effect=hopeless,
@@ -228,20 +215,20 @@ class LifecycleTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(result.data)
         self.assertFalse(self.trace()['abstained'])
 
-    async def test_verifier_success_stops_retrieval(self):
+    async def test_search_returns_after_one_ranking(self):
         vec = (await embed(['Alice work']))[0]
         aid = self.st.insert_amu(user_id='u', session_id='s', content='Alice work', embedding=vec)
         result = await self.run_search(schemas.SearchRequest(user_id='u', query='Alice work'))
         self.assertEqual(result.data[0].id, aid)
         self.assertEqual(len(self.trace()['rounds']), 1)
 
-    async def test_empty_hot_results_trigger_one_cold_fallback(self):
+    async def test_empty_results_do_not_trigger_extra_model_calls(self):
         req = schemas.SearchRequest(user_id='u', query='quantum chromodynamics')
         await self.run_search(req, plan={'intent': 'fact', 'entities': [],
                                          'sub_queries': ['quantum chromodynamics']})
         trace = self.trace()
-        self.assertEqual(len(trace['rounds']), 2)
-        self.assertEqual({r['round'] for r in trace['routes']}, {1, 2})
+        self.assertEqual(len(trace['rounds']), 1)
+        self.assertEqual({r['round'] for r in trace['routes']}, {1})
         self.assertTrue(trace['abstained'])
 
     async def test_single_message_segment_does_not_duplicate_fact_as_episode(self):

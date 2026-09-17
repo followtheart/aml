@@ -62,7 +62,8 @@ class SearchItem(BaseModel):
 class SearchResponse(BaseModel):
     search_id: Optional[str] = None
     data: List[SearchItem]
-    evidence_status: str = "not_found"
+    # retrieved means candidates were packed, not that an LLM proved sufficiency.
+    evidence_status: str = "not_found"  # retrieved | conflicting | not_found
     verification_status: str = "not_run"
     packet_hash: Optional[str] = None
     read_revision: Optional[int] = None

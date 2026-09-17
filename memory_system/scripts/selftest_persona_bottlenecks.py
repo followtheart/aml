@@ -24,20 +24,6 @@ def entry(letter='A', claim='you enjoy anime', evidence='enjoys anime', **change
 
 
 class ViewAndPacketTests(unittest.TestCase):
-    def test_user_facts_and_plans_survive_while_assistant_knowledge_does_not(self):
-        rows = [dict(id='p', type='preference', content='The user likes anime'),
-                dict(id='f', type='fact', content='Daniel promised a convention trip', sources=[source('I promised a convention trip')]),
-                dict(id='l', type='plan', content='Daniel adjusts his schedule for pollen', sources=[source('Pollen affects my comfort')]),
-                dict(id='w', type='fact', content='Water stores heat', sources=[source('Water stores heat', role='assistant')])]
-        plan = {'intent': 'preference'}
-        self.assertEqual([r['id'] for r in search._select_memory_view([rows], plan)[0]], ['p', 'f', 'l'])
-        self.assertEqual(plan['_view_excluded'][0]['id'], 'w')
-
-    def test_personal_view_also_applies_to_options_without_profile_rows(self):
-        rows = [dict(id='f', type='fact', content='The user owns a small garden')]
-        result = search._select_memory_view([rows], {'intent': 'fact', '_personalization': True})
-        self.assertEqual(result, [rows])
-
     def test_mixed_dialog_world_fact_is_not_personal_evidence(self):
         item = dict(type='fact', content='Regular exercise improves insulin sensitivity.',
                     sources=[source('How does exercise help?'),
@@ -61,18 +47,13 @@ class ViewAndPacketTests(unittest.TestCase):
             ss = [source('I am curious how this works. Could you explain it?'), source(text, 1, 'assistant')]
             self.assertFalse(personal.personal(dict(type='fact', content=text), ss), text)
 
-    def test_general_choice_fact_view_keeps_assistant_recommendations(self):
-        item = dict(id='a', type='fact', content='The assistant recommended Cafe Roma.',
-                    sources=[source('Try Cafe Roma.', role='assistant')])
-        self.assertEqual(search._select_memory_view([[item]], {'intent': 'fact'}), [[item]])
-
     def test_validated_assistant_context_and_late_user_support_are_retained(self):
         ss = [source('Were you living in Paris in 2020?', 0, 'assistant'),
               source('Yes, that was my previous home.', 1), source('Hello', 2),
               source('I keep a small garden.', 3)]
         candidate = dict(content='The user lived in Paris and has a garden', evidence=[
             dict(request_id='r', message_index=i, quote=ss[i]['content']) for i in [0, 1, 3]])
-        result = personal.compact_sources(candidate, ss, 'home', 128, 1, persona=True)
+        result = personal.compact_sources(candidate, ss, 'home', 128, 1)
         self.assertEqual([s['message_index'] for s in result if s.get('content')], [0, 1, 3])
         self.assertIn('Paris in 2020', result[0]['content'])
 
@@ -111,7 +92,7 @@ class ViewAndPacketTests(unittest.TestCase):
         text = 'Background filler. ' * 80 + 'I do not have asthma. I love cycling. More background.'
         candidate = dict(content='The user does not have asthma', evidence=[
             dict(request_id='r', message_index=0, quote='I do not have asthma')])
-        ss = personal.compact_sources(candidate, [source(text)], 'asthma', 128, 3, persona=True)
+        ss = personal.compact_sources(candidate, [source(text)], 'asthma', 128, 3)
         shown = ss[0]['content']
         self.assertIn('I do not have asthma', shown)
         self.assertLess(len(shown), len(text))

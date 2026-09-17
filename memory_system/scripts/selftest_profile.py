@@ -251,8 +251,7 @@ class SearchInjectionTests(unittest.IsolatedAsyncioTestCase):
             resp2 = await search.run_search(self.st, req2)
         ids2 = [d.id for d in resp2.data]
         self.assertEqual(len(ids2), 2)  # Core profile shares top_k and token budget
-        self.assertLessEqual(resp2.coverage_manifest['core_bytes'],
-                             resp2.coverage_manifest['core_budget'])
+        self.assertEqual(resp2.coverage_manifest['core_bytes'], 0)
 
     async def test_rule_survives_rerank_rejection(self):
         rule = await self.memory('Always respond politely to the user', type='rule')
@@ -275,166 +274,37 @@ class SearchInjectionTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn(rule, [d.id for d in resp.data])
 
 
-def cited_response(align, qa, memories):
-    """Fixtures follow the new explicit claim/source citation contract."""
-    import copy
-    align = copy.deepcopy(align)
-    for entry, option in zip(align['options'], qa['options']):
-        entry['option_claim'] = option[3:] if entry['kind'] == 'persona' else ''
-        entry['evidence_id'] = next((m.get('id', f'memory_{i}') for i, m in enumerate(memories)
-                                    if entry['evidence'] and entry['evidence'] in m['content']
-                                    and m['memory_type'] != 'rule'), '')
-        entry['unsupported_claims'] = []
-        entry['constraint_id'], entry['constraint_span'] = '', ''
-        if entry['forbidden']:
-            i, rule = next((i, m) for i, m in enumerate(memories) if m['memory_type'] == 'rule')
-            entry['constraint_id'] = rule.get('id', f'memory_{i}')
-            entry['constraint_span'] = rule['content']
-    return align
-
-
-class ChoiceAlignTests(unittest.IsolatedAsyncioTestCase):
-    def test_alignment_reaches_answer_prompt(self):
-        qa = {'question': 'Weekend kitchen project ideas?',
-              'options': ['A. Bake bread at home', 'B. Order takeout'],
-              'gold_labels': ['A'], 'qa_type': 'single_choice', 'scoring': 'choice'}
-        memories = [{'memory_type': 'preference',
-                     'content': 'The user bakes bread at home'}]
-        align = {'options': [{'letter': 'A', 'kind': 'persona', 'match': 'weak',
-                              'evidence': 'bakes bread at home', 'forbidden': False},
-                             {'letter': 'B', 'kind': 'generic', 'match': 'none',
-                              'evidence': '', 'forbidden': False}]}
-        captured = {}
-
-        async def fake_complete(prompt, **kwargs):
-            captured['prompt'] = prompt
-            return 'A'
-
-        with patch.object(scoring.llm, 'complete_json',
-                          AsyncMock(return_value=cited_response(align, qa, memories))), \
-             patch.object(scoring.llm, 'complete', side_effect=fake_complete):
-            pred, score, diag = asyncio.run(scoring.evaluate(qa, memories))
-        self.assertEqual((pred, score), ('A', 1.0))
-        self.assertIn('Persona evidence alignment', captured['prompt'])
-        self.assertIn('A: persona, match=weak', captured['prompt'])
-        self.assertIn('Evidence tiers (ties are unordered; not an answer): A > B', captured['prompt'])
-        # Alignment records the exact evidence IDs used for its judgements.
-        self.assertEqual([e['letter'] for e in diag['choice_alignment']], ['A', 'B'])
-        self.assertTrue(diag['choice_alignment'][0]['citation_valid'])
-        self.assertEqual(diag['alignment_input_ids'], ['memory_0'])
-
-    def test_alignment_preserves_demographics_with_scope_rules(self):
-        # Relevant location/job evidence remains visible, with dependency rules.
-        qa = {'question': 'Weekend plans?',
-              'options': ['A. As a Kansan you might enjoy a local fair',
-                          'B. Order takeout'],
-              'gold_labels': ['B'], 'qa_type': 'single_choice', 'scoring': 'choice'}
-        memories = [{'memory_type': 'profile',
-                     'content': 'The user lives in Lawrence, Kansas'},
-                    {'memory_type': 'preference',
-                     'content': 'The user bakes bread at home'}]
-        captured = {}
-
-        async def fake_complete_json(prompt, *a, **k):
-            captured['align_prompt'] = prompt
-            return {'options': [{'letter': 'A', 'kind': 'persona', 'match': 'none',
-                                 'evidence': '', 'forbidden': False},
-                                {'letter': 'B', 'kind': 'generic', 'match': 'none',
-                                 'evidence': '', 'forbidden': False}]}
-
-        with patch.object(scoring.llm, 'complete_json', side_effect=fake_complete_json), \
-             patch.object(scoring.llm, 'complete', AsyncMock(return_value='B')):
-            pred, score, _ = asyncio.run(scoring.evaluate(qa, memories))
-        self.assertEqual((pred, score), ('B', 1.0))
-        # Relevant location/job evidence remains visible, with dependency rules.
-        self.assertIn('The user lives in Lawrence, Kansas', captured['align_prompt'])
-        self.assertIn('directly dependent advice', captured['align_prompt'])
-
-    def test_autopick_answers_from_ranked_alignment(self):
-        qa = {'question': 'Weekend kitchen project ideas?',
-              'options': ['A. Order takeout', 'B. Bake bread at home'],
-              'gold_labels': ['B'], 'qa_type': 'single_choice', 'scoring': 'choice'}
-        memories = [{'memory_type': 'preference',
-                     'content': 'The user bakes bread at home'}]
-        align = {'options': [{'letter': 'A', 'kind': 'generic', 'match': 'none',
-                              'evidence': '', 'forbidden': False},
-                             {'letter': 'B', 'kind': 'persona', 'match': 'strong',
-                              'evidence': 'bakes bread at home', 'forbidden': False}]}
-        with patch.object(scoring.config, 'CHOICE_AUTOPICK', True), \
-             patch.object(scoring.llm, 'complete_json', AsyncMock(return_value=cited_response(align, qa, memories))), \
-             patch.object(scoring.llm, 'complete',
-                          AsyncMock(side_effect=AssertionError('answer model called'))):
-            pred, score, diag = asyncio.run(scoring.evaluate(qa, memories))
-        self.assertEqual((pred, score), ('B', 1.0))
-        self.assertEqual(diag.get('choice_autopick'), 'B')
-
-    def test_forgotten_trait_marks_option_forbidden(self):
+class DirectChoiceTests(unittest.IsolatedAsyncioTestCase):
+    async def test_one_answer_call_uses_sources_and_constraints_without_alignment(self):
         qa = {'question': 'Summer event ideas?',
-              'options': ['A. Since you love electronic festivals, try Tomorrowland',
-                          'B. A local food fair'],
+              'options': ['A. An electronic music festival', 'B. A local food fair'],
               'gold_labels': ['B'], 'qa_type': 'single_choice', 'scoring': 'choice'}
-        memories = [{'memory_type': 'rule',
-                     'content': 'The user requested to forget that they enjoy modern '
-                                'electronic music festivals'},
-                    {'memory_type': 'preference',
-                     'content': 'The user enjoys modern electronic music festivals'}]
-        align = {'options': [{'letter': 'A', 'kind': 'persona', 'match': 'strong',
-                              'evidence': 'electronic music festivals', 'forbidden': True},
-                             {'letter': 'B', 'kind': 'generic', 'match': 'none',
-                              'evidence': '', 'forbidden': False}]}
-        captured = {}
-
-        async def fake_complete_json(prompt, *a, **k):
-            captured['align_prompt'] = prompt
-            return cited_response(align, qa, memories)
-
-        async def fake_complete(prompt, **kwargs):
-            captured['prompt'] = prompt
-            return 'B'
-
-        with patch.object(scoring.llm, 'complete_json', side_effect=fake_complete_json), \
-             patch.object(scoring.llm, 'complete', side_effect=fake_complete):
-            pred, score, _ = asyncio.run(scoring.evaluate(qa, memories))
+        memories = [{'memory_type': 'rule', 'content':
+                     'The user requested to forget their electronic music festival interest'},
+                    {'memory_type': 'episode', 'content':
+                     'Claire shared a story about her garden; the user asked to edit it.'}]
+        answer = AsyncMock(return_value='B')
+        extra = AsyncMock(side_effect=AssertionError('unexpected alignment or judge'))
+        with patch.object(scoring.llm, 'complete_json', extra), patch.object(scoring.llm, 'complete', answer):
+            pred, score, diag = await scoring.evaluate(qa, memories)
         self.assertEqual((pred, score), ('B', 1.0))
-        # The forget rule is handed to the aligner as a forgotten trait, not
-        # as ordinary persona evidence.
-        forgotten = captured['align_prompt'].split('asked the assistant to FORGET')[1]
-        self.assertIn('electronic music festivals', forgotten)
-        self.assertIn('A: persona, match=strong, FORBIDDEN', captured['prompt'])
-        self.assertIn('Evidence tiers (ties are unordered; not an answer): B > A', captured['prompt'])
+        self.assertEqual(diag['answer_policy'], 'direct_evidence_v1')
+        extra.assert_not_awaited()
+        answer.assert_awaited_once()
+        prompt = answer.call_args.args[0]
+        self.assertIn('Claire shared a story', prompt)
+        self.assertIn('requested to forget', prompt)
+        self.assertIn('third-party stories', prompt)
+        self.assertIn('Honor explicit forget constraints', prompt)
+        self.assertNotIn('Persona evidence alignment', prompt)
 
-    def test_forbidden_autopick_skips_banned_top_option(self):
-        qa = {'question': 'Summer event ideas?',
-              'options': ['A. Since you love electronic festivals, try Tomorrowland',
-                          'B. A local food fair'],
-              'gold_labels': ['B'], 'qa_type': 'single_choice', 'scoring': 'choice'}
-        memories = [{'memory_type': 'rule',
-                     'content': 'The user requested to forget that they enjoy modern '
-                                'electronic music festivals'},
-                    {'memory_type': 'preference',
-                     'content': 'The user enjoys modern electronic music festivals'}]
-        align = {'options': [{'letter': 'A', 'kind': 'persona', 'match': 'strong',
-                              'evidence': 'electronic music festivals', 'forbidden': True},
-                             {'letter': 'B', 'kind': 'generic', 'match': 'none',
-                              'evidence': '', 'forbidden': False}]}
-        with patch.object(scoring.config, 'CHOICE_AUTOPICK', True), \
-             patch.object(scoring.llm, 'complete_json', AsyncMock(return_value=cited_response(align, qa, memories))), \
-             patch.object(scoring.llm, 'complete',
-                          AsyncMock(side_effect=AssertionError('answer model called'))):
-            pred, score, diag = asyncio.run(scoring.evaluate(qa, memories))
-        # Autopick requires a non-forbidden persona match; B has none here, so
-        # the answer model must be consulted... it is mocked to fail, which
-        # proves autopick did NOT fire on a banned-only ranking.
-        self.assertEqual((pred, score), ('', 0.0))
-
-    def test_alignment_failure_fails_open(self):
+    async def test_answer_failure_keeps_explicit_diagnostics(self):
         qa = {'question': 'q', 'options': ['A. x', 'B. y'], 'gold_labels': ['B'],
               'qa_type': 'single_choice', 'scoring': 'choice'}
-        with patch.object(scoring.llm, 'complete_json',
-                          AsyncMock(side_effect=RuntimeError('offline'))), \
-             patch.object(scoring.llm, 'complete', AsyncMock(return_value='B')):
-            pred, score, _ = asyncio.run(scoring.evaluate(qa, []))
-        self.assertEqual((pred, score), ('B', 1.0))
+        with patch.object(scoring.llm, 'complete', AsyncMock(side_effect=RuntimeError('offline'))):
+            pred, score, diag = await scoring.evaluate(qa, [])
+        self.assertEqual((pred, score), ('', 0.0))
+        self.assertEqual(diag['error_stage'], 'answer')
 
 
 if __name__ == '__main__':

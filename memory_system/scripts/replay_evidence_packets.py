@@ -102,8 +102,7 @@ def main():
                                      evidence_token_budget=args.budget)
         plan = copy.deepcopy(trace['plan'])
         routes = [route['candidates'] for route in trace['routes']]
-        new_view = search_pipeline._select_memory_view(routes, plan, adapter)
-        admitted = {m['id'] for route in new_view for m in route}
+        admitted = {m['id'] for route in routes for m in route}
         fused_ids = {m['id'] for m in trace['fused']}
         # Hold the previous ranking fixed to isolate packaging changes.
         packet, digest, manifest = search_pipeline._pack_evidence(

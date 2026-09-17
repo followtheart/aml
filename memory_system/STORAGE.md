@@ -194,40 +194,44 @@ Forgetting uses `R = exp(-age / (30 days · strength))`; each recall adds
 `AML_FORGET_RECALL_BONUS_DAYS / AML_FORGET_STRENGTH_DAYS` to the dimensionless
 strength multiplier. With
 `AML_FORGET_THRESHOLD > 0` memories below it move to `tier='cold'`, which the
-dense and sparse routes skip (graph/temporal routes still reach them). A cold
+dense and sparse routes can skip. Single-pass Search explicitly includes cold
+memories alongside hot ones, without a verifier-driven fallback. A cold
 memory that is recalled returns to `hot`, as does its Scene. Nothing is deleted
 except through the explicit compliance purge endpoint.
 
-The search loop runs up to `AML_SEARCH_MAX_ROUNDS` (default 2): after reranking,
-prompt 08 judges whether the evidence is necessary and sufficient; if not, its
-follow-up queries drive one more recall round. If the final verdict is
-insufficient with confidence below `AML_ABSTAIN_CONFIDENCE`, the search returns an
-empty list. Preference/profile-intent queries and requests carrying answer
-`options` are exempt (trace `abstain_exempt`): they are decided by user traits,
-not by a stored answer, so ranked evidence is always handed over. Verifier
-failures fail open. `plan`-type memories (foresight) are
+Search uses `single_pass_v1`: plan once, recall once across dense/sparse,
+graph/scene/profile and applicable temporal routes, rank once, and pack once.
+Up to six embedding queries prioritize the question and supplied options before
+generic rewrites. Options are retrieval hypotheses, never source evidence.
+No sufficiency model, iterative retrieval or persona wording filter runs.
+`evidence_status=retrieved` means a nonempty packet was returned, not that its
+sufficiency was verified; `verification_status=not_run`. Empty packets report
+`not_found`; included disputed memories report `conflicting`.
+`plan`-type memories (foresight) are
 prefixed with `[plan; status: pending|expired]` relative to the anchor time and
 are dropped when a query time scope does not intersect their window.
 
 Candidates are LLM-scored only for the fused head (`AML_RERANK_MAX_CANDIDATES`,
-default 40, one batch of `RERANK_CANDIDATES`). Kept items are ordered by relevance;
+default 40, one batch of `RERANK_CANDIDATES`). Scored items are ordered by relevance;
 the unscored tail follows in fusion order (`unscored_fused`) so `top_k=100` stays
 full without penalising unscored evidence.
-Explicit scores below `AML_SEARCH_MIN_RELEVANCE` (default 0.3) are rejected. If
-any batch fails or omits a candidate, the entire request falls back to one coherent
+Scores and model keep flags affect no eligibility decision: low scores change
+ordering only. If any batch fails or omits a candidate, ranking falls back to one coherent
 RRF ordering; relevance and RRF scales are never mixed.
 
-Search items add `memory_type` and structured `sources`. Source bodies are
-deduplicated across results and bounded by per-item and total character budgets;
-omitted bodies retain request/message references and an omission reason. The
-response reports `source_count` and caps returned references separately. Full
-sources remain in SQLite and debug logs. Summary sources cover the same user's
-session. Older memories without source records return an empty list.
+Search items add `memory_type` and structured `sources`. Source spans are
+deduplicated across results; omitted bodies retain request/message references
+and an omission reason. Validated support quotes are retained when choosing
+excerpts. Whole items then compete for `top_k` and the packet's UTF-8 byte budget,
+without clipping their supporting quotes. The response reports `source_count`;
+full sources remain in SQLite and debug logs. Summary sources cover the same
+user's session. Older memories without source records return an empty list.
 
-Fact, multi-hop, temporal and profile intents use Memory-Only: episode candidates
-are removed when atomic evidence exists, and source references omit their bodies.
-Narrative/document intents use Memory-Doc: episode candidates are preferred and
-bounded source text is included. Sensitive AMUs are absent from every route unless
+Atomic facts and episodes both remain eligible. Narrative/document intents prefer
+episodes on score ties and preserve full source bodies. Other intents select
+relevant excerpts, including assistant-authored drafts when relevant, with explicit
+source roles. Forget rules are packed before other candidates; core profiles do
+not bypass ranking through a second injection path. Sensitive AMUs are absent from every route unless
 both `AML_SENSITIVE_RECALL_ENABLED=1` and request `include_sensitive=true`.
 
 `POST /feedback` is the only task-experience write path. It requires an explicit
@@ -242,15 +246,14 @@ JSONL event to that path. Each event includes:
 - `routes`: named channels, query variants and candidates with full text, rank
   and channel scores when available (including empty routes).
 - `fused`: deduplicated candidates with RRF scores and fusion ranks.
-- `rerank`: per-candidate batch, score, keep flag and decision reason;
-  `rerank_rejected`, `global_rrf_fallback`, `unscored_fused`, or `kept`.
-- `rounds`: per-round query set, fused/ranked counts and the verifier verdict;
-  `abstained` marks an empty response caused by the verifier.
+- `rerank`: per-candidate score, retained keep flag, optional model_keep diagnostic,
+  and decision reason: `global_rrf_fallback`, `unscored_fused`, or `kept`.
+- `rounds`: one query set, fused/ranked counts and `verification_status=not_run`;
+  `abstained` marks an empty packet, not a model sufficiency decision.
 - `scenes`: the top MemScenes chosen for the scene->cell route;
   `foresight_dropped`: plan memories outside the query time scope.
 - `anchor_time`: the reference time used for relative dates.
-- `pre_rerank_excluded`: the fusion tail omitted by the configured cost budget.
-- `top_k_excluded`: relevant candidates omitted only because of the result limit.
+- `top_k_excluded`: candidates omitted because of the result limit (not necessarily relevant).
 - `returned`: final response items including source evidence.
 
 Failed searches record error type and any diagnostics collected before failure.

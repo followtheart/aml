@@ -218,6 +218,9 @@ class CascadeTests(unittest.IsolatedAsyncioTestCase):
         rows = self.rows()
         rows[-1].update(type='rule', _user_rule=True)
         rows[-2]['_coverage_ids'] = ['option:1']
+        # Model the preparation stage's source-witnessed reservation, not a
+        # bare lexical topic hit (which must no longer force a low-score item).
+        rows[-2]['_supported_coverage_ids'] = ['option:1']
         plan = {'_coverage_requirements': [{'id': 'option:1', 'text': 'Rare option'}]}
         async def ce(query, documents, **kwargs):
             return [.001 if evidence_number(t) == 68 else .8 for t in documents]

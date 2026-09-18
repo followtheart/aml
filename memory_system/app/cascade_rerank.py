@@ -4,49 +4,21 @@ import json
 import math
 import re
 import time
-from . import budget, config, cross_encoder, llm, profile, prompts
+import httpx
+from . import budget, config, cross_encoder, evidence_selection, llm, profile, prompts, rerank_query
 
 
 def protected(item):
     return bool(item.get('_user_rule')) or profile.is_forget_rule(item)
 
 
-def shortlist(rows, count, requirements, key, reserve_ids=()):
-    ordered = sorted(rows, key=key, reverse=True)
-    reserved = []
-    for requirement in requirements:
-        hit = next((c for c in ordered if requirement['id'] in c.get('_coverage_ids', [])), None)
-        if hit is not None and hit not in reserved:
-            reserved.append(hit)
-    reserved = reserved[:max(1, count // 2)]
-    for c in ordered:
-        if c['id'] in reserve_ids and c not in reserved and len(reserved) < count:
-            reserved.append(c)
-    chosen, seen = list(reserved), set()
-    for c in chosen:
-        seen.update(c.get('_fusion_source_ids', []))
-    while len(chosen) < count:
-        pending = [c for c in ordered if c not in chosen]
-        if not pending:
-            break
-        budget.check()
-        # Source novelty only breaks a near-score tie; it is not source authority.
-        top = max(pending, key=lambda c: (math.floor(max(-1e6, min(1e6, float(key(c)[0]))) * 10),
-            not bool(set(c.get('_fusion_source_ids', [])) & seen), key(c)))
-        chosen.append(top)
-        seen.update(top.get('_fusion_source_ids', []))
-    ids = {c['id'] for c in chosen}
-    return [c for c in ordered if c['id'] in ids]
+def shortlist(rows, count, requirements, key, reserve_ids=(), *, trace=None, carry_ids=()):
+    return evidence_selection.select(rows, count, requirements, key, reserve_ids,
+                                     trace=trace, carry_ids=carry_ids)
 
 
 def query_text(req, plan):
-    parts = [req.query]
-    if req.options:
-        parts.append('Option premises to verify: ' + '\n'.join(req.options))
-    subqueries = [x['text'] for x in plan.get('_query_specs', []) if x.get('origin') in ('sub_queries', 'grounded_followup')]
-    if subqueries:
-        parts.append('Subquestions: ' + '\n'.join(subqueries))
-    return '\n'.join(parts)
+    return rerank_query.build(req, plan)
 
 
 def listwise_prompt(req, plan, rows):
@@ -112,7 +84,8 @@ def listwise_request(req, plan, rows, *, repair=False):
 
 
 async def rank(req, plan, candidates):
-    trace = plan['_cascade'] = dict(coarse={}, cross_encoder={}, fine={}, listwise={}, omitted=[])
+    trace = plan['_cascade'] = dict(coarse={}, cross_encoder={}, fine={}, listwise={}, omitted=[],
+                                   reservation_missing=[])
     plan['_rerank'], plan['_evidence_groups'] = [], []
     if not candidates:
         plan['_rerank_status'] = 'not_run'
@@ -120,10 +93,12 @@ async def rank(req, plan, candidates):
     rules = [c for c in candidates if protected(c)]
     ordinary = [c for c in candidates if not protected(c)]
     requirements = plan.get('_coverage_requirements', [])
+    coarse_selection = {}
     coarse = shortlist(ordinary, config.CASCADE_COARSE_LIMIT, requirements,
-                       lambda c: (c.get('_fused', 0),))
+                       lambda c: (c.get('_fused', 0),), trace=coarse_selection)
     trace['coarse'] = dict(input_count=len(ordinary), output_count=len(coarse),
-                          limit=config.CASCADE_COARSE_LIMIT, selected_ids=[c['id'] for c in coarse])
+                          limit=config.CASCADE_COARSE_LIMIT, selected_ids=[c['id'] for c in coarse],
+                          selection=coarse_selection)
     coarse_ids = {c['id'] for c in coarse}
     trace['omitted'].extend(dict(id=c['id'], stage='coarse', reason='coarse_limit')
                             for c in ordinary if c['id'] not in coarse_ids)
@@ -157,11 +132,12 @@ async def rank(req, plan, candidates):
     held_calls = int(headroom > 0 and limits.calls + limits.reserved_calls < limits.max_calls)
     batch_traces, scores, waves = [], {}, []
     ce_seconds = min(config.CE_DEADLINE_SECONDS, max(.01, limits.deadline - time.monotonic() - 5)) if limits else config.CE_DEADLINE_SECONDS
+    ce_deadline = time.monotonic() + ce_seconds
     async def score(entry, rows):
         try:
             entry['status'] = 'running'
             values = await cross_encoder.rerank(query, [c.get('_rank_text', c['content']) for c in rows],
-                                                 stage=f"search.cross_encoder.batch_{entry['batch']}")
+                                                 stage=entry.get('stage', f"search.cross_encoder.batch_{entry['batch']}"))
             if len(values) != len(rows) or any(isinstance(v, bool) or not isinstance(v, (int, float)) or not math.isfinite(v) for v in values):
                 raise ValueError('Cross-Encoder returned invalid score mapping')
             scores.update((c['id'], float(v)) for c, v in zip(rows, values))
@@ -170,7 +146,8 @@ async def rank(req, plan, candidates):
             entry['status'] = 'cancelled'
             raise
         except Exception as exc:
-            entry.update(status='error', error=type(exc).__name__)
+            entry.update(status='error', error=type(exc).__name__,
+                         retryable_timeout=isinstance(exc, (TimeoutError, httpx.TimeoutException)))
     if held_calls:
         limits.reserve_calls(held_calls)
     try:
@@ -218,13 +195,46 @@ async def rank(req, plan, candidates):
                 # recompute batch sizes; never fail a queued batch on in-flight
                 # reservation pressure or retry a request already sent to HTTP.
                 await asyncio.gather(*(score(entry, rows) for entry, rows in wave))
+            # Retry only request timeouts, after every initial wave has settled.
+            # Keep the original deadline, shared budget and listwise reservation.
+            timed_out = {mid for b in batch_traces if b.get('retryable_timeout')
+                         for mid in b['candidate_ids'] if mid not in scores}
+            retry_rows = evidence_selection.rescue([c for c in coarse if c['id'] in timed_out],
+                config.CE_RETRY_BATCHES * min(config.CE_RETRY_BATCH_SIZE, config.CE_BATCH_SIZE),
+                req.query, plan.get('_query_specs', []))
+            for attempt in range(config.CE_RETRY_BATCHES):
+                budget.check()
+                if not retry_rows or ce_deadline - time.monotonic() < min(1., config.CE_TIMEOUT_SECONDS / 4):
+                    break
+                available = (max(0, limits.max_tokens - limits.tokens - limits.reserved_tokens - headroom)
+                             if limits else config.CE_MAX_REQUEST_BYTES)
+                if limits and limits.calls + limits.reserved_calls >= limits.max_calls:
+                    break
+                retry_batch, size = [], 0
+                for c in list(retry_rows):
+                    if size + sizes[c['id']] <= min(available, config.CE_MAX_REQUEST_BYTES):
+                        retry_batch.append(c)
+                        retry_rows.remove(c)
+                        size += sizes[c['id']]
+                    if len(retry_batch) >= min(config.CE_RETRY_BATCH_SIZE, config.CE_BATCH_SIZE):
+                        break
+                if not retry_batch:
+                    break
+                entry = dict(batch=len(batch_traces) + 1, wave=len(waves) + 1,
+                    stage=f'search.cross_encoder.retry_{attempt + 1}', retry=True,
+                    candidate_ids=[c['id'] for c in retry_batch], candidate_count=len(retry_batch),
+                    input_bound=size, status='queued')
+                batch_traces.append(entry)
+                waves.append(dict(wave=len(waves) + 1, available_tokens=available, batches=[entry['batch']], retry=True))
+                await score(entry, retry_batch)
     except TimeoutError:
         rejected.extend(dict(id=c['id'], error='TimeoutError', reason='stage_deadline') for c in pending)
     finally:
         if held_calls:
             limits.release_calls(held_calls)
     ce_errors = rejected + [dict(batch=b['batch'], error=b.get('error', b['status']))
-                            for b in batch_traces if b['status'] != 'ok']
+                            for b in batch_traces if b['status'] != 'ok'
+                            and any(mid not in scores for mid in b['candidate_ids'])]
     for c in coarse:
         c['_ce_score'] = scores.get(c['id'])
         if c['id'] in scores:
@@ -235,27 +245,38 @@ async def rank(req, plan, candidates):
     trace['cross_encoder'] = dict(status='ok' if len(scores) == len(coarse) else 'partial' if scores else 'fallback',
         input_count=len(coarse), scored_count=len(scores), batches=sorted(batch_traces, key=lambda b: b['batch']), errors=ce_errors,
         model='fake-cross-encoder' if config.FAKE else config.CE_MODEL,
-        scheduler='settled_waves', waves=waves, listwise_token_headroom=headroom, listwise_call_headroom=held_calls)
+        scheduler='settled_waves', waves=waves, listwise_token_headroom=headroom, listwise_call_headroom=held_calls,
+        query=query, recovered_ids=sorted({mid for b in batch_traces if b['status'] != 'ok'
+            for mid in b['candidate_ids'] if mid in scores}))
     # No calibration between CE and graph scores: failed CE entries get a
     # reserved, bounded opportunity; the rest use CE order only.
     failed = [c for c in coarse if c['id'] not in scores]
     reserve_count = min(max(1, min(config.CASCADE_FINE_LIMIT, config.CASCADE_LLM_LIMIT) // 4), len(failed)) if scores else 0
-    failed_ids = {c['id'] for c in failed[:reserve_count]}
+    failed_ids = {c['id'] for c in evidence_selection.rescue(failed, reserve_count, req.query,
+                                                           plan.get('_query_specs', []))}
+    fine_selection = {}
     fine = shortlist(coarse, min(config.CASCADE_FINE_LIMIT, len(coarse)), requirements,
         lambda c: (c['_ce_score'] if c.get('_ce_score') is not None else -1e30, c.get('_fused', 0)),
-        reserve_ids=failed_ids) if scores else shortlist(coarse, config.CASCADE_FINE_LIMIT, requirements, lambda c: (c.get('_fused', 0),))
+        reserve_ids=failed_ids, trace=fine_selection) if scores else shortlist(coarse, config.CASCADE_FINE_LIMIT,
+            requirements, lambda c: (c.get('_fused', 0),), trace=fine_selection)
     fine_ids = {c['id'] for c in fine}
-    trace['fine'] = dict(input_count=len(coarse), output_count=len(fine), selected_ids=[c['id'] for c in fine])
+    reservations = [r for r in fine_selection['reservations'] if r['selected']]
+    carried_ids = {r['candidate_id'] for r in reservations}
+    trace['fine'] = dict(input_count=len(coarse), output_count=len(fine), selected_ids=[c['id'] for c in fine],
+                         selection=fine_selection, reserved_ids=sorted(carried_ids))
+    for stage, selection in (('coarse', coarse_selection), ('fine', fine_selection)):
+        for r in selection['reservations']:
+            if not r['selected']:
+                trace['reservation_missing'].extend(dict(requirement_id=rid, candidate_id=r['candidate_id'],
+                    stage=stage, reason='capacity') for rid in r['requirement_ids'] or [None])
     trace['omitted'].extend(dict(id=c['id'], stage='fine', reason='fine_limit') for c in coarse if c['id'] not in fine_ids)
     # Preserve the fine rank and its coverage reservations at the listwise cap.
     positions = {c['id']: len(fine) - i for i, c in enumerate(fine)}
-    ordered = shortlist(fine, config.CASCADE_LLM_LIMIT, requirements, lambda c: (positions[c['id']],), reserve_ids=failed_ids)
+    admission_selection = {}
+    ordered = shortlist(fine, config.CASCADE_LLM_LIMIT, [], lambda c: (positions[c['id']],),
+                        carry_ids=carried_ids, trace=admission_selection)
     submitted, token_limited = [], False
-    mandatory = set(failed_ids)
-    for requirement in requirements:
-        champion = next((c for c in ordered if requirement['id'] in c.get('_coverage_ids', [])), None)
-        if champion:
-            mandatory.add(champion['id'])
+    mandatory = carried_ids
     for c in sorted(ordered, key=lambda c: c['id'] not in mandatory):
         request = listwise_request(req, plan, submitted + [c])
         if len(request['prompt'].encode('utf-8')) > config.RERANK_MAX_PROMPT_BYTES:
@@ -269,6 +290,14 @@ async def rank(req, plan, candidates):
     submitted_ids = {c['id'] for c in submitted}
     trace['omitted'].extend(dict(id=c['id'], stage='listwise', reason='listwise_limit')
                             for c in fine if c['id'] not in submitted_ids and c not in ordered)
+    for r in reservations:
+        if r['candidate_id'] not in submitted_ids:
+            omission = next((o for o in reversed(trace['omitted']) if o['id'] == r['candidate_id']), {})
+            reason = omission.get('reason', 'capacity')
+            if reason == 'listwise_limit':
+                reason = 'capacity'
+            trace['reservation_missing'].extend(dict(requirement_id=rid,candidate_id=r['candidate_id'],
+                stage='listwise',reason=reason) for rid in r['requirement_ids'] or [None])
     selected, irrelevant, status, errors = list(submitted), set(), 'not_run', []
     attempts = []
     if submitted:
@@ -317,7 +346,7 @@ async def rank(req, plan, candidates):
     trace['listwise'] = dict(status=status, input_count=len(submitted), output_count=len(selected),
         candidate_ids=[c['id'] for c in submitted], selected_ids=[c['id'] for c in selected],
         input_bytes=len(listwise_prompt(req, plan, submitted).encode('utf-8')) if submitted else 0,
-        attempts=attempts, errors=errors)
+        attempts=attempts, errors=errors, selection=admission_selection, carried_ids=sorted(carried_ids))
     for i in irrelevant:
         trace['omitted'].append(dict(id=submitted[i]['id'], stage='listwise', reason='irrelevant'))
     if status == 'fallback':

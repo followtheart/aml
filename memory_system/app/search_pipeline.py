@@ -560,11 +560,12 @@ def _prepare_candidates(st, req, plan, fused):
             if (proof.get('seed_ids') and set(proof['seed_ids']) <= visited
                     and search_coverage.matches(primary_text, proof['text'])):
                 c['_coverage_ids'].extend(proof.get('coverage_ids', []))
-        search_coverage.annotate(c, plan.get('_coverage_requirements', []))
+        search_coverage.annotate(c, plan.get('_coverage_requirements', []), visible)
         c['_packet_item'] = dict(id=c['id'], **unit, _rank_aligned=True, is_constraint=profile.is_forget_rule(c),
             equivalent_ids=c.get('_equivalent_ids', []), memory_type=c.get('type', 'fact'),
             personal_evidence=personal_evidence.personal(c, visible), source_count=len(unit['sources']),
-            coverage_ids=c.get('_coverage_ids', []), temporal=c.get('temporal'), created_at=c.get('created_at'))
+            coverage_ids=c.get('_coverage_ids', []), supported_coverage_ids=c.get('_supported_coverage_ids', []),
+            coverage_witnesses=c.get('_coverage_witnesses', {}), temporal=c.get('temporal'), created_at=c.get('created_at'))
         prepared.append(c)
     return _coalesce_episodes(prepared, plan)
 
@@ -589,10 +590,15 @@ def _coalesce_episodes(candidates, plan):
             continue
         retained = groups[key]
         retained.setdefault('_equivalent_ids', []).extend([c['id']] + c.get('_equivalent_ids', []))
-        for field in ('_coverage_ids', '_bridge_ids'):
+        for field in ('_coverage_ids', '_supported_coverage_ids', '_bridge_ids'):
             retained[field] = sorted(set(retained.get(field, [])) | set(c.get(field, [])))
+        for rid, witnesses in c.get('_coverage_witnesses', {}).items():
+            retained.setdefault('_coverage_witnesses', {}).setdefault(rid, []).extend(
+                w for w in witnesses if w not in retained.get('_coverage_witnesses', {}).get(rid, []))
         if '_packet_item' in retained:
             retained['_packet_item']['coverage_ids'] = retained.get('_coverage_ids', [])
+            retained['_packet_item']['supported_coverage_ids'] = retained.get('_supported_coverage_ids', [])
+            retained['_packet_item']['coverage_witnesses'] = retained.get('_coverage_witnesses', {})
         plan.setdefault('_deduplicated', []).append(dict(
             id=c['id'], retained_id=retained['id'], reason='same_episode_sources_and_preview'))
     return out

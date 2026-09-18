@@ -148,6 +148,7 @@ class RecoveryTests(unittest.IsolatedAsyncioTestCase):
         rows = [{'id': f'm{i}', 'content': f'record {i}', '_fused': 1-i/100}
                 for i in range(90)]
         rows[60]['_coverage_ids'] = ['rare']
+        rows[60]['_supported_coverage_ids'] = ['rare']
         plan = {'_coverage_requirements': [{'id': 'rare', 'text': 'record 60'}]}
         submitted = []
         async def ce(query, documents, **kwargs):

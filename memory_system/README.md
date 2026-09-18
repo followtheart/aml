@@ -48,7 +48,7 @@ Search 的最終證據包預設上限為 32,000 UTF-8 bytes（保守 token 上�
 後讀取同一包，不再另行截斷。舊格式、沒有 hash 的輸入仍使用 24,000／2,400
 字符的總額／單條上限。
 
-讀取鏈路使用 `graph_cascade_v7`：一次查詢規劃、多路召回、可選一次有來源依據的多跳補查、圖融合、三級排序和原子證據組裝包。
+讀取鏈路使用 `graph_cascade_v9`：一次查詢規劃、多路召回、可選一次有來源依據的多跳補查、圖融合、三級排序和原子證據組裝包。
 規劃器以 `option_queries` 為每個選項返回一條不超過 240 字元的短前提查詢；通用建議用空字串。
 缺失／無效項目回退到選項首句或前提，保留否定與條件，不把選項寫成記憶。
 原問題、每個選項和最多 3 個子問題保留；6 條軟上限只限制額外擴展，不再擠掉第六個選項。
@@ -66,7 +66,11 @@ graph／scene 在多跳、敘事、文件查詢，或任一查詢匹配的獨立
 
 三級排序預設為 **粗排 50 → Cross-Encoder 精排保留 12 → LLM 列表比較 10**，
 分別由 `AML_CASCADE_COARSE_LIMIT`、`AML_CASCADE_FINE_LIMIT`、`AML_CASCADE_LLM_LIMIT` 控制。
-粗排／精排保留有界的需求覆蓋位置，部分 CE 失敗時亦保留少量未評分候選給 LLM 比較。
+粗排／精排只為可見原文支援的需求保留位置；一般詞彙覆蓋保留作診斷，不取得硬保留名額。
+精排依分數順序選擇，僅延後原文已由其他選中項完整涵蓋的候選；部分來源重疊仍可保留新增證據。
+已選保留項會傳遞到 LLM 名額與字節檢查，無法容納時記錄 `reservation_missing`，不重新換代表掩蓋損失。
+CE 查詢只加入有界的選項前提與子問題，不拼接完整建議答案；正文的主體、否定與時間仍保留。
+部分 CE 失敗時，按查詢分面保留少量未評分候選給 LLM 比較。
 固定證據單元含必要原文、來源與版本依賴，上限是 `AML_SEARCH_ITEM_MAX_BYTES`、
 `AML_CE_MAX_DOCUMENT_BYTES` 和包預算的最小值，預設有效上限 4,000 UTF-8 bytes。
 無法容納的完整必要引文會明確省略，不會為模型默默截斷。
@@ -75,6 +79,7 @@ Cross-Encoder 使用提供者的真正 Rerank API。DashScope 自動沿用相同
 SiliconFlow 自動使用 `BAAI/bge-reranker-v2-m3`。其他部署可設定 `AML_CE_API_URL/MODEL/API_KEY`，
 支援平面 Cohere 相容格式及 DashScope 原生格式。憑證只會在相同 origin 自動沿用。
 CE 每批最多 24 條、最多 2 批並行，每次最多 10 秒、整階段最多 12 秒；仍受 Search 總預算限制。
+單批逾時在原階段期限與剩餘額度內最多小批重試兩次，每批預設 4 條，受 `AML_CE_RETRY_BATCHES`／`AML_CE_RETRY_BATCH_SIZE` 限制；已成功項不重送，最後一次 LLM 呼叫仍預留。
 CE 分數保留原始有限值（包括負值／零值），作為排序訊號，沒有跨 LLM 批次校準或固定相關性門檻。
 
 LLM 一次看到最多 10 個候選，回傳完整索引排列、明確無用項和必須共同使用的證據組。
@@ -89,7 +94,7 @@ CE 不可用時明確記錄降級；LLM 失敗時保留 CE 順序，兩者均不
 `coverage_manifest.selection_mode=graph_cascade`；`fusion`、`cascade` 和 `evidence_groups` 記錄各階段選中與省略原因。
 `rerank_status` 區分 `ok/recovered/partial/fallback/not_run`，未恢復的錯誤會設置 `search_degraded=true`。
 舊 `AML_RERANK_MAX_CANDIDATES/BATCH_MAX_CANDIDATES/CALIBRATION_ANCHORS` 和
-`AML_EVIDENCE_MIN_RELEVANCE` 僅留給歷史回放，對 v7 線上級聯無效。
+`AML_EVIDENCE_MIN_RELEVANCE` 僅留給歷史回放，對目前線上級聯無效。
 完整設定、限制與驗證見 [GRAPH_CASCADE_IMPLEMENTATION.md](GRAPH_CASCADE_IMPLEMENTATION.md)。
 画像按查询相关性召回；相同偏好合并展示并保留全部来源 ID。遗忘规则优先装包，
 计入总字节预算但不占普通证据 `top_k`，因此返回条数可能超过 `top_k`。

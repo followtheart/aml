@@ -155,8 +155,8 @@ class SinglePassTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(score, 1.0)
         self.assertEqual(response.coverage_manifest['rerank_status'], 'ok')
         self.assertEqual(len(trace['rounds']), 1)
-        self.assertEqual(trace['pipeline'], 'graph_cascade_v8')
-        self.assertEqual(trace['versions']['search_policy'], 'graph_cascade_v8')
+        self.assertEqual(trace['pipeline'], 'graph_cascade_v9')
+        self.assertEqual(trace['versions']['search_policy'], 'graph_cascade_v9')
         self.assertEqual(trace['versions']['settings']['SEARCH_DEADLINE_SECONDS'], search.config.SEARCH_DEADLINE_SECONDS)
 
     async def test_no_keyexp_ablation_uses_current_planner_signature(self):

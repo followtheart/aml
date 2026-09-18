@@ -116,7 +116,8 @@ class QualityTests(unittest.IsolatedAsyncioTestCase):
         rows = [dict(id=f'noise{i}', content=f'common indoor topic {i}', _fused=1-i/100,
                      _coverage_ids=['option:0']) for i in range(90)]
         rows.append(dict(id='rare', content='Only option B matches the surfing evidence.',
-                         _fused=.001, _coverage_ids=['option:1']))
+                         _fused=.001, _coverage_ids=['option:1'],
+                         _supported_coverage_ids=['option:1']))
         plan = {'_coverage_requirements': [dict(id='option:0', text='indoor'),
                                            dict(id='option:1', text='surfing')]}
         self.assertEqual(sorted(rows, key=lambda c: c['_fused'], reverse=True)[-1]['id'], 'rare')

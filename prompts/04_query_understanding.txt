@@ -32,14 +32,13 @@ Analyze and return ONLY a JSON object:
   "entities": ["named entities and key concepts in the question"],
   "sub_queries": ["1-3 decomposed sub-questions for multi-hop retrieval;
                    for simple questions, repeat the original query"],
-  "expanded_queries": ["the original query plus one rewrite per option when
-                        options are present; otherwise just the original query"]
+  "expanded_queries": ["distinct, concise evidence queries naming the personal
+                        premises that distinguish the options; omit duplicates"]
 }}
 
 Rules:
 - Resolve all relative time expressions against the question reference time.
-- The reference time is the latest moment known in this user's memory when no
-  question date was supplied; never assume the service's wall-clock date.
+- Use the reference time supplied above; do not substitute a memory timestamp.
 - For temporal questions ("when", "before/after", "most recent"), always
   fill time_scope.
 - Use intent=profile for questions about who the user is (traits, background,
@@ -56,6 +55,8 @@ Rules:
   trait "borderline high cholesterol" -> "snack ideas for someone watching
   their cholesterol"). Never invent traits absent from the profile.
 - Never output an answer to the question itself.
+- Options are hypotheses to investigate, not known user traits. Extract their
+  discriminating concepts for retrieval without asserting them as facts.
 
 - Set include_history=true for questions about former states, past dates, or
   changes over time, even without an exact date. For current-state questions

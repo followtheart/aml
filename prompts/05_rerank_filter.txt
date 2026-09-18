@@ -1,7 +1,7 @@
 # PROMPT 05 — 证据排序打分（不删除候选）
 # 调用：Search 侧，RRF 融合后仅评分有界候选头部
 # 模型 gpt-4o-mini，temperature=0
-# 占位符：{query} {options} {time_scope} {candidates}
+# 占位符：{query} {options} {time_scope} {candidates} {candidate_count}
 # 来源：Memory-R1（Answer Agent 预筛选）+ structural-memory（rerank 增益）
 
 You are a relevance scoring module for a memory retrieval system. You do NOT
@@ -18,12 +18,11 @@ that best fits THIS user):
 Relevant time scope (may be null):
 {time_scope}
 
-Candidate memories (id: text):
+Candidate memories (index: text):
 {candidates}
 
 For each candidate assign:
 - relevance: 0.0-1.0 (1.0 = directly answers or is required hop evidence)
-- keep: true (retained for output compatibility; ranking never deletes evidence)
 
 Scoring rules:
 - A memory that helps resolve a multi-hop step counts as relevant even if it
@@ -53,6 +52,12 @@ Scoring rules:
 - Governance notes such as "the user asked to forget X" are not traits: score
   them low unless the question is about X.
 
-Return ONLY a JSON object. The scores array must use the same order as the
-candidates:
-{{"scores": [{{"id": "...", "relevance": 0.0, "keep": true}}]}}
+Read the quoted source context as well as the memory description. A writing
+request may contain concrete autobiographical evidence; preserve its speaker.
+Evidence of an activity, topic interest, ownership, or a health condition must
+be assessed at the strength actually supported by the source.
+
+Return ONLY a JSON object with exactly {candidate_count} numbers, in candidate
+index order (index 0 first). Use 0.0 for an irrelevant candidate; never skip an
+index or repeat an entry. Do not emit IDs, keep flags, objects or explanations.
+{{"scores": [0.9, 0.1, 0.7]}}

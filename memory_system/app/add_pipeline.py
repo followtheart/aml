@@ -86,6 +86,9 @@ def _validate_fact(raw, batch, start, req):
         raise ValueError('Invalid epistemic status')
     indices = integrity.verify_quotes(fact, batch)
     source_messages = [batch[j] for j in indices]
+    # An assistant recommendation is evidence of advice, not a user instruction.
+    if fact.get('type') == 'rule' and not any(m.role == 'user' for m in source_messages):
+        fact['type'] = 'fact'
     if any(m.source_kind in ('document', 'import', 'unknown') or m.role == 'assistant' for m in source_messages):
         fact['epistemic_status'] = 'inferred'
     elif all(m.source_kind == 'tool' or m.role == 'tool' for m in source_messages):
@@ -138,12 +141,16 @@ def _validate_fact(raw, batch, start, req):
 def _episode(req, indices, segment_index=0, episode=None, sensitivity="normal"):
     episode = episode or {}
     raw = _format_messages([req.messages[i] for i in indices])
-    return {"content": episode.get("narrative") or raw,
+    sensitivity = max([sensitivity] + [req.messages[i].sensitivity for i in indices],
+                      key=lambda s: {'normal': 0, 'sensitive': 1, 'suppressed': 2}[s])
+    # Index the conversation itself. A summary such as "asked for editing"
+    # cannot stand in for the facts or third-party attribution inside the draft.
+    return {"content": raw,
             "compressed_content": episode.get("compressed_chunk") or raw,
             "retrieval_key": "Conversation episode", "type": "episode",
             "_sources": list(indices), "_segment": segment_index,
             "entities": [], "keywords": [],
-            "event_time": None, "sensitivity": sensitivity}
+            "event_time": None, "sensitivity": sensitivity, 'epistemic_status': 'observed'}
 
 
 async def _segments(req: schemas.AddRequest) -> List[List[int]]:
@@ -176,6 +183,7 @@ async def _extract(st: store.Store, req: schemas.AddRequest) -> Dict:
 async def _extract_segment(req: schemas.AddRequest, summary: Optional[str],
                            seg_index: int, indices: List[int]) -> List[Dict]:
     facts: List[Dict] = []
+    sensitivity = 'normal'
     start = indices[0]
     batch = [req.messages[i] for i in indices]
     prior = req.messages[max(0, start - 4):start]
@@ -199,6 +207,10 @@ async def _extract_segment(req: schemas.AddRequest, summary: Optional[str],
         raw_facts = data.get("facts") or []
         if not isinstance(raw_facts, list):
             raise ValueError("Extraction facts must be an array")
+        # Privacy annotations remain conservative, independently of whether
+        # a proposed claim passes grounding. A rejected claim alone is not PII.
+        if any(isinstance(f, dict) and f.get('sensitivity') == 'sensitive' for f in raw_facts):
+            sensitivity = 'sensitive'
         for fact_index, raw in enumerate(raw_facts):
             try:
                 fact = _validate_fact(raw, batch, start, req)
@@ -248,17 +260,15 @@ async def _extract_segment(req: schemas.AddRequest, summary: Optional[str],
         # a single fully-extracted message would only duplicate its fact.
         # Without episodes only rejected sources fall back to a chunk.
         if config.STORE_EPISODES and (len(indices) > 1 or not grounded or rejected_sources):
-            sensitivity = ("sensitive" if rejected_sources or any(
-                fact.get("sensitivity") == "sensitive" for fact in grounded) else "normal")
             facts.append(_episode(req, indices, seg_index, data.get("episode"), sensitivity))
         elif rejected_sources:
             facts.append(_episode(req, sorted(rejected_sources), seg_index,
-                                  data.get("episode"), "sensitive"))
+                                  data.get("episode"), sensitivity))
     except Exception as e:
         log.warning(
             "extraction segment %d-%d failed (%s); storing that segment as "
             "an episode", start, indices[-1], e)
-        facts.append(_episode(req, indices, seg_index, sensitivity="sensitive"))
+        facts.append(_episode(req, indices, seg_index, sensitivity=sensitivity))
     return facts
 
 
@@ -340,6 +350,7 @@ async def _persist_fact(st: store.Store, req: schemas.AddRequest,
             retrieval_key=fact.get("retrieval_key", ""), type="episode",
             valid_from=_ref_time(req.messages), confidence=0.6, embedding=vec,
             evidence=fact.get("evidence", []),
+            epistemic_status=fact.get('epistemic_status', 'observed'),
             sensitivity=fact.get("sensitivity", "normal"))
     op, detail = await _govern_one(st, req.user_id, fact, vec)
     fact["_novelty"] = detail.get("novelty", 1.0)

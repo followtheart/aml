@@ -134,11 +134,10 @@ EMBEDDING_SPACE = os.environ.get(
 SENSITIVE_RECALL_ENABLED = os.environ.get("AML_SENSITIVE_RECALL_ENABLED", "0") == "1"
 GOVERNANCE_NEIGHBORS = 5
 RECALL_PER_ROUTE = 100
-RERANK_CANDIDATES = 40
-# ULM §5.4: score only a small head of the fused list; the rest keeps its
-# fusion order below the scored items instead of being penalised.
+# One compact positional scoring response. The pool expands to at least
+# top_k + 20 so reranking can select evidence, not only rearrange the packet.
 RERANK_MAX_CANDIDATES = max(
-    10, int(os.environ.get("AML_RERANK_MAX_CANDIDATES", "40")))
+    10, int(os.environ.get("AML_RERANK_MAX_CANDIDATES", "80")))
 
 # ---- ULM lifecycle knobs (llm-memory-survey/memory-system-design.md) ----
 # §3.2 semantic boundary segmentation (embedding drop between adjacent windows)

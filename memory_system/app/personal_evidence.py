@@ -1,4 +1,4 @@
-"""Source-aware personal evidence and pre-verification source excerpts."""
+"""Source-aware personal evidence and verbatim source excerpts."""
 import re
 
 _PERSONAL = re.compile(r"\b(?:the user|user's|i|my|we|our)\b", re.I)
@@ -9,6 +9,19 @@ _NAMED_PERSONAL = re.compile(
     r'(?:promised|asked|requested|owns|enjoys|prefers|plans|feels|felt|wants|'
     r'went|visited|attended|took|lives|lived|works|worked|adjusts|does|is|has|had)\b')
 _STOP = set('the a an and or to of in on for is are was were be been with from that this it you your user users how what why some can could would should have has do does about as at by when which me my they their'.split())
+_STOP.update('since given might consider try suggest help please like enjoy make more also really bit want things way ways'.split())
+_EDIT_REQUEST = re.compile(r'\b(refine|polish|rewrite|rephrase|improve|proofread|revision|wording)\b', re.I)
+
+
+def editorial_request(text):
+    """A short editing request is context, not the body being edited."""
+    return len(text) < 220 and '\n' not in text.strip() and bool(_EDIT_REQUEST.search(text))
+
+
+def source_score(source, query):
+    text = source.get('content') or ''
+    return (not editorial_request(text), len(terms(text) & terms(query)),
+            source.get('role') == 'user', min(len(text), 1600))
 _SELF_STATEMENT = re.compile(
     r"\b(?:I|we)(?:['’](?:m|ve|d|re)|\s+(?:am|have|had|was|were|live|lived|own|keep|"
     r"enjoy|love|prefer|promised|plan|feel|felt|want|went|visited|attended|took|work|teach|"
@@ -73,8 +86,18 @@ def excerpt(text, query, limit, quotes=()):
         sentences = list(re.finditer(r'[^\n.!?]+(?:[.!?]+|\n|$)', text))
         if not sentences:
             return text, 0, len(text)
-        best = max(sentences, key=lambda s: len(terms(s.group()) & needles))
+        best = max(sentences, key=lambda s: (not editorial_request(s.group()),
+                                            len(terms(s.group()) & needles)))
         start, end = best.start(), best.end()
+    # Use the available window for context, including names, qualifications and
+    # nearby concrete details. A single matched sentence often hides the subject.
+    # Expand enough to preserve local attribution, not to fill every per-source
+    # allowance: filling 800 characters for each hit crowds out other memories.
+    context_width = min(limit, 320)
+    spare = max(0, context_width - (end - start))
+    width = max(context_width, end - start)
+    start = max(0, min(start - spare // 2, len(text) - width))
+    end = max(end, min(len(text), start + width))
     # Expand to sentence boundaries, preserving negations and qualifications.
     left = max(text.rfind('\n', 0, start), text.rfind('. ', 0, start))
     start = left + (2 if text[left:left + 2] == '. ' else 1) if left >= 0 else 0
@@ -100,10 +123,9 @@ def compact_sources(candidate, sources, query, limit, max_messages):
                           and e.get('quote') and e['quote'] in s.get('content', '')]
     # Explicit support is mandatory, including disambiguating assistant turns.
     required = {key for key, quotes in by_source.items() if quotes}
-    needles = terms(query + ' ' + candidate['content'])
     extras = sorted((s for s in sources if s.get('content') and
                      (s.get('request_id'), s.get('message_index')) not in required),
-                    key=lambda s: (-len(terms(s['content']) & needles), s.get('role') != 'user'))
+                    key=lambda s: source_score(s, query), reverse=True)
     chosen = required | {(s.get('request_id'), s.get('message_index'))
                          for s in extras[:max(0, max_messages - len(required))]}
     for source in sources:
@@ -114,7 +136,7 @@ def compact_sources(candidate, sources, query, limit, max_messages):
             s['content_omitted'] = 'source_limit'
         elif text:
             quotes = by_source[key]
-            shown, start, end = excerpt(text, query + ' ' + candidate['content'], limit, quotes)
+            shown, start, end = excerpt(text, query, limit, quotes)
             s['content'] = shown
             s['content_span'] = {'start': start, 'end': end, 'original_length': len(text)}
             if start or end < len(text):

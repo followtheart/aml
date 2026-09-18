@@ -223,6 +223,10 @@ async def _recall(st: store.Store, req: schemas.SearchRequest,
     route("full_text", st.fts_search(req.user_id, req.query, limit,
                                     include_history=history,
                                     include_sensitive=sensitive, include_cold=bool(plan.get("_cold"))), req.query)
+    route('source_text', _merge_query_results([
+        st.source_search(req.user_id, q, limit, include_history=history,
+                         include_sensitive=sensitive, include_cold=bool(plan.get('_cold')))
+        for q in queries], limit), ' | '.join(queries))
     if plan.get("intent") == "multi_hop" or plan.get("_expand"):
         triples = st.triples_for_user(req.user_id, include_sensitive=sensitive)
         # Exclude closed memories before graph traversal on current-state searches.
@@ -230,8 +234,14 @@ async def _recall(st: store.Store, req: schemas.SearchRequest,
             valid = {a["id"] for a in st.get_amus_by_ids(
                 list({t["amu_id"] for t in triples}), include_sensitive=sensitive)}
             triples = [t for t in triples if t["amu_id"] in valid]
-        triples = graph.filter_triples(triples, req.query, plan.get("entities") or [])
-        ppr_ids = graph.ppr_recall(triples, plan.get("entities") or [], top_n=limit)
+        # Seed with actual retrieved nodes when a planner's abstract concepts
+        # do not match graph entity labels. No extra model or retrieval round.
+        seed_ids = list(dict.fromkeys(c['id'] for r in (routes[0], routes[2]) for c in r[:3]))
+        plan['_graph_seed_ids'] = seed_ids
+        triples = graph.filter_triples(triples, req.query, plan.get('entities') or [],
+                                       seed_amu_ids=seed_ids)
+        ppr_ids = graph.ppr_recall(triples, plan.get("entities") or [], top_n=limit,
+                                   seed_amu_ids=seed_ids)
         by_id = {a["id"]: a for a in st.get_amus_by_ids(
             ppr_ids, include_history=history, include_sensitive=sensitive)}
         route("graph", [by_id[i] for i in ppr_ids if i in by_id])
@@ -257,9 +267,17 @@ async def _recall(st: store.Store, req: schemas.SearchRequest,
     profile_types = ["rule"]
     if req.options or plan.get("intent") in ("preference", "rule", "profile"):
         profile_types += ["preference", "profile", "workflow"]
-    route("profile_rule", st.get_by_type(req.user_id, profile_types,
-                                         include_history=history,
-                                         include_sensitive=sensitive))
+    profiles = st.get_by_type(req.user_id, profile_types, include_history=history,
+                              include_sensitive=sensitive)
+    terms = personal_evidence.terms(' '.join(queries))
+    for c in profiles:
+        c['_score'] = len(personal_evidence.terms(c['content']) & terms)
+    # The route's order must be relevance, not SQLite insertion order. Legacy
+    # assistant advice remains available via normal recall, not a rule boost.
+    profiles = [c for c in profiles if not (
+        c.get('type') == 'rule' and c.get('epistemic_status') == 'inferred'
+        and not any(s.get('role') == 'user' for s in st.sources_for_amu(c['id'])))]
+    route('profile_rule', sorted(profiles, key=lambda c: (-c['_score'], c['id'])))
     if plan.get("intent") == "procedural":
         route("experience", st.get_by_type(
             req.user_id, ["strategy", "workflow", "skill", "playbook"],
@@ -278,96 +296,119 @@ def _options_text(req: schemas.SearchRequest) -> str:
     return "\n".join(req.options or []) or "(none)"
 
 
+def _coalesce_preferences(items, plan):
+    """Merge identical current claims, retaining all provenance for packing."""
+    groups, out = {}, []
+    for original in items:
+        item = dict(original)
+        if '_equivalent_ids' in item:
+            item['_equivalent_ids'] = list(item['_equivalent_ids'])
+        if item.get('type') != 'preference':
+            out.append(item)
+            continue
+        temporal = item.get('temporal') or {}
+        if not any(temporal.get(k) for k in ('raw', 'start', 'end')):
+            temporal = None
+        key = (item.get('user_id'), item['content'].strip().rstrip('.').casefold(),
+               json.dumps(temporal, sort_keys=True),
+               item.get('resolution_status') or 'accepted',
+               *(json.dumps(item.get(k), sort_keys=True) for k in
+                 ('valid_from', 'valid_to', 'state', 'sensitivity')))
+        if key not in groups:
+            groups[key] = item
+            out.append(item)
+            continue
+        representative = groups[key]
+        representative.setdefault('_equivalent_ids', []).extend(
+            [item['id']] + item.get('_equivalent_ids', []))
+        plan.setdefault('_deduplicated', []).append(
+            {'id': item['id'], 'retained_id': representative['id'], 'reason': 'same_preference'})
+    return out
+
+
+def _candidate_sources(st, req, plan, candidate):
+    ids = [candidate['id']] + candidate.get('_equivalent_ids', [])
+    key = tuple(ids)
+    cache = plan.setdefault('_source_cache', {})
+    if key not in cache:
+        full = st.get_amus_by_ids(ids, include_history=True,
+                                  include_sensitive=bool(config.SENSITIVE_RECALL_ENABLED and req.include_sensitive))
+        full.sort(key=lambda m: ids.index(m['id']))
+        sources = (st.sources_for_session(req.user_id, candidate['session_id'])
+                   if candidate.get('type') == 'session_summary' else
+                   [s for mid in ids for s in st.sources_for_amu(mid)])
+        sources = list({(s['request_id'], s['message_index']): dict(s) for s in sources}.values())
+        cache[key] = (full, sources)
+    return cache[key]
+
+
+def _prepare_candidates(st, req, plan, fused):
+    candidates = _coalesce_preferences(fused, plan)
+    query = req.query + ' ' + _options_text(req)
+    for c in candidates:
+        full, sources = _candidate_sources(st, req, plan, c)
+        grounded = dict(full[0] if full else c)
+        grounded['evidence'] = [e for m in full for e in m.get('evidence') or []]
+        snippets = personal_evidence.compact_sources(grounded, sources, query, 320, 2)
+        # Rank original excerpts as well as facts. Meta summaries such as
+        # "asked to refine a note" must not hide the note from the ranker.
+        body = ('Conversation excerpts; verify speaker attribution.'
+                if c.get('type') == 'episode' and sources else c['content'][:500])
+        c['_rank_text'] = answer_context.with_evidence(body, snippets)
+    return candidates
+
+
 async def _filter_rerank(req: schemas.SearchRequest, plan: Dict,
                          fused: List[Dict], scored: Optional[Dict] = None) -> List[Dict]:
-    """§5.4 small-R rerank: LLM-score only the fused head; unscored candidates
-    keep their fusion order below the kept items instead of being penalised."""
-    scored = scored if scored is not None else {}
-    head_limit = config.RERANK_MAX_CANDIDATES
-    head = list(fused[:head_limit])
-    tail = list(fused[head_limit:])
-    candidates = [c for c in head if c["id"] not in scored]
-    decisions = plan.setdefault("_rerank", [])
-    round_index = plan.get("_round", 1)
-    batch_size = max(1, config.RERANK_CANDIDATES)
-
-    async def score_batch(start):
-        cands = candidates[start:start + batch_size]
-        cand_text = "\n".join(
-            f"{c['id']}: {_time_prefix(c)}[type: {c.get('type', 'fact')}] {_one_line(c['content'])}"
-            for c in cands)
-        ts = plan.get("time_scope") or {}
-        prompt = prompts.render("05_rerank_filter.txt", query=req.query,
-                                options=_options_text(req),
-                                time_scope=json.dumps(ts, ensure_ascii=False), candidates=cand_text)
-        try:
-            result = await llm.complete_json(
-                prompt, '{"scores":[{"id":"...","relevance":0.0,"keep":true}]}',
-                schema=llm.STRUCTURED_SCHEMAS["rerank"],
-                stage=f"search.rerank.batch_{start // batch_size + 1}")
-            by_id = {}
-            for entry in result.get("scores", []):
-                if not isinstance(entry, dict):
-                    continue
-                value = entry.get("relevance")
-                if (type(value) not in (int, float) or not math.isfinite(value)
-                        or not 0 <= value <= 1 or type(entry.get("keep")) is not bool):
-                    raise ValueError("Reranker returned an invalid score")
-                if entry.get('id') in by_id:
-                    raise ValueError('Reranker returned a duplicate id')
-                by_id[entry.get("id")] = entry
-            if set(by_id) != {candidate["id"] for candidate in cands}:
-                raise ValueError("Reranker did not score every candidate exactly once")
-            return start, cands, by_id, None
-        except Exception as exc:
-            plan.setdefault('_rerank_errors', []).append({
-                'round': round_index, 'batch': start // batch_size + 1,
-                'error': type(exc).__name__,
-                'detail': str(exc) if isinstance(exc, ValueError) else 'provider call failed'})
-            log.warning("rerank batch failed (%s); keep fused order", exc)
-            return start, cands, {}, type(exc).__name__
-
-    batches = await asyncio.gather(*(
-        score_batch(start) for start in range(0, len(candidates), batch_size)))
-    error = next((err for _, _, _, err in batches if err), None)
-    if error:
-        # Never mix 0..1 relevance with RRF scores. A partial failure falls
-        # back as one coherent ranking so high-fusion evidence is not buried.
-        for rank, candidate in enumerate(fused):
-            candidate["_final"] = 1.0 / (rank + 1)
-            decisions.append({"id": candidate["id"], "round": round_index,
-                              "content": candidate["content"],
-                              "keep": True, "score": candidate["_final"],
-                              "reason": "global_rrf_fallback", "error": error})
+    """One positional scoring call over a pool larger than the output capacity."""
+    head_limit = max(config.RERANK_MAX_CANDIDATES, req.top_k + 20)
+    head, tail = list(fused[:head_limit]), list(fused[head_limit:])
+    decisions = plan.setdefault('_rerank', [])
+    plan['_rerank_pool_size'] = len(head)
+    if not head:
+        return []
+    cand_text = '\n'.join(
+        f"{i}: {_time_prefix(c)}[type: {c.get('type', 'fact')}] {_one_line(c.get('_rank_text', c['content']))}"
+        for i, c in enumerate(head))
+    prompt = prompts.render('05_rerank_filter.txt', query=req.query,
+                            options=_options_text(req),
+                            time_scope=json.dumps(plan.get('time_scope') or {}, ensure_ascii=False),
+                            candidates=cand_text, candidate_count=len(head))
+    values = None
+    try:
+        result = await llm.complete_json(
+            prompt, '{"scores":[0.0]}', schema=llm.STRUCTURED_SCHEMAS['rerank'],
+            stage='search.rerank.batch_1')
+        values = result.get('scores')
+        if not isinstance(values, list) or len(values) != len(head):
+            raise ValueError('Reranker score count does not match candidate count')
+        if any(type(v) not in (int, float) or not math.isfinite(v) or not 0 <= v <= 1 for v in values):
+            raise ValueError('Reranker returned an invalid score')
+    except Exception as exc:
+        plan.setdefault('_rerank_errors', []).append({
+            'round': 1, 'batch': 1, 'error': type(exc).__name__,
+            'expected_count': len(head),
+            'received_count': len(values) if isinstance(values, list) else None,
+            'detail': str(exc) if isinstance(exc, ValueError) else 'provider call failed'})
+        log.warning('rerank failed (%s); keep fused order', exc)
+        # Never combine partially returned relevance values with RRF scores.
+        for rank, c in enumerate(fused):
+            c['_final'] = 1.0 / (rank + 1)
+            decisions.append(dict(id=c['id'], round=1, content=c['content'], keep=True,
+                                  score=c['_final'], reason='global_rrf_fallback', error=type(exc).__name__))
         return list(fused)
-
-    newly = {c["id"] for c in candidates}
-    for start, cands, by_id, _ in batches:
-        for c in cands:
-            scored[c["id"]] = (float(by_id[c["id"]]["relevance"]),
-                               bool(by_id[c["id"]]["keep"]))
-    # Relevance changes order only. A model's low score/keep=false must not
-    # irreversibly erase evidence before the answer model sees the packet.
-    kept, unscored = [], []
-    for c in head:
-        relevance, keep_flag = scored[c["id"]]
-        c["_final"] = relevance
-        if c["id"] in newly:
-            decisions.append({"id": c["id"], "round": round_index,
-                              "content": c["content"], "keep": True,
-                              "model_keep": keep_flag, "score": relevance,
-                              "reason": "kept", "error": None})
-        kept.append(c)
+    for c, value in zip(head, values):
+        c['_final'] = float(value)
+        decisions.append(dict(id=c['id'], round=1, content=c['content'], keep=True,
+                              score=c['_final'], reason='kept', error=None))
     document = plan.get('intent') in ('narrative', 'document')
-    kept.sort(key=lambda x: (-x["_final"],
-                            (x.get('type') in ('episode', 'session_summary')) != document))
+    head.sort(key=lambda c: (-c['_final'],
+                            (c.get('type') in ('episode', 'session_summary')) != document))
     for c in tail:
-        c.pop("_final", None)
-        decisions.append({"id": c["id"], "round": round_index, "content": c["content"],
-                          "keep": True, "score": c.get("_fused"),
-                          "reason": "unscored_fused", "error": None})
-        unscored.append(c)
-    return kept + unscored
+        c.pop('_final', None)
+        decisions.append(dict(id=c['id'], round=1, content=c['content'], keep=True,
+                              score=c.get('_fused'), reason='unscored_fused', error=None))
+    return head + tail
 
 
 def _foresight_status(item: Dict, anchor: str) -> Optional[str]:
@@ -434,22 +475,25 @@ def _memory_prefix(c: Dict, full: Optional[Dict], anchor: str) -> str:
 def _pack_evidence(st, req, plan, ranked, anchor):
     # Rules are already recalled through profile_rule. Avoid a second injection
     # path that bypasses ranking and can add assistant advice as user rules.
-    candidates = sorted(_foresight_filter(ranked, plan), key=lambda c: not profile.is_forget_rule(c))
+    candidates = sorted(_coalesce_preferences(_foresight_filter(ranked, plan), plan),
+                        key=lambda c: not profile.is_forget_rule(c))
     document = plan.get('intent') in ('document', 'narrative')
     items = []
     for candidate in candidates:
         if candidate.get('view_status') == 'stale':
             continue
-        is_summary = candidate.get('type') == 'session_summary'
-        sources = (st.sources_for_session(req.user_id, candidate['session_id']) if is_summary
-                   else st.sources_for_amu(candidate['id']))
-        sources = [dict(source) for source in sources]
-        full = st.get_amus_by_ids([candidate['id']], include_history=True,
-                                 include_sensitive=bool(config.SENSITIVE_RECALL_ENABLED and req.include_sensitive))
+        full, raw_sources = _candidate_sources(st, req, plan, candidate)
+        sources = [dict(source) for source in raw_sources]
         grounded = dict(full[0] if full else candidate)
-        body = _memory_prefix(candidate, grounded, anchor) + candidate['content']
-        support_queue = list(st.dependencies_for(candidate['id']))
-        support_evidence = []
+        if any(m.get('epistemic_status') == 'inferred' for m in full):
+            grounded['epistemic_status'] = 'inferred'
+        body = ('[conversation excerpts; quoted context, verify speaker attribution]'
+                if candidate.get('type') == 'episode' and sources
+                else candidate['content'])
+        body = _memory_prefix(candidate, grounded, anchor) + body
+        support_queue = [d for mid in [candidate['id']] + candidate.get('_equivalent_ids', [])
+                         for d in st.dependencies_for(mid)]
+        support_evidence = [e for m in full for e in m.get('evidence') or []]
         visited = {candidate['id']}
         support_missing = False
         while support_queue:
@@ -473,12 +517,14 @@ def _pack_evidence(st, req, plan, ranked, anchor):
         is_personal = personal_evidence.personal(candidate, sources)
         if not document:
             # Fetch validated support quotes omitted from lightweight recall rows.
-            grounded['evidence'] = list(grounded.get('evidence') or []) + support_evidence
+            grounded['evidence'] = support_evidence
             sources = personal_evidence.compact_sources(
                 grounded, sources, req.query + ' ' + _options_text(req),
                 config.SEARCH_SOURCE_EXCERPT_CHARS, config.SEARCH_SOURCE_MESSAGES_PER_ITEM)
         body = answer_context.with_evidence(body, sources)
         items.append(dict(id=candidate['id'], content=body,
+                          is_constraint=profile.is_forget_rule(grounded),
+                          equivalent_ids=candidate.get('_equivalent_ids', []),
                           personal_evidence=is_personal,
                           memory_type=candidate.get('type', 'fact'), sources=sources,
                           source_count=len(sources), temporal=candidate.get('temporal'),
@@ -509,9 +555,10 @@ async def _run_search(st: store.Store,
         routes = [[item for item in route if _profile_not_expired(item, anchor, history)]
                   for route in routes]
         fused = _fold_versions(_rrf(routes), plan)
-        ranked = await _filter_rerank(req, plan, fused)
+        candidates = _prepare_candidates(st, req, plan, fused)
+        ranked = await _filter_rerank(req, plan, candidates)
         packed, packet_hash, manifest = _pack_evidence(st, req, plan, ranked, anchor)
-        trace["pipeline"] = "single_pass_v1"
+        trace["pipeline"] = "single_pass_v2"
         trace["fused"] = _snapshot(fused)
         trace["rounds"] = [{"round": 1, "queries": plan.get("_used_queries", []),
                             "fused": len(fused), "ranked": len(ranked),
@@ -554,6 +601,9 @@ async def _run_search(st: store.Store,
         trace["rerank"] = plan.get("_rerank", [])
         trace['view_excluded'] = plan.get('_view_excluded', [])
         trace['rerank_errors'] = plan.get('_rerank_errors', [])
+        trace['deduplicated'] = plan.get('_deduplicated', [])
+        trace['rerank_pool_size'] = plan.get('_rerank_pool_size', 0)
+        trace['graph_seed_ids'] = plan.get('_graph_seed_ids', [])
         trace["finished_at"] = datetime.now(timezone.utc).isoformat()
         if st.user_state(req.user_id)["epoch"] == epoch:
             search_debug.append(trace)

@@ -165,9 +165,12 @@ only, so this route is disabled unless `AML_SUMMARY_ROUTE=1`.
 Each Add is cut into topic segments by embedding-similarity drops
 (`AML_SEGMENT_SIM_DROP`, `AML_SEGMENT_MIN_MESSAGES`, capped by
 `AML_EXTRACT_BATCH_MESSAGES`). A segment yields one MemCell: an `episode` AMU
-holding an extracted third-person narrative and compressed view (unless
+holding the original conversation with message roles and an optional compressed view (unless
 `AML_STORE_EPISODES=0`) plus its atomic facts and triples, all sharing a `cell_id`.
-Raw messages remain in source references. Episodes bypass governance.
+Raw messages also remain in source references. Episodes bypass governance.
+Their observed status describes the conversation, not the truth or ownership of
+every quoted statement. A grounding failure does not itself mark the raw episode
+sensitive; explicit model/source privacy annotations still apply.
 
 Governance is preceded by a novelty gate: a neighbour with cosine ≥
 `AML_NOVELTY_DUP_THRESHOLD` and identical normalised text is a NOOP without an LLM
@@ -199,7 +202,7 @@ memories alongside hot ones, without a verifier-driven fallback. A cold
 memory that is recalled returns to `hot`, as does its Scene. Nothing is deleted
 except through the explicit compliance purge endpoint.
 
-Search uses `single_pass_v1`: plan once, recall once across dense/sparse,
+Search uses `single_pass_v2`: plan once, recall once across dense/sparse/source text,
 graph/scene/profile and applicable temporal routes, rank once, and pack once.
 Up to six embedding queries prioritize the question and supplied options before
 generic rewrites. Options are retrieval hypotheses, never source evidence.
@@ -211,18 +214,30 @@ sufficiency was verified; `verification_status=not_run`. Empty packets report
 prefixed with `[plan; status: pending|expired]` relative to the anchor time and
 are dropped when a query time scope does not intersect their window.
 
-Candidates are LLM-scored only for the fused head (`AML_RERANK_MAX_CANDIDATES`,
-default 40, one batch of `RERANK_CANDIDATES`). Scored items are ordered by relevance;
-the unscored tail follows in fusion order (`unscored_fused`) so `top_k=100` stays
-full without penalising unscored evidence.
-Scores and model keep flags affect no eligibility decision: low scores change
-ordering only. If any batch fails or omits a candidate, ranking falls back to one coherent
-RRF ordering; relevance and RRF scales are never mixed.
+One LLM call scores the fused head after identical preferences are coalesced.
+The head size is `min(candidate_count, max(AML_RERANK_MAX_CANDIDATES, top_k + 20))`;
+the configured default is 80. Even an older setting of 40 leaves selection room
+above `top_k=50`. Rerank inputs include source excerpts. Output is a positional
+array of finite scores in [0,1], with exactly one score per input; no ID copying
+or model keep flags. Scored items are ordered by relevance and the unscored tail
+follows in fusion order (`unscored_fused`). Low scores change ordering only.
+Any invalid or incomplete array falls back to one coherent RRF ordering;
+relevance and RRF scales are never mixed. Provider retries remain separately bounded.
+
+`source_fts` indexes immutable source messages and is backfilled on opening old
+databases. Recall joins through `amu_sources` to enforce user ownership, valid
+versions, view readiness, retractions, sensitivity and cold-tier policy. Snapshot
+reads use the projected source links. Purge removes the source index too.
+This migration never clears old sensitive labels or rewrites old episodes.
+Graph traversal can seed from retrieved AMUs when planner concepts do not match
+entity labels; filtering retains those seeds and their immediate neighbors.
+The profile route sorts by query overlap rather than insertion order and does
+not boost assistant-only inferred advice as user rules.
 
 Search items add `memory_type` and structured `sources`. Source spans are
 deduplicated across results; omitted bodies retain request/message references
 and an omission reason. Validated support quotes are retained when choosing
-excerpts. Whole items then compete for `top_k` and the packet's UTF-8 byte budget,
+excerpts. Whole ordinary evidence items compete for `top_k` and the packet's UTF-8 byte budget,
 without clipping their supporting quotes. The response reports `source_count`;
 full sources remain in SQLite and debug logs. Summary sources cover the same
 user's session. Older memories without source records return an empty list.
@@ -230,7 +245,16 @@ user's session. Older memories without source records return an empty list.
 Atomic facts and episodes both remain eligible. Narrative/document intents prefer
 episodes on score ties and preserve full source bodies. Other intents select
 relevant excerpts, including assistant-authored drafts when relevant, with explicit
-source roles. Forget rules are packed before other candidates; core profiles do
+source roles. Short editorial requests rank below draft bodies when choosing
+sources. Long-source excerpts retain a local context window and complete required
+quotes, without padding every excerpt to its maximum allowance.
+Forget rules are packed before other candidates and consume the shared byte
+budget, but not ordinary evidence slots. The response can exceed `top_k` by the
+number of included constraints; `coverage_manifest` reports `evidence_count`,
+`constraint_count` and `constraint_bytes`. Identical preferences with compatible
+validity/privacy/status metadata share one item, retaining their source union
+and `equivalent_ids`. Hash v3 covers those IDs and `is_constraint` as well as v2's
+signed fields; v1/v2 remain readable. Core profiles do
 not bypass ranking through a second injection path. Sensitive AMUs are absent from every route unless
 both `AML_SENSITIVE_RECALL_ENABLED=1` and request `include_sensitive=true`.
 
@@ -246,8 +270,10 @@ JSONL event to that path. Each event includes:
 - `routes`: named channels, query variants and candidates with full text, rank
   and channel scores when available (including empty routes).
 - `fused`: deduplicated candidates with RRF scores and fusion ranks.
-- `rerank`: per-candidate score, retained keep flag, optional model_keep diagnostic,
+- `rerank`: per-candidate score, retained keep flag,
   and decision reason: `global_rrf_fallback`, `unscored_fused`, or `kept`.
+- `rerank_pool_size`, `rerank_errors` (including expected/received score counts),
+  `deduplicated` (removed/retained IDs) and `graph_seed_ids`.
 - `rounds`: one query set, fused/ranked counts and `verification_status=not_run`;
   `abstained` marks an empty packet, not a model sufficiency decision.
 - `scenes`: the top MemScenes chosen for the scene->cell route;

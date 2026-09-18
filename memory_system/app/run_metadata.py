@@ -13,8 +13,8 @@ def versions():
     hashes = {str(p.relative_to(app.parents[1])).replace('\\', '/'):
               hashlib.sha256(p.read_bytes()).hexdigest() for p in files}
     fingerprint = hashlib.sha256(repr(sorted(hashes.items())).encode()).hexdigest()
-    return {'pipeline_version': fingerprint, 'search_policy': 'single_pass_v1',
-            'answer_policy': 'direct_evidence_v1', 'file_hashes': hashes,
+    return {'pipeline_version': fingerprint, 'search_policy': 'single_pass_v2',
+            'answer_policy': 'direct_evidence_v2', 'file_hashes': hashes,
             'model': config.LLM_MODEL, 'embedding_model': config.EMBED_MODEL,
             'settings': {key: getattr(config, key) for key in (
                 'CORE_PROFILE_MAX_ITEMS', 'QUERY_PROFILE_DIGEST',

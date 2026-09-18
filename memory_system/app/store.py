@@ -165,6 +165,9 @@ CREATE VIRTUAL TABLE IF NOT EXISTS amu_fts USING fts5(
 CREATE VIRTUAL TABLE IF NOT EXISTS sessions_fts USING fts5(
  user_id UNINDEXED, session_id UNINDEXED, summary
 );
+CREATE VIRTUAL TABLE IF NOT EXISTS source_fts USING fts5(
+ request_id UNINDEXED, message_index UNINDEXED, user_id UNINDEXED, content
+);
 INSERT INTO sessions_fts(user_id,session_id,summary)
  SELECT s.user_id,s.session_id,s.summary FROM sessions s
  WHERE NOT EXISTS (SELECT 1 FROM sessions_fts f
@@ -220,6 +223,12 @@ class Store(ProvenanceStore):
             self.conn.executescript(FTS_SCHEMA)
             self.conn.executescript(SOURCE_SCHEMA)
             self._init_provenance()
+            # Source text is immutable. Backfill older databases without changing
+            # their claims, privacy labels, vectors or recorded revisions.
+            self.conn.execute("""INSERT INTO source_fts(request_id,message_index,user_id,content)
+                SELECT s.request_id,s.message_index,s.user_id,s.content FROM source_messages s
+                WHERE NOT EXISTS (SELECT 1 FROM source_fts f
+                  WHERE f.request_id=s.request_id AND f.message_index=s.message_index)""")
             triple_columns = {r["name"] for r in self.conn.execute("PRAGMA table_info(triples)")}
             for column in ("valid_from", "valid_to"):
                 if column not in triple_columns:
@@ -259,6 +268,7 @@ class Store(ProvenanceStore):
         copy("sessions", "user_id=?", (user_id,))
         copy("requests", "user_id=?", (user_id,))
         copy("source_messages", "user_id=?", (user_id,))
+        copy("source_fts", "user_id=?", (user_id,))
         copy("claim_versions", "user_id=?", (user_id,))
         copy("view_dependencies", "user_id=?", (user_id,))
         copy("feedback_events", "user_id=?", (user_id,))
@@ -343,6 +353,8 @@ class Store(ProvenanceStore):
                          message.role, message.content, message.timestamp, identity, event,
                          message.speaker_id or message.role, message.source_kind,
                          json.dumps(message.trust_scope), _now(), message.sensitivity))
+            self._write('INSERT INTO source_fts(request_id,message_index,user_id,content) VALUES (?,?,?,?)',
+                        (req.request_id, i, req.user_id, message.content))
         self._touch_user(req.user_id)
         self.conn.commit()
 
@@ -463,7 +475,7 @@ class Store(ProvenanceStore):
                 self.conn.execute(
                     "DELETE FROM amu_sources WHERE amu_id IN "
                     "(SELECT id FROM amu WHERE user_id=?)", (user_id,))
-                for table in ("amu_fts", "sessions_fts", "triples", "scenes", "amu",
+                for table in ("amu_fts", "sessions_fts", "source_fts", "triples", "scenes", "amu",
                               "sessions", "requests", "source_messages", "claim_versions", "view_dependencies", "feedback_events"):
                     self.conn.execute(f"DELETE FROM {table} WHERE user_id=?", (user_id,))
                 self.conn.execute(
@@ -744,6 +756,51 @@ class Store(ProvenanceStore):
         for item in out:
             item["_score"] = 1.0
         return out
+
+    def source_search(self, user_id, query, k, include_history=False,
+                      include_sensitive=False, include_cold=False):
+        """Recall eligible claims by their original, linked source text.
+
+        Joining through amu_sources is essential: historical reads, retractions,
+        privacy and user isolation apply even when a source remains indexed.
+        """
+        from .personal_evidence import terms
+        import re
+        tokens = sorted(terms(query))
+        cjk = ''.join(re.findall(r'[\u3400-\u9fff]', query))
+        if not tokens and len(cjk) < 2:
+            return []
+        if len(cjk) >= 2:
+            grams = list(dict.fromkeys(cjk[i:i + 2] for i in range(len(cjk) - 1)))[:20]
+            match_sql = '(' + ' OR '.join('source_fts.content LIKE ?' for _ in grams) + ')'
+            match_args = [f'%{g}%' for g in grams]
+            rank_sql = '0.0'
+        else:
+            match_sql = 'source_fts MATCH ?'
+            match_args = [' OR '.join('"' + t.replace('"', '""') + '"' for t in tokens[:40])]
+            rank_sql = 'bm25(source_fts)'
+        with _LOCK:
+            rows = self.conn.execute(f"""SELECT a.id, {rank_sql} AS rank
+                FROM source_fts
+                JOIN source_messages s ON s.request_id=source_fts.request_id
+                  AND s.message_index=source_fts.message_index
+                JOIN amu_sources l ON l.request_id=s.request_id AND l.message_index=s.message_index
+                JOIN amu a ON a.id=l.amu_id
+                WHERE {match_sql} AND source_fts.user_id=? AND a.user_id=?
+                  AND s.user_id=? AND (? OR a.valid_to IS NULL)
+                  AND (? OR (a.sensitivity!='sensitive' AND s.sensitivity!='sensitive'))
+                  AND a.sensitivity!='suppressed' AND s.sensitivity!='suppressed'
+                  AND a.view_status='ready' AND a.resolution_status!='retracted'
+                  AND (? OR a.tier!='cold')
+                ORDER BY rank, a.id LIMIT ?""",
+                (*match_args, user_id, user_id, user_id, include_history, include_sensitive,
+                 include_cold, k * 10)).fetchall()
+        scores = {}
+        for row in rows:
+            scores.setdefault(row['id'], -float(row['rank']))
+        ids = list(scores)[:k]
+        found = {m['id']: m for m in self.get_amus_by_ids(ids, include_history, include_sensitive)}
+        return [dict(found[mid], _score=scores[mid]) for mid in ids if mid in found]
 
     def get_by_entities(self, user_id, entities, k):
         wanted = {graph.normalize_entity(e) for e in entities

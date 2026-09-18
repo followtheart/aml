@@ -19,8 +19,8 @@ from app.embeddings import embed
 async def score_all(prompt, *args, **kwargs):
     if 'sufficiency verifier' in prompt:
         return {'sufficient': True, 'confidence': .9, 'missing': '', 'follow_up_queries': []}
-    ids = re.findall(r'^(amu_[^:]+|summary_[^:]+):', prompt, re.M)
-    return {'scores': [{'id': aid, 'relevance': 0.9, 'keep': True} for aid in ids]}
+    indices = re.findall(r'^\d+:', prompt, re.M)
+    return {'scores': [0.9 for _ in indices]}
 
 
 class SearchTests(unittest.IsolatedAsyncioTestCase):
@@ -98,7 +98,7 @@ class SearchTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.st.summary_search('another', 'Bob', 10), [])
 
     async def test_top_100_with_small_r_rerank_head(self):
-        for i in range(105):
+        for i in range(145):
             await self.memory(f'Alice work record {i}')
         result = await self.run_search(self.req(top_k=100))
         self.assertEqual(len(result.data), 100)
@@ -106,27 +106,27 @@ class SearchTests(unittest.IsolatedAsyncioTestCase):
         scored = [x for x in trace['rerank'] if x['reason'] in ('kept', 'rerank_rejected')]
         unscored = [x for x in trace['rerank'] if x['reason'] == 'unscored_fused']
         # §5.4: only the fused head is LLM-scored; the rest keeps fusion order below it.
-        self.assertEqual(len(scored), config.RERANK_MAX_CANDIDATES)
+        self.assertEqual(len(scored), max(config.RERANK_MAX_CANDIDATES, 120))
         self.assertGreater(len(unscored), 0)
         self.assertEqual(len(trace['returned']), 100)
         returned_ids = [x['id'] for x in trace['returned']]
-        self.assertEqual(returned_ids[:len(scored)], [x['id'] for x in scored])
+        self.assertEqual(returned_ids, [x['id'] for x in scored[:100]])
         self.assertEqual(trace['rounds'][0]['verification_status'], 'not_run')
 
     async def test_low_rerank_score_only_changes_order_and_topk_is_logged(self):
         ids = [await self.memory(f'Alice work {i}') for i in range(3)]
         async def reject_one(prompt, *args, **kwargs):
             result = await score_all(prompt)
-            for entry in result['scores']:
-                if entry['id'] == ids[0]:
-                    entry.update(keep=False, relevance=0.1)
+            for index, content in re.findall(r'^(\d+): (.*)$', prompt, re.M):
+                if 'Alice work 0' in content:
+                    result['scores'][int(index)] = 0.1
             return result
         with patch.object(search, '_understand', AsyncMock(return_value={'intent': 'fact'})), \
              patch.object(search.llm, 'complete_json', side_effect=reject_one):
             response = await search.run_search(self.st, self.req(top_k=1))
         self.assertEqual(len(response.data), 1)
         trace = json.loads(self.path.read_text())
-        demoted = [d for d in trace['rerank'] if not d['model_keep']]
+        demoted = [d for d in trace['rerank'] if d['score'] == 0.1]
         self.assertEqual(demoted[0]['id'], ids[0])
         self.assertTrue(demoted[0]['keep'])
         self.assertNotEqual(response.data[0].id, ids[0])
@@ -145,9 +145,7 @@ class SearchTests(unittest.IsolatedAsyncioTestCase):
     async def test_low_score_does_not_erase_the_only_evidence(self):
         await self.memory('weak candidate')
         async def weak(prompt, *args, **kwargs):
-            ids = re.findall(r'^(amu_[^:]+):', prompt, re.M)
-            return {'scores': [{'id': aid, 'relevance': 0.2, 'keep': True}
-                               for aid in ids]}
+            return {'scores': [0.2 for _ in re.findall(r'^\d+:', prompt, re.M)]}
         with patch.object(search, '_understand', AsyncMock(return_value={
                 'intent': 'fact'})), patch.object(
                 search.llm, 'complete_json', side_effect=weak):
@@ -158,8 +156,7 @@ class SearchTests(unittest.IsolatedAsyncioTestCase):
     async def test_incomplete_batch_falls_back_entire_ranking(self):
         ids = [await self.memory(f'Alice work {i}') for i in range(2)]
         async def incomplete(prompt, *args, **kwargs):
-            found = re.findall(r'^(amu_[^:]+):', prompt, re.M)
-            return {'scores': [{'id': found[0], 'relevance': 0.1, 'keep': True}]}
+            return {'scores': [0.1]}
         with patch.object(search, '_understand', AsyncMock(return_value={
                 'intent': 'fact'})), patch.object(
                 search.llm, 'complete_json', side_effect=incomplete):

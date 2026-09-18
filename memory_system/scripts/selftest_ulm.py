@@ -31,8 +31,8 @@ def request(rid, *texts, session='s'):
 async def score_all(prompt, *args, **kwargs):
     if 'sufficiency verifier' in prompt:
         return {'sufficient': True, 'confidence': .9, 'missing': '', 'follow_up_queries': []}
-    ids = re.findall(r'^(amu_[^:]+):', prompt, re.M)
-    return {'scores': [{'id': aid, 'relevance': 0.9, 'keep': True} for aid in ids]}
+    ids = re.findall(r'^\d+:', prompt, re.M)
+    return {'scores': [0.9 for _ in ids]}
 
 
 class SegmentationTests(unittest.IsolatedAsyncioTestCase):

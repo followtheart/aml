@@ -36,9 +36,9 @@ class SinglePassTests(unittest.IsolatedAsyncioTestCase):
 
     async def rank(self, prompt, *args, **kwargs):
         self.assertEqual(kwargs.get('stage'), 'search.rerank.batch_1')
-        ids = re.findall(r'^(amu_[^:]+):', prompt, re.M)
+        ids = re.findall(r'^\d+:', prompt, re.M)
         # Deliberately unhelpful ranking must not become another deletion gate.
-        return {'scores': [{'id': aid, 'relevance': 0.1, 'keep': False} for aid in ids]}
+        return {'scores': [0.1 for _ in ids]}
 
     async def search(self, query='morning routine', **kwargs):
         with patch.object(search, '_understand', AsyncMock(return_value={
@@ -89,9 +89,11 @@ class SinglePassTests(unittest.IsolatedAsyncioTestCase):
         rows = [by_id[fact], by_id[rule]]
         packet, _, manifest = search._pack_evidence(self.st, schemas.SearchRequest(
             user_id='u', query='event ideas', top_k=1), {}, rows, '2026-09-17T00:00:00Z')
-        self.assertEqual([x['id'] for x in packet], [rule])
+        self.assertEqual([x['id'] for x in packet], [rule, fact])
         self.assertIn('do NOT use or recommend', packet[0]['content'])
-        self.assertEqual(manifest['omitted'][0]['id'], fact)
+        self.assertEqual(manifest['constraint_count'], 1)
+        self.assertEqual(manifest['evidence_count'], 1)
+        self.assertEqual(manifest['omitted'], [])
 
     async def test_core_does_not_reinject_unranked_assistant_advice(self):
         noise = await self.memory('The assistant suggested playing fetch with a dog.',
@@ -144,7 +146,7 @@ class SinglePassTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(stages, ['search.understand', 'search.rerank.batch_1', 'eval.answer'])
         self.assertEqual(score, 1.0)
         self.assertEqual(len(trace['rounds']), 1)
-        self.assertEqual(trace['pipeline'], 'single_pass_v1')
+        self.assertEqual(trace['pipeline'], 'single_pass_v2')
         self.assertEqual(trace['versions']['settings']['SEARCH_DEADLINE_SECONDS'], search.config.SEARCH_DEADLINE_SECONDS)
 
     async def test_no_keyexp_ablation_uses_current_planner_signature(self):

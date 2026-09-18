@@ -57,15 +57,7 @@ STRUCTURED_SCHEMAS: Dict[str, dict] = {
         "properties": {
             "scores": {
                 "type": "array",
-                "items": {
-                    "type": "object",
-                    "properties": {
-                        "id": {"type": "string"},
-                        "relevance": {"type": "number"},
-                        "keep": {"type": "boolean"},
-                    },
-                    "required": ["id", "relevance", "keep"],
-                },
+                "items": {"type": "number", "minimum": 0.0, "maximum": 1.0},
             },
         },
         "required": ["scores"],
@@ -449,7 +441,7 @@ class FakeLLM:
             qwords = {"".join(ch for ch in w if ch.isalnum())
                       for w in q.lower().split()}
             qwords.discard("")
-            cand = prompt.split("Candidate memories (id: text):", 1)[1]
+            cand = prompt.split("Candidate memories (index: text):", 1)[1]
             cand = cand.split("For each candidate", 1)[0]
         except IndexError:
             return []
@@ -462,6 +454,5 @@ class FakeLLM:
                       for w in text.lower().split()}
             overlap = len(qwords & twords)
             rel = min(1.0, overlap / 5.0)
-            out.append({"id": cid.strip(), "relevance": rel,
-                        "keep": rel >= 0.3})
+            out.append(rel)
         return out

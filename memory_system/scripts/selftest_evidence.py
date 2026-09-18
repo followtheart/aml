@@ -43,14 +43,14 @@ class EvidenceTests(unittest.IsolatedAsyncioTestCase):
         with patch.object(llm, 'complete_json', AsyncMock(return_value={'facts': [self.fact()]})):
             result = await add._extract(self.st, req)
         self.assertEqual(result['facts'][0]['type'], 'episode')
-        self.assertEqual(result['facts'][0]['sensitivity'], 'sensitive')
+        self.assertEqual(result['facts'][0]['sensitivity'], 'normal')
         self.assertIn('Alice lives in Paris.', result['facts'][0]['content'])
         amu_id = await add._persist_fact(
             self.st, req, result['facts'][0], (await embed(['fallback episode']))[0])
         self.assertEqual(
             self.st.get_amus_by_ids([amu_id], include_sensitive=True)[0]['sensitivity'],
-            'sensitive')
-        self.assertEqual(self.st.get_amus_by_ids([amu_id]), [])
+            'normal')
+        self.assertEqual(self.st.get_amus_by_ids([amu_id])[0]['epistemic_status'], 'observed')
 
     async def test_semantic_rejection_does_not_store_wrong_graph(self):
         fact = self.fact()
@@ -59,7 +59,7 @@ class EvidenceTests(unittest.IsolatedAsyncioTestCase):
         with patch.object(config, 'FAKE', False), patch.object(llm, 'complete_json', AsyncMock(side_effect=responses)):
             result = await add._extract(self.st, self.req(fact['content']))
         self.assertEqual(result['facts'][0]['type'], 'episode')
-        self.assertEqual(result['facts'][0]['sensitivity'], 'sensitive')
+        self.assertEqual(result['facts'][0]['sensitivity'], 'normal')
         self.assertNotIn('triples', result['facts'][0])
 
     async def test_verified_evidence_keeps_original_quote(self):
@@ -209,7 +209,7 @@ class EvidenceTests(unittest.IsolatedAsyncioTestCase):
         with patch.object(llm, 'complete_json', AsyncMock(return_value={'facts': [fact]})):
             result = await add._extract(self.st, self.req('Alice lives in Paris.'))
         self.assertEqual(result['facts'][0]['type'], 'episode')
-        self.assertEqual(result['facts'][0]['sensitivity'], 'sensitive')
+        self.assertEqual(result['facts'][0]['sensitivity'], 'normal')
 
     async def test_bad_quote_only_shadows_its_cited_message(self):
         req = self.req('Alice lives in Paris.')

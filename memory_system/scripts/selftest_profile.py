@@ -228,8 +228,8 @@ class SearchInjectionTests(unittest.IsolatedAsyncioTestCase):
         async def scorer(prompt, *a, **k):
             import re
             if 'relevance scoring module' in prompt:
-                return {'scores': [{'id': i, 'relevance': 0.9, 'keep': True}
-                                   for i in re.findall(r'^(amu_\w+|summary_\w+):',
+                return {'scores': [0.9
+                                   for i in re.findall(r'^\d+:',
                                                        prompt, re.M)]}
             return {'sufficient': True, 'confidence': 0.9, 'missing': '',
                     'follow_up_queries': []}
@@ -262,8 +262,8 @@ class SearchInjectionTests(unittest.IsolatedAsyncioTestCase):
         async def scorer(prompt, *a, **k):
             import re
             if 'relevance scoring module' in prompt:
-                return {'scores': [{'id': i, 'relevance': 0.0, 'keep': False}
-                                   for i in re.findall(r'^(amu_\w+):', prompt, re.M)]}
+                return {'scores': [0.0
+                                   for i in re.findall(r'^\d+:', prompt, re.M)]}
             return {'sufficient': True, 'confidence': 0.9, 'missing': '',
                     'follow_up_queries': []}
 
@@ -288,14 +288,14 @@ class DirectChoiceTests(unittest.IsolatedAsyncioTestCase):
         with patch.object(scoring.llm, 'complete_json', extra), patch.object(scoring.llm, 'complete', answer):
             pred, score, diag = await scoring.evaluate(qa, memories)
         self.assertEqual((pred, score), ('B', 1.0))
-        self.assertEqual(diag['answer_policy'], 'direct_evidence_v1')
+        self.assertEqual(diag['answer_policy'], 'direct_evidence_v2')
         extra.assert_not_awaited()
         answer.assert_awaited_once()
         prompt = answer.call_args.args[0]
         self.assertIn('Claire shared a story', prompt)
         self.assertIn('requested to forget', prompt)
-        self.assertIn('third-party stories', prompt)
-        self.assertIn('Honor explicit forget constraints', prompt)
+        self.assertIn('Distinguish the speaker from people in pasted stories', prompt)
+        self.assertIn('Apply explicit forget constraints first', prompt)
         self.assertNotIn('Persona evidence alignment', prompt)
 
     async def test_answer_failure_keeps_explicit_diagnostics(self):

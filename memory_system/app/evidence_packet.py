@@ -10,10 +10,13 @@ import json
 def digest(items):
     payload = [{'id': x['id'], 'content': x['content']} for x in items]
     versions = {x.get('packet_hash_version') for x in items}
-    if versions == {2}:
+    if versions in ({2}, {3}):
         payload = [dict(p, memory_type=x.get('memory_type', 'fact'), sources=x.get('sources', []),
                         personal_evidence=x.get('personal_evidence'))
                    for p, x in zip(payload, items)]
+        if versions == {3}:
+            payload = [dict(p, is_constraint=x.get('is_constraint', False),
+                            equivalent_ids=x.get('equivalent_ids', [])) for p, x in zip(payload, items)]
     elif versions - {None, 1}:
         raise ValueError('Mixed or unsupported evidence packet hash versions')
     return hashlib.sha256(json.dumps(payload, ensure_ascii=False, sort_keys=True,
@@ -22,6 +25,7 @@ def digest(items):
 
 def pack(items, top_k, token_budget, core_budget=None):
     selected, omitted, used, core_used = [], [], 0, 0
+    evidence_count, constraint_bytes = 0, 0
     seen_sources = {}
     for item in items:
         from . import answer_context
@@ -40,13 +44,17 @@ def pack(items, top_k, token_budget, core_budget=None):
             item['sources'] = sources
         cost = len(item['content'].encode('utf-8')) + bool(selected)
         is_core = item.pop('_core_injected', False)
+        is_constraint = bool(item.get('is_constraint'))
         if is_core and core_budget is not None and core_used + cost > core_budget:
             omitted.append({'id': item['id'], 'reason': 'core_budget', 'cost': cost})
             continue
-        if len(selected) >= top_k or used + cost > token_budget:
-            omitted.append({'id': item['id'], 'reason': 'top_k' if len(selected) >= top_k else 'token_budget', 'cost': cost})
+        full = not is_constraint and evidence_count >= top_k
+        if full or used + cost > token_budget:
+            omitted.append({'id': item['id'], 'reason': 'top_k' if full else 'token_budget', 'cost': cost})
             continue
-        selected.append(dict(item, packet_hash_version=2))
+        selected.append(dict(item, packet_hash_version=3))
+        evidence_count += not is_constraint
+        constraint_bytes += cost if is_constraint else 0
         for s in sources:
             if not s.get('content'):
                 continue
@@ -62,4 +70,7 @@ def pack(items, top_k, token_budget, core_budget=None):
     return selected, packet_hash, {'included_ids': [x['id'] for x in selected],
                                     'omitted': omitted, 'token_upper_bound': used,
                                     'token_budget': token_budget, 'estimator': 'utf8_bytes',
+                                    'evidence_count': evidence_count,
+                                    'constraint_count': len(selected) - evidence_count,
+                                    'constraint_bytes': constraint_bytes,
                                     'core_bytes': core_used, 'core_budget': core_budget}

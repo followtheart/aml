@@ -83,17 +83,16 @@ def answer_prompt(qa, memories):
     if qa.get("scoring") == "choice":
         question += "\n\nOptions:\n" + "\n".join(qa["options"])
         instructions += (
-            " Selection policy: choose the option whose personal premises are "
-            "supported by source evidence. Check all premises, not just proposed "
-            "advice. Distinguish the speaker from people in pasted emails or "
-            "third-party stories; assistant suggestions do not prove user history. "
-            "Drafts and rewrites can carry evidence, but verify whose experience "
-            "they describe. Infer activities from concrete descriptions without "
-            "turning topical questions into habits, conditions or possessions. "
-            "Location and occupation matter only for directly dependent advice. "
-            "Prefer generic advice when personalized options invent key facts. "
-            "Honor explicit forget constraints even if older evidence repeats the "
-            "trait; apply only their stated scope.")
+            " Selection policy: check every option's personal premises. "
+            "Prefer supported personalization over generic advice. Concrete "
+            "descriptions can imply an activity without naming it; topical "
+            "questions support interest, not ownership, diagnoses or habits. "
+            "Distinguish the speaker from people in pasted stories. Drafts can "
+            "describe the user's life; assistant advice alone cannot prove it. "
+            "Use generic advice if personal premises lack support. "
+            "Apply explicit forget constraints first: do not select an option "
+            "that uses the forgotten trait, even if older evidence mentions it. "
+            "Judge all options by the same evidence standard.")
         if qa["qa_type"] == "single_choice":
             instructions += (" Return exactly one uppercase option letter and nothing "
                              "else; do not repeat the option text.")
@@ -132,7 +131,7 @@ async def evaluate(qa, memories):
     scoring = qa.get("scoring", "binary")
     diagnostics = {}
     if scoring == "choice":
-        diagnostics["answer_policy"] = "direct_evidence_v1"
+        diagnostics["answer_policy"] = "direct_evidence_v2"
     try:
         pred = (await llm.complete(answer_prompt(qa, memories), stage="eval.answer")).strip()
     except Exception as exc:

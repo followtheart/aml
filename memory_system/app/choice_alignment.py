@@ -17,7 +17,7 @@ def evidence_pool(memories):
     visible = answer_context.build(memories)
     pool, forgotten = {}, {}
     for index, memory in enumerate(memories):
-        eligibility = memory.get('personal_evidence') if memory.get('packet_hash_version') in (2, 3) else None
+        eligibility = memory.get('personal_evidence') if memory.get('packet_hash_version') in (2, 3, 4) else None
         if not (eligibility if eligibility is not None else personal_evidence.personal(memory)):
             continue
         if not memory.get('packet_hash') and memory.get('content', '') not in visible:

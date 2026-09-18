@@ -16,7 +16,8 @@ import numpy as np
 os.environ['AML_FAKE'] = '1'
 os.environ['AML_MEMORY_DEBUG_LOG'] = ''
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from app import add_pipeline as add, config, llm, scenes, schemas, search_pipeline as search, segment, store
+from listwise_fixture import from_scores
+from app import add_pipeline as add, config, cross_encoder, llm, scenes, schemas, search_pipeline as search, segment, store
 from app.embeddings import embed
 
 
@@ -32,7 +33,7 @@ async def score_all(prompt, *args, **kwargs):
     if 'sufficiency verifier' in prompt:
         return {'sufficient': True, 'confidence': .9, 'missing': '', 'follow_up_queries': []}
     ids = re.findall(r'^\d+:', prompt, re.M)
-    return {'scores': [0.9 for _ in ids]}
+    return from_scores([0.9 for _ in ids])
 
 
 class SegmentationTests(unittest.IsolatedAsyncioTestCase):
@@ -179,17 +180,22 @@ class LifecycleTests(unittest.IsolatedAsyncioTestCase):
         vec = (await embed(['Alice sister Carol']))[0]
         self.st.insert_amu(user_id='u', session_id='s', content='Alice sister Carol', embedding=vec)
         stages = []
+        original_ce = cross_encoder.rerank
+        async def ce(query, documents, **kwargs):
+            stages.append(kwargs['stage'])
+            return await original_ce(query, documents, **kwargs)
         async def rank_only(prompt, *args, **kwargs):
             stages.append(kwargs.get('stage'))
             self.assertNotIn('sufficiency verifier', prompt)
             return await score_all(prompt)
-        result = await self.run_search(schemas.SearchRequest(
-            user_id='u', query='Where does Alice sister live?'), side_effect=rank_only)
+        with patch.object(cross_encoder, 'rerank', side_effect=ce):
+            result = await self.run_search(schemas.SearchRequest(
+                user_id='u', query='Where does Alice sister live?'), side_effect=rank_only)
         self.assertTrue(result.data)
         self.assertEqual(result.evidence_status, 'retrieved')
         self.assertEqual(result.verification_status, 'not_run')
         self.assertEqual(len(self.trace()['rounds']), 1)
-        self.assertEqual(stages, ['search.rerank.batch_1'])
+        self.assertEqual(stages, ['search.cross_encoder.batch_1', 'search.listwise'])
 
     async def test_personalization_queries_never_abstain_with_evidence(self):
         vec = (await embed(['Alice lives in Kansas']))[0]

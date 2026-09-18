@@ -12,6 +12,7 @@ from unittest.mock import AsyncMock, patch
 os.environ['AML_FAKE'] = '1'
 os.environ['AML_MEMORY_DEBUG_LOG'] = ''
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from listwise_fixture import from_scores
 from app import config, store, schemas, search_pipeline as search, eval_scoring
 from app.embeddings import embed
 
@@ -20,7 +21,7 @@ async def score_all(prompt, *args, **kwargs):
     if 'sufficiency verifier' in prompt:
         return {'sufficient': True, 'confidence': .9, 'missing': '', 'follow_up_queries': []}
     indices = re.findall(r'^\d+:', prompt, re.M)
-    return {'scores': [0.9 for _ in indices]}
+    return from_scores([0.9 for _ in indices])
 
 
 class SearchTests(unittest.IsolatedAsyncioTestCase):
@@ -97,40 +98,38 @@ class SearchTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(self.st.summary_search('u', 'Bob', 10)), 1)
         self.assertEqual(self.st.summary_search('another', 'Bob', 10), [])
 
-    async def test_top_100_with_small_r_rerank_head(self):
+    async def test_large_topk_keeps_cascade_pools_bounded(self):
         for i in range(145):
             await self.memory(f'Alice work record {i}')
-        result = await self.run_search(self.req(top_k=100))
-        self.assertEqual(len(result.data), 100)
+        # A broad recall request cannot expand the bounded model stages.
+        with patch.multiple(config, RECALL_VECTOR_LIMIT=145, RECALL_FTS_LIMIT=145):
+            result = await self.run_search(self.req(top_k=100))
+        self.assertEqual(len(result.data), 10)
         trace = json.loads(self.path.read_text().splitlines()[-1])
-        scored = [x for x in trace['rerank'] if x['reason'] in ('kept', 'rerank_rejected')]
-        unscored = [x for x in trace['rerank'] if x['reason'] == 'unscored_fused']
-        # §5.4: only the fused head is LLM-scored; the rest keeps fusion order below it.
-        self.assertEqual(len(scored), max(config.RERANK_MAX_CANDIDATES, 120))
-        self.assertGreater(len(unscored), 0)
-        self.assertEqual(len(trace['returned']), 100)
+        cascade = trace['coverage_manifest']['cascade']
+        self.assertEqual(cascade['coarse']['output_count'], 50)
+        self.assertEqual(cascade['fine']['output_count'], 12)
+        self.assertEqual(cascade['listwise']['input_count'], 10)
+        self.assertEqual(len(trace['returned']), 10)
         returned_ids = [x['id'] for x in trace['returned']]
-        self.assertEqual(returned_ids, [x['id'] for x in scored[:100]])
+        self.assertEqual(returned_ids, cascade['listwise']['selected_ids'])
+        self.assertEqual(len(set(returned_ids)), 10)
         self.assertEqual(trace['rounds'][0]['verification_status'], 'not_run')
 
-    async def test_low_rerank_score_only_changes_order_and_topk_is_logged(self):
+    async def test_noise_selection_and_topk_are_logged_separately(self):
         ids = [await self.memory(f'Alice work {i}') for i in range(3)]
         async def reject_one(prompt, *args, **kwargs):
-            result = await score_all(prompt)
-            for index, content in re.findall(r'^(\d+): (.*)$', prompt, re.M):
-                if 'Alice work 0' in content:
-                    result['scores'][int(index)] = 0.1
-            return result
+            rows = re.findall(r'^\d+: (.*)$', prompt, re.M)
+            return from_scores([.1 if 'Alice work 0' in row else .9 for row in rows])
         with patch.object(search, '_understand', AsyncMock(return_value={'intent': 'fact'})), \
              patch.object(search.llm, 'complete_json', side_effect=reject_one):
             response = await search.run_search(self.st, self.req(top_k=1))
         self.assertEqual(len(response.data), 1)
         trace = json.loads(self.path.read_text())
-        demoted = [d for d in trace['rerank'] if d['score'] == 0.1]
-        self.assertEqual(demoted[0]['id'], ids[0])
-        self.assertTrue(demoted[0]['keep'])
         self.assertNotEqual(response.data[0].id, ids[0])
-        self.assertEqual(len(trace['top_k_excluded']), 2)
+        self.assertEqual(len(trace['top_k_excluded']), 1)
+        self.assertEqual(trace['selection']['omitted'], [
+            {'id': ids[0], 'stage': 'listwise', 'reason': 'irrelevant'}])
         self.assertTrue(all('content' in c for r in trace['routes'] for c in r['candidates']))
 
     async def test_rerank_error_retains_candidates_and_logs_fallback(self):
@@ -140,12 +139,16 @@ class SearchTests(unittest.IsolatedAsyncioTestCase):
             result = await search.run_search(self.st, self.req())
         self.assertEqual(result.data[0].id, aid)
         trace = json.loads(self.path.read_text())
-        self.assertEqual(trace['rerank'][0]['reason'], 'global_rrf_fallback')
+        cascade = trace['coverage_manifest']['cascade']
+        self.assertEqual(cascade['listwise']['status'], 'fallback')
+        self.assertEqual(cascade['cross_encoder']['status'], 'ok')
+        self.assertEqual(result.data[0].score_kind, 'cross_encoder')
+        self.assertIsNotNone(result.data[0].score)
 
     async def test_low_score_does_not_erase_the_only_evidence(self):
         await self.memory('weak candidate')
         async def weak(prompt, *args, **kwargs):
-            return {'scores': [0.2 for _ in re.findall(r'^\d+:', prompt, re.M)]}
+            return from_scores([0.2 for _ in re.findall(r'^\d+:', prompt, re.M)])
         with patch.object(search, '_understand', AsyncMock(return_value={
                 'intent': 'fact'})), patch.object(
                 search.llm, 'complete_json', side_effect=weak):
@@ -153,18 +156,21 @@ class SearchTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(result.data), 1)
         self.assertEqual(result.evidence_status, 'retrieved')
 
-    async def test_incomplete_batch_falls_back_entire_ranking(self):
+    async def test_incomplete_listwise_permutation_falls_back_to_ce_shortlist(self):
         ids = [await self.memory(f'Alice work {i}') for i in range(2)]
         async def incomplete(prompt, *args, **kwargs):
-            return {'scores': [0.1]}
+            return from_scores([0.1])
         with patch.object(search, '_understand', AsyncMock(return_value={
                 'intent': 'fact'})), patch.object(
                 search.llm, 'complete_json', side_effect=incomplete):
             result = await search.run_search(self.st, self.req())
-        self.assertEqual(len(result.data), 2)
+        self.assertEqual({item.id for item in result.data}, set(ids))
         trace = json.loads(self.path.read_text().splitlines()[-1])
-        self.assertTrue(all(item['reason'] == 'global_rrf_fallback'
-                            for item in trace['rerank']))
+        cascade = trace['coverage_manifest']['cascade']
+        self.assertEqual(cascade['listwise']['status'], 'fallback')
+        self.assertEqual(len(cascade['listwise']['attempts']), 2)
+        self.assertEqual(cascade['cross_encoder']['scored_count'], 2)
+        self.assertTrue(all(item.score_kind == 'cross_encoder' for item in result.data))
 
     async def test_amu_sources_and_user_isolation(self):
         aid = await self.memory('Alice work')
@@ -258,15 +264,20 @@ class SearchTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(sum(source.get('content_omitted') == 'duplicate'
                              for item in result.data for source in item.sources), 1)
 
-    async def test_memory_doc_prefers_episode_and_includes_sources(self):
+    async def test_document_listwise_choice_keeps_episode_sources(self):
         fact = await self.memory('Alice work fact')
         episode = await self.memory('Alice described her work journey in detail', type='episode')
         req = schemas.AddRequest(request_id='doc-source', user_id='u', session_id='s',
             messages=[schemas.Message(role='user', content='Full narrative source')])
         self.st.save_messages(req)
         self.st.link_sources(episode, 'doc-source', [0])
-        result = await self.run_search(self.req('Tell the story'),
-                                       {'intent': 'narrative', 'entities': []})
+        async def rank(prompt, *args, **kwargs):
+            rows = re.findall(r'^\d+: (.*)$', prompt, re.M)
+            return from_scores([.9 if 'Full narrative source' in row else .8 for row in rows])
+        with patch.object(search, '_understand', AsyncMock(return_value={
+                'intent': 'narrative', 'entities': []})), \
+                patch.object(search.llm, 'complete_json', side_effect=rank):
+            result = await search.run_search(self.st, self.req('Tell the story'))
         self.assertEqual([item.id for item in result.data], [episode, fact])
         self.assertIn('Full narrative source', result.data[0].content)
 

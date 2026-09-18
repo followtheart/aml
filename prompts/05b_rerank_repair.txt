@@ -1,0 +1,3 @@
+Previous output had an invalid format. Score the {candidate_count} MEMORY
+candidates, not the answer options. Generate a fresh scores array with exactly
+one finite number between 0 and 1 per candidate, in candidate index order.

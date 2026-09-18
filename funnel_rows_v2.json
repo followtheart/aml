@@ -1,0 +1,404 @@
+[
+ {
+  "qid": "0",
+  "cat": "Health",
+  "gold": "A",
+  "pred": "C",
+  "score": 0.0,
+  "stage": "4-答对",
+  "src": "cite",
+  "rank": 1,
+  "unsupp": [
+   "you already practice yoga and meditation daily"
+  ],
+  "mem": "Daniel mentioned his routine of starting mornings with quiet minutes on the mat, stretches, and deep breaths before the kids come ",
+  "gold_claim": "Since you already practice yoga and meditation daily, you might enjoy starting your mornin",
+  "pred_claim": "You might enjoy starting your mornings with a few minutes of light stretching, followed by"
+ },
+ {
+  "qid": "1",
+  "cat": "Communication",
+  "gold": "D",
+  "pred": "C",
+  "score": 0.0,
+  "stage": "3-入包",
+  "src": "sim(m=0.07)",
+  "rank": 113,
+  "unsupp": [
+   "remind yourself that being present often matters more than having all the answers"
+  ],
+  "mem": "The user is interested in understanding why certain slow-paced foreign dramas are ranked highly by critics despite having smaller ",
+  "gold_claim": "When a student shares something deeply troubling, it can help to take a slow breath, liste",
+  "pred_claim": "When you feel emotionally heavy, it can help to pause, take a deep breath, and focus on a "
+ },
+ {
+  "qid": "2",
+  "cat": "Health",
+  "gold": "D",
+  "pred": "D",
+  "score": 1.0,
+  "stage": "OK",
+  "src": "sim(m=0.17)",
+  "rank": 2,
+  "unsupp": [
+   "step away for a few minutes, take some slow deep breaths, and focus on a non-work-related activity you enjoy"
+  ],
+  "mem": "Daniel mentioned his routine of starting mornings with quiet minutes on the mat, stretches, and deep breaths before the kids come ",
+  "gold_claim": "After a tense confrontation, it can help to step away for a few minutes, take some slow de",
+  "pred_claim": "After a tense confrontation, it can help to step away for a few minutes, take some slow de"
+ },
+ {
+  "qid": "3",
+  "cat": "Travel",
+  "gold": "C",
+  "pred": "D",
+  "score": 0.0,
+  "stage": "2-召回",
+  "src": "sim(m=0.10)",
+  "rank": null,
+  "unsupp": [
+   "Since you’re passionate about surfing when you’re near the coast"
+  ],
+  "mem": "Daniel Robert Whitaker waxed his board and enjoyed catching early waves.",
+  "gold_claim": "Since you’re passionate about surfing when you’re near the coast, I’d suggest starting you",
+  "pred_claim": "Since, as a Kansan, you’re likely to appreciate fresh, locally grown foods, I’d suggest st"
+ },
+ {
+  "qid": "4",
+  "cat": "Food",
+  "gold": "D",
+  "pred": "C",
+  "score": 0.0,
+  "stage": "2-召回",
+  "src": "sim(m=0.06)",
+  "rank": null,
+  "unsupp": [
+   "Since you already enjoy baking fresh bread at home"
+  ],
+  "mem": "Daniel Robert Whitaker is considering joining a 20-mile community cycling fundraiser next month.",
+  "gold_claim": "Since you already enjoy baking fresh bread at home, you might try experimenting with infus",
+  "pred_claim": "If you’re looking for relaxing weekend kitchen projects, you might try baking something ne"
+ },
+ {
+  "qid": "5",
+  "cat": "Health",
+  "gold": "A",
+  "pred": "D",
+  "score": 0.0,
+  "stage": "2-召回",
+  "src": "sim(m=0.06)",
+  "rank": null,
+  "unsupp": [
+   "Since you’ve got that mild lower back pain from your old sports injury"
+  ],
+  "mem": "The assistant mentioned that Kansas lacks major professional sports teams, so college programs like the KU Jayhawks fill that spac",
+  "gold_claim": "Since you’ve got that mild lower back pain from your old sports injury, you might find gen",
+  "pred_claim": "Since you probably spend time grading and prepping lessons late into the evening, you migh"
+ },
+ {
+  "qid": "6",
+  "cat": "Outdoors",
+  "gold": "C",
+  "pred": "C",
+  "score": 1.0,
+  "stage": "OK",
+  "src": "sim(m=0.06)",
+  "rank": 5,
+  "unsupp": null,
+  "mem": "Daniel Robert Whitaker, a high school social studies teacher in Lawrence, Kansas, is contemplating joining a 20-mile community cyc",
+  "gold_claim": "Since spring pollen tends to set off your seasonal allergies, you might find it more comfo",
+  "pred_claim": "Since spring pollen tends to set off your seasonal allergies, you might find it more comfo"
+ },
+ {
+  "qid": "7",
+  "cat": "Home",
+  "gold": "B",
+  "pred": "B",
+  "score": 1.0,
+  "stage": "3-入包",
+  "src": "sim(m=0.05)",
+  "rank": 100,
+  "unsupp": [
+   "bring in some greenery, add lighter window treatments, and place a few colorful accents around the room to make it feel more open and fresh. Simple changes like repositioning furniture can also revive the space without a full remodel."
+  ],
+  "mem": "The user, Daniel Robert Whitaker, asked for fresh recipe ideas to cook at home. The assistant suggested several convenient and spe",
+  "gold_claim": "You could bring in some greenery, add lighter window treatments, and place a few colorful ",
+  "pred_claim": "You could bring in some greenery, add lighter window treatments, and place a few colorful "
+ },
+ {
+  "qid": "8",
+  "cat": "Communication",
+  "gold": "D",
+  "pred": "A",
+  "score": 0.0,
+  "stage": "4-答对",
+  "src": "sim(m=0.12)",
+  "rank": 15,
+  "unsupp": [
+   "Since you already enjoy using Facebook to stay connected with friends and family"
+  ],
+  "mem": "The user asked the assistant to forget this and never use it: \"Please forget that I take photos during family trips.\"",
+  "gold_claim": "Since you already enjoy using Facebook to stay connected with friends and family, you coul",
+  "pred_claim": "You could share occasional updates or photos through social media, send quick text message"
+ },
+ {
+  "qid": "9",
+  "cat": "Events",
+  "gold": "A",
+  "pred": "B",
+  "score": 0.0,
+  "stage": "3-入包",
+  "src": "sim(m=0.07)",
+  "rank": 66,
+  "unsupp": [
+   "using colorful lighting, projection art, and upbeat live music. Adding interactive activities like a collaborative mural or themed photo booths"
+  ],
+  "mem": "The user requested that the assistant forget they use TikTok for entertainment and news.",
+  "gold_claim": "You could create an immersive celebration by using colorful lighting, projection art, and ",
+  "pred_claim": "You could draw from the atmosphere of modern electronic music festivals by using neon ligh"
+ },
+ {
+  "qid": "10",
+  "cat": "Fashion",
+  "gold": "C",
+  "pred": "C",
+  "score": 1.0,
+  "stage": "OK",
+  "src": "cite",
+  "rank": 1,
+  "unsupp": [
+   "sharply tailored blazer in a bold jewel tone",
+   "wide-leg trousers in breathable fabrics",
+   "statement designer belt to elevate your everyday look",
+   "minimalist leather sneakers",
+   "structured crossbody bag in a seasonal color"
+  ],
+  "mem": "Daniel is seeking advice on how to balance professional obligations with making space for family experiences that he really doesn’",
+  "gold_claim": "For the upcoming season, you might consider adding a sharply tailored blazer in a bold jew",
+  "pred_claim": "For the upcoming season, you might consider adding a sharply tailored blazer in a bold jew"
+ },
+ {
+  "qid": "11",
+  "cat": "Motivation",
+  "gold": "A",
+  "pred": "D",
+  "score": 0.0,
+  "stage": "3-入包",
+  "src": "sim(m=0.09)",
+  "rank": 88,
+  "unsupp": [
+   "positive change can take time to appear. Focusing on the process and steady commitment, rather than immediate results, helps me keep perspective."
+  ],
+  "mem": "The user is interested in understanding the significance of borderline lipid panel results over time.",
+  "gold_claim": "When I start questioning whether my efforts have made a real difference, I try to remember",
+  "pred_claim": "When I think back to the student I mentored who left school unexpectedly, I remind myself "
+ },
+ {
+  "qid": "12",
+  "cat": "Health",
+  "gold": "B",
+  "pred": "A",
+  "score": 0.0,
+  "stage": "2-召回",
+  "src": "sim(m=0.08)",
+  "rank": null,
+  "unsupp": [],
+  "mem": "Daniel asked the assistant to suggest a slightly warmer closing line for his email to Jenna, aiming to make it feel more personal.",
+  "gold_claim": "It might help to set firmer boundaries between your work and personal time, and take short",
+  "pred_claim": "Since you’ve already navigated the chaos of juggling parenting with grading and lesson pre"
+ },
+ {
+  "qid": "13",
+  "cat": "Entertainment",
+  "gold": "D",
+  "pred": "D",
+  "score": 1.0,
+  "stage": "OK",
+  "src": "cite",
+  "rank": 1,
+  "unsupp": [],
+  "mem": "The user is interested in understanding the storytelling approach of anime that deals with political or historical themes.",
+  "gold_claim": "Since you’re into anime and enjoy layered stories with complex characters, I’d recommend s",
+  "pred_claim": "Since you’re into anime and enjoy layered stories with complex characters, I’d recommend s"
+ },
+ {
+  "qid": "14",
+  "cat": "Travel",
+  "gold": "A",
+  "pred": "A",
+  "score": 1.0,
+  "stage": "OK",
+  "src": "cite",
+  "rank": 1,
+  "unsupp": [],
+  "mem": "The user is interested in attending events or gatherings around the world that have an energetic, vibrant atmosphere and are worth",
+  "gold_claim": "If you’re up for mixing travel with your love of pop culture, this year has some standout ",
+  "pred_claim": "If you’re up for mixing travel with your love of pop culture, this year has some standout "
+ },
+ {
+  "qid": "15",
+  "cat": "Wellbeing",
+  "gold": "B",
+  "pred": "B",
+  "score": 1.0,
+  "stage": "OK",
+  "src": "cite",
+  "rank": 1,
+  "unsupp": [],
+  "mem": "Daniel Robert Whitaker, a 38-year-old high school social studies teacher from Lawrence, Kansas, has been feeling disconnected from",
+  "gold_claim": "It’s understandable to feel that loss, especially when cycling along the river trail was p",
+  "pred_claim": "It’s understandable to feel that loss, especially when cycling along the river trail was p"
+ },
+ {
+  "qid": "16",
+  "cat": "Health",
+  "gold": "A",
+  "pred": "A",
+  "score": 1.0,
+  "stage": "OK",
+  "src": "cite",
+  "rank": 1,
+  "unsupp": [],
+  "mem": "Daniel Robert Whitaker had mild asthma as a child but it has not been an issue for a long time.",
+  "gold_claim": "Since you’ve had mild asthma in the past, you might find it helps to check the air quality",
+  "pred_claim": "Since you’ve had mild asthma in the past, you might find it helps to check the air quality"
+ },
+ {
+  "qid": "17",
+  "cat": "Automotive",
+  "gold": "B",
+  "pred": "D",
+  "score": 0.0,
+  "stage": "2-召回",
+  "src": "sim(m=0.04)",
+  "rank": null,
+  "unsupp": [
+   "Since you prefer practical, American-made vehicles"
+  ],
+  "mem": "The user is interested in improving the tone and flow of their messages.",
+  "gold_claim": "Since you prefer practical, American-made vehicles, you might look at the Chevrolet Malibu",
+  "pred_claim": "For a balance of comfort, reliability, and reasonable upkeep, you might look at midsize se"
+ },
+ {
+  "qid": "18",
+  "cat": "Outdoors",
+  "gold": "B",
+  "pred": "C",
+  "score": 0.0,
+  "stage": "4-答对",
+  "src": "sim(m=0.06)",
+  "rank": 19,
+  "unsupp": [
+   "Since you already have a vegetable and herb garden"
+  ],
+  "mem": "The user asked for ways to apply crop rotation in a small garden with limited space.",
+  "gold_claim": "Since you already have a vegetable and herb garden, you could make the space more function",
+  "pred_claim": "To make the most of a small outdoor space, consider installing vertical planters or shelvi"
+ },
+ {
+  "qid": "19",
+  "cat": "Decor",
+  "gold": "B",
+  "pred": "C",
+  "score": 0.0,
+  "stage": "4-答对",
+  "src": "cite",
+  "rank": 3,
+  "unsupp": [],
+  "mem": "The user is interested in whether personal mementos can be used to influence how visitors perceive the homeowner.",
+  "gold_claim": "You could arrange your shelves with a balance of books, plants, and framed family photos s",
+  "pred_claim": "You could arrange your shelves with a balance of books, plants, and decorative objects so "
+ },
+ {
+  "qid": "20",
+  "cat": "Shopping",
+  "gold": "B",
+  "pred": "D",
+  "score": 0.0,
+  "stage": "4-答对",
+  "src": "sim(m=0.14)",
+  "rank": 24,
+  "unsupp": [
+   "Given your passion for rare vintage vinyl from international artists"
+  ],
+  "mem": "The user is interested in audio engineering and vinyl record production differences between regions.",
+  "gold_claim": "Given your passion for rare vintage vinyl from international artists, you might explore ni",
+  "pred_claim": "If you’re looking for unique items not usually found through big-name retailers, you might"
+ },
+ {
+  "qid": "21",
+  "cat": "Finance",
+  "gold": "C",
+  "pred": "B",
+  "score": 0.0,
+  "stage": "4-答对",
+  "src": "cite",
+  "rank": 2,
+  "unsupp": [
+   "Given your interest in emerging cryptocurrency markets"
+  ],
+  "mem": "The user is interested in understanding the differences between government-issued digital currencies and private stablecoins.",
+  "gold_claim": "Given your interest in emerging cryptocurrency markets, a good approach is to combine real",
+  "pred_claim": "To stay ahead of fast-moving trends in global financial markets, it’s wise to monitor a mi"
+ },
+ {
+  "qid": "22",
+  "cat": "Entertainment",
+  "gold": "C",
+  "pred": "B",
+  "score": 0.0,
+  "stage": "2-召回",
+  "src": "sim(m=0.06)",
+  "rank": null,
+  "unsupp": [
+   "If you’re drawn to the golden era of cinema"
+  ],
+  "mem": "The user is interested in staying updated with trending stories and pop culture without using TikTok.",
+  "gold_claim": "If you’re drawn to the golden era of cinema, I’d suggest immersing yourself in films like ",
+  "pred_claim": "For timeless storytelling and unforgettable characters, you could explore titles like *The"
+ },
+ {
+  "qid": "23",
+  "cat": "Outdoors",
+  "gold": "A",
+  "pred": "D",
+  "score": 0.0,
+  "stage": "4-答对",
+  "src": "sim(m=0.06)",
+  "rank": 35,
+  "unsupp": [
+   "Since you enjoy swimming in the summer"
+  ],
+  "mem": "The user questioned why the water in local lakes feels noticeably warmer in late July compared to early June, even when air temper",
+  "gold_claim": "Since you enjoy swimming in the summer, you might take advantage of the local pool or head",
+  "pred_claim": "If you’re looking to stay active in the summer, you might explore local outdoor activities"
+ },
+ {
+  "qid": "24",
+  "cat": "Food",
+  "gold": "B",
+  "pred": "D",
+  "score": 0.0,
+  "stage": "3-入包",
+  "src": "sim(m=0.05)",
+  "rank": 76,
+  "unsupp": [],
+  "mem": "The user is interested in understanding the reasons behind differences in spice usage in recipes across the world.",
+  "gold_claim": "Since you already keep a well-stocked spice rack, you could layer flavors in your vegetabl",
+  "pred_claim": "You could add depth to your vegetable soup by sautéing onions, garlic, and celery until de"
+ },
+ {
+  "qid": "25",
+  "cat": "Food",
+  "gold": "A",
+  "pred": "A",
+  "score": 1.0,
+  "stage": "OK",
+  "src": "cite",
+  "rank": 1,
+  "unsupp": [],
+  "mem": "The user monitors their cholesterol levels.",
+  "gold_claim": "Since you’re keeping an eye on your cholesterol, you might like snacks such as unsalted al",
+  "pred_claim": "Since you’re keeping an eye on your cholesterol, you might like snacks such as unsalted al"
+ }
+]

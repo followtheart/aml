@@ -10,7 +10,8 @@ from unittest.mock import AsyncMock, patch
 
 os.environ['AML_FAKE'] = '1'
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from app import answer_context, eval_scoring, schemas, search_pipeline as search, store
+from listwise_fixture import from_scores
+from app import answer_context, cross_encoder, eval_scoring, schemas, search_pipeline as search, store
 from app.embeddings import embed
 import local_eval
 
@@ -35,10 +36,10 @@ class SinglePassTests(unittest.IsolatedAsyncioTestCase):
         return aid
 
     async def rank(self, prompt, *args, **kwargs):
-        self.assertEqual(kwargs.get('stage'), 'search.rerank.batch_1')
+        self.assertEqual(kwargs.get('stage'), 'search.listwise')
         ids = re.findall(r'^\d+:', prompt, re.M)
         # Deliberately unhelpful ranking must not become another deletion gate.
-        return {'scores': [0.1 for _ in ids]}
+        return from_scores([0.1 for _ in ids])
 
     async def search(self, query='morning routine', **kwargs):
         with patch.object(search, '_understand', AsyncMock(return_value={
@@ -105,7 +106,7 @@ class SinglePassTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([x['id'] for x in packet], [target])
         self.assertNotIn(noise, [x['id'] for x in packet])
 
-    async def test_options_are_retrieval_queries_but_never_inserted_as_evidence(self):
+    async def test_option_premises_are_queries_but_never_inserted_as_evidence(self):
         target = await self.memory('The user discussed record pressings.', type='preference')
         options = ['A. Since you collect rare vinyl, try a record marketplace',
                    'B. Since you own a spaceship, try an auction']
@@ -117,15 +118,20 @@ class SinglePassTests(unittest.IsolatedAsyncioTestCase):
             response = await search.run_search(self.st, schemas.SearchRequest(
                 user_id='u', query='Where can I buy unique items?', options=options))
         queries = embedding.call_args.args[0]
-        self.assertEqual(queries[1:3], options)
+        self.assertEqual(queries[1:3], ['Since you collect rare vinyl', 'Since you own a spaceship'])
         self.assertLessEqual(len(queries), 6)
         profile_route = next(r for r in plan['_routes'] if r['channel'] == 'profile_rule')
-        self.assertIn(target, [c['id'] for c in profile_route['candidates']])
+        self.assertNotIn(target, [c['id'] for c in profile_route['candidates']])
+        self.assertIn(target, [x.id for x in response.data])
         self.assertNotIn('spaceship', answer_context.build([x.model_dump() for x in response.data]))
 
-    async def test_default_choice_path_has_only_plan_rank_answer_model_stages(self):
+    async def test_default_choice_has_plan_ce_listwise_answer_stages(self):
         await self.memory('The user lives in Kansas.')
         stages = []
+        original_ce = cross_encoder.rerank
+        async def ce(query, documents, **kwargs):
+            stages.append(kwargs['stage'])
+            return await original_ce(query, documents, **kwargs)
         async def json_call(prompt, *args, **kwargs):
             stages.append(kwargs['stage'])
             if kwargs['stage'] == 'search.understand':
@@ -138,24 +144,33 @@ class SinglePassTests(unittest.IsolatedAsyncioTestCase):
               'scoring': 'choice', 'qa_type': 'single_choice', 'gold_labels': ['A']}
         with tempfile.TemporaryDirectory() as temp, patch.object(search.config, 'SEARCH_DEBUG_LOG',
                 str(Path(temp) / 'trace.jsonl')), patch.object(search.llm, 'complete_json',
-                side_effect=json_call), patch.object(eval_scoring.llm, 'complete', side_effect=answer):
+                side_effect=json_call), patch.object(eval_scoring.llm, 'complete', side_effect=answer), \
+                patch.object(cross_encoder, 'rerank', side_effect=ce):
             response = await search.run_search(self.st, schemas.SearchRequest(
                 user_id='u', query=qa['question'], options=qa['options']))
             _, score, _ = await eval_scoring.evaluate(qa, [x.model_dump() for x in response.data])
             trace = json.loads((Path(temp) / 'trace.jsonl').read_text())
-        self.assertEqual(stages, ['search.understand', 'search.rerank.batch_1', 'eval.answer'])
+        self.assertEqual(stages, ['search.understand', 'search.cross_encoder.batch_1',
+                                  'search.listwise', 'eval.answer'])
         self.assertEqual(score, 1.0)
+        self.assertEqual(response.coverage_manifest['rerank_status'], 'ok')
         self.assertEqual(len(trace['rounds']), 1)
-        self.assertEqual(trace['pipeline'], 'single_pass_v2')
+        self.assertEqual(trace['pipeline'], 'graph_cascade_v8')
+        self.assertEqual(trace['versions']['search_policy'], 'graph_cascade_v8')
         self.assertEqual(trace['versions']['settings']['SEARCH_DEADLINE_SECONDS'], search.config.SEARCH_DEADLINE_SECONDS)
 
     async def test_no_keyexp_ablation_uses_current_planner_signature(self):
+        await self.memory('The user lives in Kyoto.')
         args = type('Args', (), dict(no_governance=False, no_graph=False,
-                                    no_rerank=False, no_keyexp=True))()
-        with patch.object(search, '_understand', search._understand):
+                                    no_rerank=True, no_keyexp=True))()
+        with patch.object(search, '_understand', search._understand), \
+                patch.object(search, '_filter_rerank', search._filter_rerank):
             local_eval.apply_ablations(args)
             plan = await search._understand(self.st, schemas.SearchRequest(user_id='u', query='q'), None)
+            response = await search.run_search(self.st, schemas.SearchRequest(user_id='u', query='Kyoto'))
         self.assertEqual(plan['expanded_queries'], ['q'])
+        self.assertTrue(response.data)
+        self.assertEqual(response.coverage_manifest['rerank_status'], 'not_run')
 
 
 if __name__ == '__main__':

@@ -10,7 +10,7 @@ from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 
-from . import config, graph, integrity, llm, store
+from . import budget, config, graph, integrity, llm, store
 
 log = logging.getLogger("aml.scenes")
 
@@ -41,6 +41,7 @@ def match_scene(scenes: List[Dict], vec: np.ndarray,
     best, best_score = None, -1.0
     unit = _unit(vec)
     for scene in scenes:
+        budget.check()
         centroid = scene.get("centroid")
         if centroid is None or scene.get("embedding_space") != config.EMBEDDING_SPACE:
             continue
@@ -56,6 +57,7 @@ def rank_scenes(scenes: List[Dict], query_vecs: np.ndarray, query_terms: List[st
     """Stage one of scene->cell retrieval (§5.2)."""
     scored = []
     for scene in scenes:
+        budget.check()
         centroid = scene.get("centroid")
         if centroid is None or scene.get("embedding_space") != config.EMBEDDING_SPACE:
             continue

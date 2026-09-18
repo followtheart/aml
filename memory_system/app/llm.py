@@ -16,6 +16,19 @@ class LLMError(RuntimeError):
     pass
 
 
+def rerank_schema(count: int) -> dict:
+    """Constrain each batch independently; never mutate the shared schema."""
+    if count < 1:
+        raise ValueError('A rerank batch must contain at least one candidate')
+    return {
+        'type': 'object', 'additionalProperties': False,
+        'properties': {'scores': {
+            'type': 'array', 'minItems': count, 'maxItems': count,
+            'items': {'type': 'number', 'minimum': 0.0, 'maximum': 1.0}}},
+        'required': ['scores'],
+    }
+
+
 STRUCTURED_SCHEMAS: Dict[str, dict] = {
     "governance": {
         "type": "object",
@@ -48,9 +61,10 @@ STRUCTURED_SCHEMAS: Dict[str, dict] = {
                             "items": {"type": "string"}},
             "expanded_queries": {"type": "array",
                                  "items": {"type": "string"}},
+            "option_queries": {"type": "array", "items": {"type": "string", "maxLength": 240}},
         },
         "required": ["intent", "include_history", "time_scope", "entities", "sub_queries",
-                     "expanded_queries"],
+                     "expanded_queries", "option_queries"],
     },
     "rerank": {
         "type": "object",
@@ -166,7 +180,8 @@ def _provider_kwargs() -> dict:
 async def complete(prompt: str, system: Optional[str] = None,
                    response_format: Optional[dict] = None,
                    max_tokens: Optional[int] = None,
-                   stage: str = "llm.complete") -> str:
+                   stage: str = "llm.complete", timeout: float = 180,
+                   attempts: int = 2) -> str:
     """Single text completion, temperature 0. Returns raw text."""
     if _fake_available():
         metrics.log_fake(kind="llm", stage=stage, model="fake")
@@ -186,14 +201,14 @@ async def complete(prompt: str, system: Optional[str] = None,
                 messages=messages,
                 temperature=config.LLM_TEMPERATURE,
                 max_tokens=max_tokens or config.LLM_MAX_TOKENS,
-                timeout=180,
+                timeout=timeout,
                 num_retries=0,
                 **kwargs,
             )
 
         resp = await metrics.measured_call(
             kind="llm", stage=stage, model=config.LLM_MODEL,
-            call=_call, attempts=2,
+            call=_call, attempts=attempts,
         )
         return resp["choices"][0]["message"]["content"]
     except Exception as e:  # pragma: no cover - depends on provider
@@ -222,7 +237,8 @@ def extract_json(text: str):
 async def complete_json(prompt: str, schema_hint: str = "",
                         system: Optional[str] = None,
                         schema: Optional[dict] = None,
-                        stage: str = "llm.structured"):
+                        stage: str = "llm.structured", max_tokens: Optional[int] = None,
+                        timeout: float = 180, attempts: int = 2):
     """Structured completion plus parsing, with one clean retry.
 
     SiliconFlow and OpenAI-compatible providers support JSON mode through
@@ -232,7 +248,8 @@ async def complete_json(prompt: str, schema_hint: str = "",
     """
     if schema and not _fake_available():
         return await _complete_tool_json(
-            prompt, schema, system=system, stage=stage)
+            prompt, schema, system=system, stage=stage, max_tokens=max_tokens,
+            timeout=timeout, attempts=attempts)
 
     json_system = system or (
         "You are a structured-data generator. Return exactly one valid JSON "
@@ -242,8 +259,8 @@ async def complete_json(prompt: str, schema_hint: str = "",
         prompt,
         system=json_system,
         response_format=json_format,
-        max_tokens=config.LLM_JSON_MAX_TOKENS,
-        stage=stage,
+        max_tokens=max_tokens or config.LLM_JSON_MAX_TOKENS,
+        stage=stage, timeout=timeout, attempts=attempts,
     )
     try:
         return extract_json(out)
@@ -259,15 +276,16 @@ async def complete_json(prompt: str, schema_hint: str = "",
         retry_prompt,
         system=json_system,
         response_format=json_format,
-        max_tokens=config.LLM_JSON_MAX_TOKENS,
-        stage=f"{stage}.json_repair",
+        max_tokens=max_tokens or config.LLM_JSON_MAX_TOKENS,
+        stage=f"{stage}.json_repair", timeout=timeout, attempts=attempts,
     )
     return extract_json(out2)
 
 
 async def _complete_tool_json(prompt: str, schema: dict,
                               system: Optional[str] = None,
-                              stage: str = "llm.tool"):
+                              stage: str = "llm.tool", max_tokens: Optional[int] = None,
+                              timeout: float = 180, attempts: int = 2):
     """Force a top-level object through OpenAI-compatible function calling."""
     import litellm
 
@@ -302,26 +320,31 @@ async def _complete_tool_json(prompt: str, schema: dict,
             tool_choice={"type": "function",
                          "function": {"name": tool_name}},
             temperature=config.LLM_TEMPERATURE,
-            max_tokens=config.LLM_JSON_MAX_TOKENS,
-            timeout=180,
+            max_tokens=min(max_tokens or config.LLM_JSON_MAX_TOKENS, config.LLM_JSON_MAX_TOKENS),
+            timeout=timeout,
             num_retries=0,
             **kwargs,
         )
-        message = resp["choices"][0]["message"]
-        calls = message.get("tool_calls") or []
-        if not calls:
-            raise ValueError("model returned no structured tool call")
-        arguments = calls[0]["function"]["arguments"]
-        result = arguments if isinstance(arguments, dict) \
-            else extract_json(arguments)
-        if not isinstance(result, dict):
-            raise ValueError("tool arguments are not a JSON object")
+        try:
+            message = resp["choices"][0]["message"]
+            calls = message.get("tool_calls") or []
+            if not calls:
+                raise ValueError("model returned no structured tool call")
+            arguments = calls[0]["function"]["arguments"]
+            result = arguments if isinstance(arguments, dict) \
+                else extract_json(arguments)
+            if not isinstance(result, dict):
+                raise ValueError("tool arguments are not a JSON object")
+        except (ValueError, TypeError, KeyError, IndexError) as exc:
+            # The provider already billed this response. Preserve retry semantics
+            # while accounting for its usage even if the tool JSON is malformed.
+            raise metrics.ResponseParseError(resp) from exc
         return result, resp
 
     try:
         result, _resp = await metrics.measured_call(
             kind="llm", stage=stage, model=config.LLM_MODEL,
-            call=_call, attempts=2, response_getter=lambda item: item[1])
+            call=_call, attempts=attempts, response_getter=lambda item: item[1])
         return result
     except Exception as e:  # provider/model dependent
         raise LLMError(
@@ -352,6 +375,9 @@ class FakeLLM:
             return "fake summary"
         if "query understanding module" in prompt:
             return json.dumps(self._fake_query(prompt))
+        if "evidence listwise ranking module" in prompt:
+            count = len(re.findall(r'^\d+: ', prompt, re.M))
+            return json.dumps({'ranking': list(range(count)), 'irrelevant': [], 'groups': []})
         if "relevance scoring module" in prompt:
             return json.dumps({"scores": self._fake_rerank(prompt)})
         if "sufficiency verifier" in prompt:
@@ -430,10 +456,11 @@ class FakeLLM:
         ents = [w.strip(".,!?\"'") for w in q.split()
                 if w[:1].isupper() and len(w) > 2][:4]
         return {"intent": "fact",
+                "include_history": False,
                 "time_scope": {"from": None, "to": None, "note": ""},
                 "entities": ents,
                 "sub_queries": [q] if q else [],
-                "expanded_queries": [q] if q else []}
+                "expanded_queries": [q] if q else [], "option_queries": []}
 
     def _fake_rerank(self, prompt: str):
         try:

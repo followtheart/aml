@@ -29,7 +29,7 @@ AML_API_KEY     : Bearer token required on /add and /search. Empty = no auth
 AML_DB_PATH     : SQLite file path. Default ./memory.db
 AML_FAKE        : "1" forces offline FakeLLM/FakeEmbedding (no network, for
                   plumbing tests and CI).
-AML_RERANK_MAX_CANDIDATES : bounded rerank cost (ordering only).
+AML_CASCADE_COARSE_LIMIT / AML_CASCADE_FINE_LIMIT / AML_CASCADE_LLM_LIMIT : stage budgets.
 """
 import os
 from pathlib import Path
@@ -98,6 +98,51 @@ EMBED_BATCH_SIZE = max(1, int(os.environ.get(
 API_KEY = os.environ.get("AML_API_KEY", "")
 DB_PATH = os.environ.get("AML_DB_PATH", os.path.join(os.path.dirname(__file__), "..", "memory.db"))
 FAKE = os.environ.get("AML_FAKE", "") == "1"
+
+
+def _cross_encoder_settings():
+    """Reuse credentials only for the exact configured provider origin."""
+    from urllib.parse import urlsplit
+    explicit_url = os.environ.get('AML_CE_API_URL', '').strip()
+    explicit_key = os.environ.get('AML_CE_API_KEY', '').strip()
+    model = os.environ.get('AML_CE_MODEL', '').strip()
+    default_url, default_model = '', ''
+    providers = [(LLM_API_BASE, LLM_API_KEY), (EMBED_API_BASE, EMBED_API_KEY)]
+    for base, key in providers:
+        parsed = urlsplit(base or '')
+        host = parsed.hostname or ''
+        origin = f'{parsed.scheme}://{parsed.netloc}'
+        if host in ('dashscope.aliyuncs.com', 'dashscope-intl.aliyuncs.com', 'dashscope-us.aliyuncs.com') or host.endswith('.maas.aliyuncs.com'):
+            default_url, default_model = origin + '/compatible-api/v1/reranks', 'qwen3-rerank'
+        elif host in ('api.siliconflow.cn', 'api.siliconflow.com'):
+            default_url, default_model = origin + '/v1/rerank', 'BAAI/bge-reranker-v2-m3'
+        else:
+            continue
+        break
+    url = explicit_url or default_url
+    key = explicit_key
+    if not key and url:
+        target = urlsplit(url)
+        for base, candidate_key in providers:
+            source = urlsplit(base or '')
+            if (target.scheme, target.hostname, target.port) == (source.scheme, source.hostname, source.port):
+                key = candidate_key or ''
+                if key:
+                    break
+    return url, key, model or (default_model if not explicit_url or explicit_url == default_url else ''), os.environ.get('AML_CE_API_FORMAT', 'cohere')
+
+
+CE_API_URL, CE_API_KEY, CE_MODEL, CE_API_FORMAT = _cross_encoder_settings()
+CE_TIMEOUT_SECONDS = max(1.0, float(os.environ.get('AML_CE_TIMEOUT_SECONDS', '10')))
+CE_DEADLINE_SECONDS = max(1.0, float(os.environ.get('AML_CE_DEADLINE_SECONDS', '12')))
+CE_BATCH_SIZE = max(1, int(os.environ.get('AML_CE_BATCH_SIZE', '24')))
+CE_MAX_DOCUMENT_BYTES = max(512, int(os.environ.get('AML_CE_MAX_DOCUMENT_BYTES', '4000')))
+CE_MAX_REQUEST_BYTES = max(1024, int(os.environ.get('AML_CE_MAX_REQUEST_BYTES', '90000')))
+CASCADE_COARSE_LIMIT = max(1, int(os.environ.get('AML_CASCADE_COARSE_LIMIT', '50')))
+CASCADE_FINE_LIMIT = max(1, int(os.environ.get('AML_CASCADE_FINE_LIMIT', '12')))
+CASCADE_LLM_LIMIT = max(1, int(os.environ.get('AML_CASCADE_LLM_LIMIT', '10')))
+GRAPH_FUSION_ENABLED = os.environ.get('AML_GRAPH_FUSION_ENABLED', '1') == '1'
+GRAPH_FUSION_MAX_CANDIDATES = max(16, int(os.environ.get('AML_GRAPH_FUSION_MAX_CANDIDATES', '256')))
 LLM_TEMPERATURE = 0.0
 # Additional retries for HTTP 429, independent of parsing/other error retries.
 RATE_LIMIT_RETRIES = max(0, int(os.environ.get("AML_RATE_LIMIT_RETRIES", "6")))
@@ -134,10 +179,37 @@ EMBEDDING_SPACE = os.environ.get(
 SENSITIVE_RECALL_ENABLED = os.environ.get("AML_SENSITIVE_RECALL_ENABLED", "0") == "1"
 GOVERNANCE_NEIGHBORS = 5
 RECALL_PER_ROUTE = 100
-# One compact positional scoring response. The pool expands to at least
-# top_k + 20 so reranking can select evidence, not only rearrange the packet.
+# Retrieval budgets are independent of the final answer's top_k.
+RECALL_VECTOR_LIMIT = max(1, int(os.environ.get("AML_RECALL_VECTOR_LIMIT", "40")))
+RECALL_SOURCE_LIMIT = max(1, int(os.environ.get("AML_RECALL_SOURCE_LIMIT", "40")))
+RECALL_FTS_LIMIT = max(1, int(os.environ.get("AML_RECALL_FTS_LIMIT", "20")))
+RECALL_PROFILE_LIMIT = max(1, int(os.environ.get("AML_RECALL_PROFILE_LIMIT", "8")))
+RECALL_EXPANSION_LIMIT = max(0, int(os.environ.get("AML_RECALL_EXPANSION_LIMIT", "12")))
+RECALL_EXPANSION_MIN_DIRECT = max(1, int(os.environ.get("AML_RECALL_EXPANSION_MIN_DIRECT", "3")))
+# Historical replay settings; v7 uses CASCADE_* and CE_BATCH_SIZE instead.
 RERANK_MAX_CANDIDATES = max(
     10, int(os.environ.get("AML_RERANK_MAX_CANDIDATES", "80")))
+# Bound each provider request independently of the total candidate pool.
+RERANK_BATCH_MAX_CANDIDATES = max(1, int(os.environ.get("AML_RERANK_BATCH_MAX_CANDIDATES", "24")))
+RERANK_MAX_PROMPT_BYTES = max(1024, int(os.environ.get("AML_RERANK_MAX_PROMPT_BYTES", "24000")))
+RERANK_CONCURRENCY = max(1, int(os.environ.get("AML_RERANK_CONCURRENCY", "2")))
+RERANK_DEADLINE_SECONDS = max(1.0, float(os.environ.get("AML_RERANK_DEADLINE_SECONDS", "45")))
+RERANK_REPAIR_MAX_CALLS = max(0, int(os.environ.get("AML_RERANK_REPAIR_MAX_CALLS", "1")))
+RERANK_CALIBRATION_ANCHORS = max(0, min(2, int(os.environ.get('AML_RERANK_CALIBRATION_ANCHORS', '2'))))
+SEARCH_FOLLOWUP_QUERIES = max(0, min(3, int(os.environ.get('AML_SEARCH_FOLLOWUP_QUERIES', '2'))))
+SEARCH_FOLLOWUP_SECONDS = max(1.0, float(os.environ.get('AML_SEARCH_FOLLOWUP_SECONDS', '8')))
+SEARCH_ITEM_MAX_BYTES = max(512, int(os.environ.get('AML_SEARCH_ITEM_MAX_BYTES', '6000')))
+SEARCH_LOCAL_CONCURRENCY = max(1, int(os.environ.get('AML_SEARCH_LOCAL_CONCURRENCY', '4')))
+VECTOR_CHUNK_SIZE = max(64, int(os.environ.get('AML_VECTOR_CHUNK_SIZE', '2048')))
+VECTOR_CACHE_BYTES = max(0, int(os.environ.get('AML_VECTOR_CACHE_BYTES', str(128 * 1024 * 1024))))
+# Approximate recall is opt-in until evaluated on the deployment's own corpus.
+VECTOR_APPROXIMATE = os.environ.get('AML_VECTOR_APPROXIMATE', '0') == '1'
+VECTOR_EXACT_LIMIT = max(64, int(os.environ.get('AML_VECTOR_EXACT_LIMIT', '20000')))
+VECTOR_CANDIDATE_LIMIT = max(64, int(os.environ.get('AML_VECTOR_CANDIDATE_LIMIT', '8192')))
+# EVIDENCE_MIN_RELEVANCE is only used by historical pointwise replay.
+# v7 preserves raw CE logits and uses explicit listwise irrelevant decisions.
+EVIDENCE_MIN_RELEVANCE = min(1.0, max(0.0, float(os.environ.get("AML_EVIDENCE_MIN_RELEVANCE", "0.15"))))
+EVIDENCE_FALLBACK_ITEMS = max(1, int(os.environ.get("AML_EVIDENCE_FALLBACK_ITEMS", "8")))
 
 # ---- ULM lifecycle knobs (llm-memory-survey/memory-system-design.md) ----
 # §3.2 semantic boundary segmentation (embedding drop between adjacent windows)
@@ -166,7 +238,7 @@ FORGET_RECALL_BONUS_DAYS = 15.0
 PROFILE_STABLE_SESSIONS = max(1, int(os.environ.get("AML_PROFILE_STABLE_SESSIONS", "2")))
 PROFILE_TRANSIENT_TTL_DAYS = max(
     1, int(os.environ.get("AML_PROFILE_TRANSIENT_TTL_DAYS", "90")))
-# Search is single-pass; evidence sufficiency is decided by the answer model.
+# Search allows one bounded grounded follow-up; the answer model judges sufficiency.
 # §9.4 hard per-search request budget: wall-clock deadline plus provider
 # call/token caps. Slow models and rate-limit backoffs can exceed 45s;
 # raise the deadline instead of letting a search die mid-flight.

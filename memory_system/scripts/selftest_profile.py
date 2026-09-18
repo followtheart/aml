@@ -10,6 +10,7 @@ from unittest.mock import AsyncMock, patch
 os.environ['AML_FAKE'] = '1'
 os.environ['AML_MEMORY_DEBUG_LOG'] = ''
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from listwise_fixture import from_scores
 from app import add_pipeline as add, config, eval_scoring as scoring, profile, schemas
 from app import search_pipeline as search, store
 from app.embeddings import embed
@@ -227,10 +228,10 @@ class SearchInjectionTests(unittest.IsolatedAsyncioTestCase):
 
         async def scorer(prompt, *a, **k):
             import re
-            if 'relevance scoring module' in prompt:
-                return {'scores': [0.9
-                                   for i in re.findall(r'^\d+:',
-                                                       prompt, re.M)]}
+            if k.get('stage') == 'search.listwise':
+                return from_scores([0.9 if 'bakes bread' in row else
+                                   0.8 if 'Chinese' in row else 0.1
+                                   for row in re.findall(r'^\d+: (.*)$', prompt, re.M)])
             return {'sufficient': True, 'confidence': 0.9, 'missing': '',
                     'follow_up_queries': []}
 
@@ -238,10 +239,12 @@ class SearchInjectionTests(unittest.IsolatedAsyncioTestCase):
              patch.object(search.llm, 'complete_json', side_effect=scorer):
             resp = await search.run_search(self.st, req)
         ids = [d.id for d in resp.data]
-        # Personal evidence survives; core rows retain their retrieval ranks.
+        # Useful profile evidence and instructions share the final budget;
+        # unrelated profiles receive no automatic lexical-route advantage.
         self.assertEqual(set(ids), {rule, pref})
         self.assertEqual(len(resp.data), 2)
         self.assertTrue(resp.packet_hash)
+        self.assertEqual(resp.coverage_manifest['rerank_status'], 'ok')
 
         # Fact intents retain general memories without a fixed profile prefix.
         req2 = schemas.SearchRequest(user_id='u', query='kitchen ideas', top_k=2)
@@ -252,6 +255,7 @@ class SearchInjectionTests(unittest.IsolatedAsyncioTestCase):
         ids2 = [d.id for d in resp2.data]
         self.assertEqual(len(ids2), 2)  # Core profile shares top_k and token budget
         self.assertEqual(resp2.coverage_manifest['core_bytes'], 0)
+        self.assertEqual(resp2.coverage_manifest['rerank_status'], 'ok')
 
     async def test_rule_survives_rerank_rejection(self):
         rule = await self.memory('Always respond politely to the user', type='rule')
@@ -261,9 +265,10 @@ class SearchInjectionTests(unittest.IsolatedAsyncioTestCase):
 
         async def scorer(prompt, *a, **k):
             import re
-            if 'relevance scoring module' in prompt:
-                return {'scores': [0.0
-                                   for i in re.findall(r'^\d+:', prompt, re.M)]}
+            if k.get('stage') == 'search.listwise':
+                self.assertNotIn('Always respond politely', prompt)
+                return from_scores([0.0
+                                   for i in re.findall(r'^\d+:', prompt, re.M)])
             return {'sufficient': True, 'confidence': 0.9, 'missing': '',
                     'follow_up_queries': []}
 
@@ -271,7 +276,8 @@ class SearchInjectionTests(unittest.IsolatedAsyncioTestCase):
                 'intent': 'preference', 'entities': ['jazz']})), \
              patch.object(search.llm, 'complete_json', side_effect=scorer):
             resp = await search.run_search(self.st, req)
-        self.assertIn(rule, [d.id for d in resp.data])
+        self.assertEqual([d.id for d in resp.data], [rule])
+        self.assertEqual(resp.coverage_manifest['rerank_status'], 'ok')
 
 
 class DirectChoiceTests(unittest.IsolatedAsyncioTestCase):

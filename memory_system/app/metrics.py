@@ -111,6 +111,13 @@ def _usage(response):
     return prompt, completion, total
 
 
+class ResponseParseError(ValueError):
+    """A billed response failed parsing; retain usage, never its content."""
+    def __init__(self, response):
+        super().__init__('Provider returned an invalid structured response')
+        self.usage = _usage(response)
+
+
 async def _measured_call(
         *, kind: str, stage: str, model: str,
         call: Callable[[int], Awaitable], attempts: int = 2,
@@ -162,6 +169,11 @@ async def _measured_call(
             return result
         except Exception as exc:
             duration = time.perf_counter() - started
+            failed_usage = exc.usage if isinstance(exc, ResponseParseError) else (0, 0, 0)
+            if failed_usage[2]:
+                if limits:
+                    limits.tokens += failed_usage[2]
+                pacer.record(failed_usage[2])
             delay = 0.0
             if _rate_limited(exc):
                 will_retry = rate_retries < config.RATE_LIMIT_RETRIES
@@ -183,6 +195,9 @@ async def _measured_call(
                 f"will_retry={str(will_retry).lower()}",
                 f"retry_delay_s={delay:.3f}",
                 f"error_type={type(exc).__name__}",
+                f"prompt_tokens={failed_usage[0]}",
+                f"completion_tokens={failed_usage[1]}",
+                f"total_tokens={failed_usage[2]}",
             ]
             if input_count is not None:
                 parts.append(f"input_count={input_count}")

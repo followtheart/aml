@@ -1,8 +1,10 @@
 """Versioned claims, source identity and consistent historical read projections."""
 import hashlib
 import json
+import sqlite3
+import threading
 from contextlib import contextmanager
-from . import integrity
+from . import budget, integrity
 
 SCHEMA = '''
 CREATE TABLE IF NOT EXISTS claim_versions (
@@ -127,10 +129,13 @@ class ProvenanceStore:
         return sorted(found)
 
     def dependencies_for(self, view_id, view_kind='amu'):
+        scope, params = self._scope_clause()
         return [dict(r) for r in self.conn.execute(
-            'SELECT source_id,source_version FROM view_dependencies WHERE view_kind=? AND view_id=?', (view_kind, view_id))]
+            'SELECT source_id,source_version FROM view_dependencies WHERE view_kind=? AND view_id=?' + scope,
+            (view_kind, view_id, *params))]
 
     def get_feedback(self, user_id, event_id):
+        self._check_user(user_id)
         row = self.conn.execute('SELECT * FROM feedback_events WHERE user_id=? AND event_id=?', (user_id, event_id)).fetchone()
         if row is None:
             return None
@@ -163,27 +168,57 @@ class ProvenanceStore:
     @contextmanager
     def snapshot(self, user_id, min_revision=None, as_of=None):
         """An isolated read projection; live Store.assert_epoch guards final delivery."""
-        from .store import Store, _LOCK, _now
+        self._check_user(user_id)
+        from .store import Store, _now
         if as_of and integrity.instant(as_of) > integrity.instant(_now()):
             raise ValueError('as_of cannot be in the future')
-        work = Store(':memory:')
-        try:
-            with _LOCK:
-                self.conn.execute('BEGIN')
+        budget.check()
+        # Latest file reads use an independent WAL transaction. Historical
+        # projections and private in-memory stores retain isolated reconstruction.
+        live_read = self.path != ':memory:' and not as_of and not hasattr(self, '_pending')
+        work = object.__new__(Store) if live_read else Store(':memory:')
+        if live_read:
+            work.path = self.path
+            work.conn = sqlite3.connect(self.path, check_same_thread=False)
+            work.conn.row_factory = sqlite3.Row
+            work._lock = threading.RLock()
+            work._cache_identity = self._cache_identity
+            work.conn.execute('PRAGMA query_only=ON')
+        limits = budget.current.get()
+        if limits:
+            def interrupt():
                 try:
-                    state = self.user_state(user_id)
-                    if min_revision is not None and state['revision'] < min_revision:
-                        raise ValueError('Requested revision is not committed')
-                    self._copy_user_to(work, user_id)
-                finally:
-                    self.conn.rollback()
+                    limits.check()
+                    return 0
+                except TimeoutError:
+                    return 1
+            work.conn.set_progress_handler(interrupt, 1000)
+        try:
+            if live_read:
+                work.conn.execute('BEGIN')
+                state = work.user_state(user_id)  # Pin revision, epoch and rows atomically.
+                if min_revision is not None and state['revision'] < min_revision:
+                    raise ValueError('Requested revision is not committed')
+            else:
+                with self._lock:
+                    self.conn.execute('BEGIN')
+                    try:
+                        state = self.user_state(user_id)
+                        if min_revision is not None and state['revision'] < min_revision:
+                            raise ValueError('Requested revision is not committed')
+                        self._copy_user_to(work, user_id)
+                    finally:
+                        self.conn.rollback()
             work.read_revision, work.read_epoch = state['revision'], state['epoch']
+            work.read_user_id = user_id
+            work._origin = getattr(self, '_origin', self)
             work.read_as_of = as_of
             if as_of:
                 work._project_as_of(user_id, as_of)
             work.conn.execute('PRAGMA query_only=ON')
             yield work
         finally:
+            work.conn.set_progress_handler(None, 0)
             work.conn.close()
 
     def _project_as_of(self, user_id, as_of):
@@ -192,9 +227,11 @@ class ProvenanceStore:
         chosen = {}
         suppressed = {r[0] for r in self.conn.execute("SELECT id FROM amu WHERE user_id=? AND sensitivity='suppressed'", (user_id,))}
         for row in self.conn.execute('SELECT * FROM amu WHERE user_id=?', (user_id,)):
+            budget.check()
             if row['recorded_from'] and integrity.instant(row['recorded_from']) <= at:
                 chosen[row['id']] = (dict(row), None, None)
         for row in self.conn.execute('SELECT * FROM claim_versions WHERE user_id=?', (user_id,)):
+            budget.check()
             if row['recorded_from'] and integrity.instant(row['recorded_from']) <= at < integrity.instant(row['recorded_to']):
                 payload = json.loads(row['payload'])
                 if isinstance(payload.get('embedding'), dict):
@@ -204,6 +241,7 @@ class ProvenanceStore:
         self.conn.execute('DELETE FROM amu WHERE user_id=?', (user_id,))
         self.conn.execute('DELETE FROM amu_fts WHERE user_id=?', (user_id,))
         for aid, (payload, sources, triples) in chosen.items():
+            budget.check()
             if aid in suppressed:
                 continue
             names = list(payload)

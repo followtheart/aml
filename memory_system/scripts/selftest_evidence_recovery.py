@@ -8,7 +8,8 @@ import unittest
 from unittest.mock import AsyncMock, patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from app import (add_pipeline as add, answer_context, config, evidence_packet,
+from listwise_fixture import from_scores
+from app import (add_pipeline as add, answer_context, config, cross_encoder, evidence_packet,
                  graph, personal_evidence, schemas, search_pipeline as search, store)
 
 
@@ -38,7 +39,7 @@ class RecoveryTests(unittest.IsolatedAsyncioTestCase):
         async def rank(prompt, *args, **kwargs):
             self.assertIn('runway fashion in Milan', prompt)
             self.assertIn('role: assistant', prompt)
-            return {'scores': [0.9]}
+            return from_scores([0.9])
         with patch.object(search, '_understand', AsyncMock(return_value={'intent': 'fact'})), \
                 patch.object(search.llm, 'complete_json', side_effect=rank) as call:
             response = await search.run_search(self.st, self.req(top_k=1))
@@ -143,31 +144,43 @@ class RecoveryTests(unittest.IsolatedAsyncioTestCase):
                    'evidence': [{'message_index': 0, 'quote': text}]}, req.messages, 0, req)
         self.assertEqual((fact['type'], fact['epistemic_status']), ('fact', 'inferred'))
 
-    async def test_single_rank_pool_can_promote_candidate_beyond_old_head(self):
-        rows = [{'id': f'm{i}', 'content': f'record {i}'} for i in range(90)]
-        plan = {}
+    async def test_coverage_reservation_and_ce_promote_candidate_beyond_coarse_head(self):
+        rows = [{'id': f'm{i}', 'content': f'record {i}', '_fused': 1-i/100}
+                for i in range(90)]
+        rows[60]['_coverage_ids'] = ['rare']
+        plan = {'_coverage_requirements': [{'id': 'rare', 'text': 'record 60'}]}
+        submitted = []
+        async def ce(query, documents, **kwargs):
+            submitted.extend(documents)
+            return [12.5 if text == 'record 60' else -3.0 for text in documents]
         async def rank(prompt, *args, **kwargs):
-            self.assertEqual(len(re.findall(r'^\d+:', prompt, re.M)), 70)
-            self.assertEqual(kwargs['stage'], 'search.rerank.batch_1')
-            scores = [0.1] * 70
-            scores[60] = 0.99
-            return {'scores': scores}
-        with patch.object(config, 'RERANK_MAX_CANDIDATES', 40), \
+            lines = re.findall(r'^\d+: (.*)$', prompt, re.M)
+            self.assertLessEqual(len(lines), 10)
+            return from_scores([.99 if 'record 60' in line else .1 for line in lines])
+        with patch.object(cross_encoder, 'rerank', side_effect=ce), \
                 patch.object(search.llm, 'complete_json', side_effect=rank) as call:
             ranked = await search._filter_rerank(self.req(top_k=50), plan, rows)
         self.assertEqual(call.call_count, 1)
+        self.assertEqual(len(set(submitted)), 50)
+        for stage in ('coarse', 'fine', 'listwise'):
+            self.assertIn('m60', plan['_cascade'][stage]['selected_ids'])
         self.assertEqual(ranked[0]['id'], 'm60')
-        self.assertEqual([m['id'] for m in ranked[70:]], [f'm{i}' for i in range(70, 90)])
+        self.assertEqual(ranked[0]['_final'], 12.5)
+        self.assertEqual([m['id'] for m in ranked if m['_cascade_selected']], ['m60'])
 
-    async def test_invalid_scores_keep_coherent_fusion_order(self):
-        for values in ([0.9], [0.9, True], [0.9, float('nan')], [0.9, 1.1], [0.9, -0.1]):
-            with self.subTest(values=values), patch.object(search.llm, 'complete_json',
-                    AsyncMock(return_value={'scores': values})):
+    async def test_invalid_listwise_permutations_fall_back_to_ce_order(self):
+        for ranking in ([0], [0, 0], [0, True], [0, 9]):
+            with self.subTest(ranking=ranking), patch.object(search.llm, 'complete_json',
+                    AsyncMock(return_value=dict(ranking=ranking, irrelevant=[], groups=[]))) as call, \
+                    patch.object(cross_encoder, 'rerank', AsyncMock(return_value=[.2, .8])):
                 plan = {}
                 ranked = await search._filter_rerank(self.req(), plan,
                           [dict(id='a', content='one'), dict(id='b', content='two')])
-                self.assertEqual([m['id'] for m in ranked], ['a', 'b'])
-                self.assertTrue(all(m['reason'] == 'global_rrf_fallback' for m in plan['_rerank']))
+                self.assertEqual([m['id'] for m in ranked], ['b', 'a'])
+                self.assertEqual([m['_final'] for m in ranked], [.8, .2])
+                self.assertTrue(all(m['_cascade_selected'] for m in ranked))
+                self.assertEqual(call.call_count, 2)
+                self.assertEqual(plan['_cascade']['listwise']['status'], 'fallback')
 
     def test_fashion_draft_beats_editorial_messages(self):
         aid = self.memory(type='episode', sources=[('user', 'Please refine this note.'),

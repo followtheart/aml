@@ -156,7 +156,9 @@ async def _govern_passthrough(st, user_id, fact, vec):
 
 async def _rerank_passthrough(req, plan, fused, scored=None):
     # Packing applies top_k after prioritizing explicit forget constraints.
-    return [dict(c, _final=c.get("_fused", 0)) for c in fused]
+    plan['_cascade'] = dict(ablation='no_rerank', omitted=[])
+    plan['_rerank_status'] = 'not_run'
+    return [dict(c, _cascade_selected=True, _listwise_rank=i, _score_kind='graph_fallback') for i, c in enumerate(fused)]
 
 
 def apply_ablations(args):
@@ -164,6 +166,7 @@ def apply_ablations(args):
         add_pipeline._govern_one = _govern_passthrough
     if args.no_graph:
         search_pipeline.graph.ppr_recall = lambda *a, **k: []
+        search_pipeline.config.GRAPH_FUSION_ENABLED = False
     if args.no_rerank:
         search_pipeline._filter_rerank = _rerank_passthrough
     if args.no_keyexp:
@@ -275,6 +278,9 @@ async def main():
                         f"[search error: {type(exc).__name__}] "
                         f"{qa['question'][:60]}")
                 else:
+                    rerank_status = resp.coverage_manifest.get('rerank_status')
+                    if rerank_status in ('partial', 'fallback'):
+                        progress.write(f'[search degraded: rerank {rerank_status}] ' + qa['question'][:60])
                     pred, score, diagnostics = await progress.run(
                         eval_scoring.evaluate(
                             qa,
@@ -282,6 +288,7 @@ async def main():
                         f"Answer/Judge conv {ci}/{conv_count} QA {qi}/{len(qas)}")
                     diagnostics.update(search_id=resp.search_id, packet_hash=resp.packet_hash,
                                        evidence_status=resp.evidence_status,
+                                       search_degraded=rerank_status in ('partial', 'fallback'),
                                        coverage_manifest=resp.coverage_manifest)
                 n_qa += 1
                 score_sum += score

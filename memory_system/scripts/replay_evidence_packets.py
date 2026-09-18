@@ -101,12 +101,19 @@ def main():
                                      options=trace.get('options'), top_k=trace['top_k'],
                                      evidence_token_budget=args.budget)
         plan = copy.deepcopy(trace['plan'])
+        cascade = trace.get('cascade') or trace.get('coverage_manifest', {}).get('cascade')
+        ranking = recorded_ranking(trace)
+        if cascade:
+            plan['_cascade'] = copy.deepcopy(cascade)
+            plan['_evidence_groups'] = copy.deepcopy(trace.get('evidence_groups',
+                trace.get('coverage_manifest', {}).get('requested_evidence_groups', [])))
+            ranking = [c for c in ranking if c.get('_cascade_selected')]
         routes = [route['candidates'] for route in trace['routes']]
         admitted = {m['id'] for route in routes for m in route}
         fused_ids = {m['id'] for m in trace['fused']}
         # Hold the previous ranking fixed to isolate packaging changes.
         packet, digest, manifest = search_pipeline._pack_evidence(
-            adapter, req, plan, recorded_ranking(trace), trace['anchor_time'])
+            adapter, req, plan, ranking, trace['anchor_time'])
         rendered = answer_context.build(packet)
         schema_packet = [schemas.SearchItem(**m).model_dump() for m in packet]
         assert answer_context.build(schema_packet) == rendered

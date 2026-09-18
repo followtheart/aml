@@ -24,7 +24,7 @@ from typing import Dict, List, Optional
 
 import numpy as np
 
-from . import config, graph, integrity
+from . import budget, config, graph, integrity, vector_index
 from .provenance import ProvenanceStore, source_identity
 
 _LOCK = threading.RLock()
@@ -114,6 +114,7 @@ CREATE TABLE IF NOT EXISTS triples (
 );
 CREATE INDEX IF NOT EXISTS idx_triples_user ON triples(user_id);
 CREATE INDEX IF NOT EXISTS idx_triples_ent ON triples(user_id, subject);
+CREATE INDEX IF NOT EXISTS idx_triples_candidate ON triples(user_id, amu_id, id);
 
 CREATE TABLE IF NOT EXISTS sessions (
   user_id TEXT NOT NULL,
@@ -186,10 +187,11 @@ def _now_dt() -> datetime:
 class Store(ProvenanceStore):
     def __init__(self, path: Optional[str] = None):
         self.path = path or config.DB_PATH
+        self._lock = _LOCK
         self.conn = sqlite3.connect(self.path, check_same_thread=False)
         self.conn.row_factory = sqlite3.Row
         self._add_locks = weakref.WeakValueDictionary()
-        with _LOCK:
+        with self._lock:
             self.conn.execute("PRAGMA busy_timeout=5000")
             if self.path != ":memory:":
                 self.conn.execute("PRAGMA journal_mode=WAL")
@@ -223,6 +225,26 @@ class Store(ProvenanceStore):
             self.conn.executescript(FTS_SCHEMA)
             self.conn.executescript(SOURCE_SCHEMA)
             self._init_provenance()
+            self.conn.executescript('''
+                CREATE TABLE IF NOT EXISTS search_database_identity (id INTEGER PRIMARY KEY CHECK(id=1), value TEXT NOT NULL);
+                CREATE TABLE IF NOT EXISTS vector_generations (user_id TEXT PRIMARY KEY, generation INTEGER NOT NULL DEFAULT 0);
+                CREATE TRIGGER IF NOT EXISTS vector_insert AFTER INSERT ON amu BEGIN
+                  INSERT INTO vector_generations VALUES (NEW.user_id,1)
+                  ON CONFLICT(user_id) DO UPDATE SET generation=generation+1;
+                END;
+                CREATE TRIGGER IF NOT EXISTS vector_delete AFTER DELETE ON amu BEGIN
+                  INSERT INTO vector_generations VALUES (OLD.user_id,1)
+                  ON CONFLICT(user_id) DO UPDATE SET generation=generation+1;
+                END;
+                CREATE TRIGGER IF NOT EXISTS vector_update AFTER UPDATE OF embedding,embedding_space,user_id ON amu BEGIN
+                  INSERT INTO vector_generations VALUES (OLD.user_id,1)
+                  ON CONFLICT(user_id) DO UPDATE SET generation=generation+1;
+                  INSERT INTO vector_generations VALUES (NEW.user_id,1)
+                  ON CONFLICT(user_id) DO UPDATE SET generation=generation+1;
+                END;
+            ''')
+            self.conn.execute('INSERT OR IGNORE INTO search_database_identity VALUES (1,?)', (uuid.uuid4().hex,))
+            self._cache_identity = self.conn.execute('SELECT value FROM search_database_identity WHERE id=1').fetchone()[0]
             # Source text is immutable. Backfill older databases without changing
             # their claims, privacy labels, vectors or recorded revisions.
             self.conn.execute("""INSERT INTO source_fts(request_id,message_index,user_id,content)
@@ -243,6 +265,7 @@ class Store(ProvenanceStore):
 
     def _touch_user(self, user_id):
         """Advance a live user's revision; staged stores advance on publish."""
+        self._check_user(user_id)
         if hasattr(self, "_pending"):
             return
         self.conn.execute(
@@ -251,16 +274,20 @@ class Store(ProvenanceStore):
 
     def _copy_user_to(self, work, user_id):
         """Copy only one user's state; avoids an O(database) Add snapshot."""
+        self._check_user(user_id)
         def copy(table, where, params):
-            rows = self.conn.execute(f"SELECT * FROM {table} WHERE {where}", params).fetchall()
-            if not rows:
-                return
-            columns = rows[0].keys()
-            placeholders = ",".join("?" for _ in columns)
-            names = ",".join(columns)
-            work.conn.executemany(
-                f"INSERT INTO {table}({names}) VALUES ({placeholders})",
-                ([row[name] for name in columns] for row in rows))
+            budget.check()
+            cursor = self.conn.execute(f"SELECT * FROM {table} WHERE {where}", params)
+            try:
+                while rows := cursor.fetchmany(512):
+                    budget.check()
+                    columns = rows[0].keys()
+                    placeholders = ",".join("?" for _ in columns)
+                    names = ",".join(columns)
+                    work.conn.executemany(f"INSERT INTO {table}({names}) VALUES ({placeholders})",
+                                          ([row[name] for name in columns] for row in rows))
+            finally:
+                cursor.close()
 
         copy("amu", "user_id=?", (user_id,))
         copy("scenes", "user_id=?", (user_id,))
@@ -278,7 +305,8 @@ class Store(ProvenanceStore):
         work.conn.commit()
 
     def user_state(self, user_id):
-        with _LOCK:
+        self._check_user(user_id)
+        with self._lock:
             revision = self.conn.execute(
                 "SELECT revision FROM user_revisions WHERE user_id=?", (user_id,)).fetchone()
             epoch = self.conn.execute(
@@ -286,8 +314,19 @@ class Store(ProvenanceStore):
         return {"revision": revision[0] if revision else 0, "epoch": epoch[0] if epoch else 0}
 
     def assert_epoch(self, user_id, expected_epoch):
+        self._check_user(user_id)
+        if hasattr(self, '_origin'):
+            return self._origin.assert_epoch(user_id, expected_epoch)
         if self.user_state(user_id)["epoch"] != expected_epoch:
             raise MemoryDeleted("Memory deleted while request was in progress")
+
+    def _scope_clause(self, alias=''):
+        user = getattr(self, 'read_user_id', None)
+        return (f' AND {alias}user_id=?', [user]) if user is not None else ('', [])
+
+    def _check_user(self, user_id):
+        if getattr(self, 'read_user_id', user_id) != user_id:
+            raise ValueError('Read snapshot belongs to another user')
 
     @contextmanager
     def staged(self, user_id, expected_epoch=None):
@@ -296,9 +335,10 @@ class Store(ProvenanceStore):
         Different users can prepare and commit independently. A same-user change
         is detected through a per-user revision and must be retried.
         """
+        self._check_user(user_id)
         work = Store(":memory:")
         try:
-            with _LOCK:
+            with self._lock:
                 self.conn.execute("BEGIN")
                 try:
                     epoch = self.user_state(user_id)["epoch"]
@@ -313,7 +353,7 @@ class Store(ProvenanceStore):
                     self.conn.rollback()
             work._pending = []
             yield work
-            with _LOCK:
+            with self._lock:
                 self.conn.execute("BEGIN IMMEDIATE")
                 try:
                     self.assert_epoch(user_id, epoch)
@@ -400,10 +440,12 @@ class Store(ProvenanceStore):
         return new_event
 
     def sources_for_amu(self, amu_id):
+        scope, params = self._scope_clause('m.')
         return [dict(r) for r in self.conn.execute(
             "SELECT m.* FROM source_messages m JOIN amu_sources s "
             "ON m.request_id=s.request_id AND m.message_index=s.message_index "
-            "WHERE s.amu_id=? ORDER BY m.request_id,m.message_index", (amu_id,))]
+            "JOIN amu a ON a.id=s.amu_id AND a.user_id=m.user_id "
+            "WHERE s.amu_id=?" + scope + " ORDER BY m.request_id,m.message_index", (amu_id, *params))]
 
     def replace_fact(self, amu_id, fact, embedding):
         """Replace derived representations together; caller supplies final-text vector."""
@@ -432,21 +474,22 @@ class Store(ProvenanceStore):
 
     # ---------------- idempotency ----------------
     def request_seen(self, request_id: str) -> bool:
-        with _LOCK:
+        with self._lock:
             row = self.conn.execute(
                 "SELECT 1 FROM requests WHERE request_id=?",
                 (request_id,)).fetchone()
             return row is not None
 
     def request_owner(self, request_id: str) -> Optional[Dict]:
-        with _LOCK:
+        with self._lock:
             row = self.conn.execute(
                 "SELECT user_id,session_id FROM requests WHERE request_id=?",
                 (request_id,)).fetchone()
         return dict(row) if row else None
 
     def record_request(self, request_id: str, user_id: str, session_id: str):
-        with _LOCK:
+        self._check_user(user_id)
+        with self._lock:
             self._write(
                 "INSERT OR IGNORE INTO requests VALUES (?,?,?,?)",
                 (request_id, user_id, session_id, _now()))
@@ -455,14 +498,16 @@ class Store(ProvenanceStore):
 
     def add_lock(self, user_id):
         """Serialize same-user Adds per process while allowing other users."""
+        self._check_user(user_id)
         key = (id(asyncio.get_running_loop()), user_id)
         return self._add_locks.setdefault(key, asyncio.Lock())
 
     def purge_user(self, user_id: str) -> Dict:
         """Hard-delete one user's content and retain a content-free receipt."""
+        self._check_user(user_id)
         receipt_id = f"purge_{uuid.uuid4().hex}"
         deleted_at = _now()
-        with _LOCK:
+        with self._lock:
             self.conn.execute("BEGIN IMMEDIATE")
             try:
                 counts = {
@@ -489,6 +534,7 @@ class Store(ProvenanceStore):
             except BaseException:
                 self.conn.rollback()
                 raise
+        vector_index.evict(self._cache_identity, user_id, self.user_state(user_id)['epoch'])
         return {"receipt_id": receipt_id, "user_id": user_id,
                 "deleted_at": deleted_at, "row_counts": counts}
 
@@ -503,6 +549,7 @@ class Store(ProvenanceStore):
                    scene_id=None, cell_id=None, polarity=None,
                    helpful=0, harmful=0, verified=False,
                    task_signature=None, epistemic_status='asserted', resolution_status='accepted') -> str:
+        self._check_user(user_id)
         integrity.validate_interval(valid_from, valid_to)
         integrity.validate_interval((temporal or {}).get("start"), (temporal or {}).get("end"))
         if epistemic_status not in ('asserted', 'observed', 'inferred', 'planned'):
@@ -518,7 +565,7 @@ class Store(ProvenanceStore):
         expires_at = ((_now_dt() + timedelta(
             days=config.PROFILE_TRANSIENT_TTL_DAYS)).isoformat()
             if profile_status == "transient" else None)
-        with _LOCK:
+        with self._lock:
             self._write(
                 """INSERT INTO amu (id,user_id,session_id,content,compressed_content,retrieval_key,
                    type,entities,keywords,event_time,valid_from,valid_to,
@@ -560,7 +607,7 @@ class Store(ProvenanceStore):
 
     def update_amu_content(self, amu_id: str, content: str,
                            confidence: Optional[float] = None):
-        with _LOCK:
+        with self._lock:
             self._archive_claim(amu_id, 'correction')
             self._write(
                 "UPDATE amu SET content=?, embedding=NULL, embedding_space=NULL, retrieval_key='', "
@@ -577,7 +624,7 @@ class Store(ProvenanceStore):
             self.conn.commit()
 
     def close_validity(self, amu_id: str, valid_to: str):
-        with _LOCK:
+        with self._lock:
             current = self.conn.execute("SELECT valid_from,valid_to FROM amu WHERE id=?", (amu_id,)).fetchone()
             if current is None or current["valid_to"] is not None:
                 raise ValueError("Cannot close a missing or already closed memory")
@@ -593,22 +640,24 @@ class Store(ProvenanceStore):
             self.conn.commit()
 
     def link_supersession(self, old_id: str, new_id: str):
-        with _LOCK:
+        with self._lock:
             self._write("UPDATE amu SET superseded_by=? WHERE id=?", (new_id, old_id))
             self.conn.commit()
 
     def get_amus(self, user_id: str, only_valid: bool = True) -> List[Dict]:
+        self._check_user(user_id)
         q = "SELECT * FROM amu WHERE user_id=?"
         if only_valid:
             q += " AND valid_to IS NULL"
-        with _LOCK:
+        with self._lock:
             rows = self.conn.execute(q, (user_id,)).fetchall()
         return [self._row_to_dict(r) for r in rows]
 
     def get_by_type(self, user_id: str, types: List[str], include_history=False,
                     include_sensitive=False) -> List[Dict]:
+        self._check_user(user_id)
         ph = ",".join("?" * len(types))
-        with _LOCK:
+        with self._lock:
             rows = self.conn.execute(
                 f"SELECT * FROM amu WHERE user_id=?"
                 + ("" if include_history else " AND valid_to IS NULL")
@@ -623,81 +672,81 @@ class Store(ProvenanceStore):
                                   scene_ids: Optional[List[str]] = None,
                                   include_cold=False,
                                   include_sensitive=False) -> List[List[Dict]]:
-        """Load a user's matrix once and rank any number of query vectors."""
-        sql = ("SELECT id,user_id,session_id,content,compressed_content,retrieval_key,type,"
-             "event_time,valid_from,valid_to,supersedes,created_at,scene_id,cell_id,tier,"
-               "temporal,state,profile_status,expires_at,sensitivity,polarity,helpful,harmful,"
-               "verified,task_signature,embedding FROM amu"
-               " WHERE user_id=? AND embedding NOT NULL AND embedding_space=?"
-               + ("" if include_history else " AND valid_to IS NULL")
-               + ("" if include_sensitive else " AND sensitivity!='sensitive'")
-               + _SUPPRESSED
-               + ("" if include_cold else " AND tier!='cold'"))
+        """Reuse immutable vectors; refilter eligibility in the current snapshot."""
+        self._check_user(user_id)
+        budget.check()
+        queries = np.atleast_2d(vecs)
+        if k <= 0 or scene_ids == []:
+            return [[] for _ in queries]
+        conditions = ("user_id=? AND embedding NOT NULL AND embedding_space=?"
+                      + ("" if include_history else " AND valid_to IS NULL")
+                      + ("" if include_sensitive else " AND sensitivity!='sensitive'")
+                      + _SUPPRESSED
+                      + ("" if include_cold else " AND tier!='cold'"))
         params = [user_id, config.EMBEDDING_SPACE]
         if scene_ids is not None:
-            if not scene_ids:
-                return [[] for _ in np.atleast_2d(vecs)]
-            sql += f" AND scene_id IN ({','.join('?' * len(scene_ids))})"
+            conditions += f" AND scene_id IN ({','.join('?' * len(scene_ids))})"
             params.extend(scene_ids)
-        with _LOCK:
-            rows = self.conn.execute(sql, params).fetchall()
-        if not rows:
-            return [[] for _ in np.atleast_2d(vecs)]
-        mat = np.stack([np.frombuffer(r["embedding"], dtype=np.float32)
-                        for r in rows])
-        queries = np.asarray(vecs, dtype=np.float32)
-        if queries.ndim == 1:
-            queries = queries[None, :]
-        if mat.shape[1] != queries.shape[1]:
-            raise ValueError("Stored and query embedding dimensions differ")
-        scores = queries @ mat.T
-        results = []
-        for query_scores in scores:
-            out = []
-            for i in np.argsort(-query_scores)[:k]:
-                d = {c: rows[int(i)][c] for c in rows[int(i)].keys()
-                     if c != "embedding"}
-                for key in ("temporal", "state"):
-                    d[key] = json.loads(d.get(key) or "null")
-                d["_score"] = float(query_scores[int(i)])
-                out.append(d)
-            results.append(out)
-        return results
+        with self._lock:
+            allowed = [r[0] for r in self.conn.execute('SELECT id FROM amu WHERE ' + conditions, params)]
+            if not allowed:
+                return [[] for _ in queries]
+            generation = self.conn.execute('SELECT generation FROM vector_generations WHERE user_id=?',
+                                           (user_id,)).fetchone()
+            generation = generation[0] if generation else 0
+            epoch = self.user_state(user_id)['epoch']
+            key = (self._cache_identity, user_id, config.EMBEDDING_SPACE, epoch, generation)
+            def load():
+                return self.conn.execute('SELECT id,embedding FROM amu WHERE user_id=? '
+                                         'AND embedding_space=? AND embedding NOT NULL ORDER BY id',
+                                         (user_id, config.EMBEDDING_SPACE))
+            index, cache_hit = vector_index.get(key, load)
+            rankings, diagnostics = index.search(queries, allowed, k)
+            found_ids = list(dict.fromkeys(mid for ranking in rankings for mid, _ in ranking))
+            by_id = {}
+            for start in range(0, len(found_ids), 500):
+                budget.check()
+                ids = found_ids[start:start + 500]
+                sql = 'SELECT * FROM amu WHERE ' + conditions + f" AND id IN ({','.join('?' * len(ids))})"
+                for row in self.conn.execute(sql, [*params, *ids]):
+                    item = self._row_to_dict(row)
+                    item.pop('embedding', None)
+                    by_id[item['id']] = item
+        self.vector_diagnostics = dict(cache_hit=cache_hit, generation=generation, queries=diagnostics)
+        return [[dict(by_id[mid], _score=score) for mid, score in ranking if mid in by_id]
+                for ranking in rankings]
 
     def nearest_by_embedding(self, user_id: str, vec: np.ndarray,
                              k: int, include_history=False) -> List[Dict]:
+        self._check_user(user_id)
         return self.nearest_many_by_embedding(
             user_id, np.asarray(vec)[None, :], k, include_history)[0]
 
     def fts_search(self, user_id: str, query: str, k: int, include_history=False,
                    include_sensitive=False, include_cold=False) -> List[Dict]:
-        # OR semantics keeps recall high for keyword-ish queries.
-        # FTS5 MATCH is syntax-sensitive: keep only alnum tokens, quote each.
+        # Share stop words and CJK tokenization with source recall and excerpts.
+        self._check_user(user_id)
+        from .personal_evidence import terms as query_terms
         import re as _re
-        cjk = "".join(_re.findall(r"[\u3400-\u9fff]", query))
-        if len(cjk) >= 2:
-            grams = list(dict.fromkeys(cjk[i:i + 2] for i in range(len(cjk) - 1)))[:20]
-            clauses = " OR ".join("content LIKE ? OR retrieval_key LIKE ?" for _ in grams)
-            params = [value for gram in grams for value in (f"%{gram}%", f"%{gram}%")]
+        terms = sorted(query_terms(query))[:40]
+        if not terms:
+            return []
+        if _re.search(r"[\u3400-\u9fff]{2}", query):
+            clauses = " OR ".join("content LIKE ? OR retrieval_key LIKE ?" for _ in terms)
+            params = [value for term in terms for value in (f"%{term}%", f"%{term}%")]
+            score = ' + '.join('(content LIKE ? OR COALESCE(retrieval_key,\'\') LIKE ?)' for _ in terms)
             history = "" if include_history else " AND valid_to IS NULL"
             sensitive = "" if include_sensitive else " AND sensitivity!='sensitive'"
             cold = "" if include_cold else " AND tier!='cold'"
-            with _LOCK:
+            with self._lock:
                 rows = self.conn.execute(
-                    f"SELECT * FROM amu WHERE user_id=?{history}{sensitive}{_SUPPRESSED}{cold} AND ({clauses}) LIMIT ?",
-                    (user_id, *params, k)).fetchall()
+                    f"SELECT *, ({score}) AS _score FROM amu WHERE user_id=?"
+                    f"{history}{sensitive}{_SUPPRESSED}{cold} AND ({clauses}) ORDER BY _score DESC,id LIMIT ?",
+                    (*params, user_id, *params, k)).fetchall()
             out = [self._row_to_dict(r) for r in rows]
-            for item in out:
-                item["_score"] = float(sum(
-                    gram in (item["content"] + " " + (item.get("retrieval_key") or ""))
-                    for gram in grams))
-            return sorted(out, key=lambda item: -item["_score"])
-        terms = [t for t in (_re.sub(r"[^0-9A-Za-z]", "", t)
-                             for t in query.split()) if len(t) > 1]
-        if not terms:
-            return []
-        match = " OR ".join(f'"{t}"' for t in terms[:20])
-        with _LOCK:
+            return out
+        match = " OR ".join(f'"{t}"' for t in terms)
+        with self._lock:
             rows = self.conn.execute(
                 """SELECT f.amu_id, bm25(amu_fts) AS rank FROM amu_fts f
                    WHERE amu_fts MATCH ? AND f.user_id=?
@@ -711,7 +760,7 @@ class Store(ProvenanceStore):
         if not ids:
             return []
         ph = ",".join("?" * len(ids))
-        with _LOCK:
+        with self._lock:
             amu_rows = self.conn.execute(
                 f"SELECT * FROM amu WHERE id IN ({ph})"
                 + ("" if include_cold else " AND tier!='cold'")
@@ -731,6 +780,7 @@ class Store(ProvenanceStore):
 
     def temporal_search(self, user_id, time_scope, k, include_sensitive=False):
         """Recall memories whose event/validity intervals overlap the query scope."""
+        self._check_user(user_id)
         start = (time_scope or {}).get("from")
         end = (time_scope or {}).get("to")
         if not start and not end:
@@ -739,7 +789,7 @@ class Store(ProvenanceStore):
             end = integrity.resolve_time(end, None).get("end") or end
         start = start or "0000-01-01T00:00:00Z"
         end = end or "9999-12-31T23:59:59Z"
-        with _LOCK:
+        with self._lock:
             rows = self.conn.execute(
                 "SELECT * FROM amu WHERE user_id=? "
                 + ("" if include_sensitive else "AND sensitivity!='sensitive' ") + _SUPPRESSED + " AND "
@@ -764,23 +814,25 @@ class Store(ProvenanceStore):
         Joining through amu_sources is essential: historical reads, retractions,
         privacy and user isolation apply even when a source remains indexed.
         """
+        self._check_user(user_id)
         from .personal_evidence import terms
         import re
-        tokens = sorted(terms(query))
-        cjk = ''.join(re.findall(r'[\u3400-\u9fff]', query))
-        if not tokens and len(cjk) < 2:
+        tokens = sorted(terms(query))[:40]
+        if not tokens:
             return []
-        if len(cjk) >= 2:
-            grams = list(dict.fromkeys(cjk[i:i + 2] for i in range(len(cjk) - 1)))[:20]
-            match_sql = '(' + ' OR '.join('source_fts.content LIKE ?' for _ in grams) + ')'
-            match_args = [f'%{g}%' for g in grams]
-            rank_sql = '0.0'
+        rank_args = []
+        if re.search(r'[\u3400-\u9fff]{2}', query):
+            match_sql = '(' + ' OR '.join('source_fts.content LIKE ?' for _ in tokens) + ')'
+            match_args = [f'%{t}%' for t in tokens]
+            rank_sql = '-(' + ' + '.join('(source_fts.content LIKE ?)' for _ in tokens) + ')'
+            rank_args = match_args
         else:
             match_sql = 'source_fts MATCH ?'
             match_args = [' OR '.join('"' + t.replace('"', '""') + '"' for t in tokens[:40])]
             rank_sql = 'bm25(source_fts)'
-        with _LOCK:
-            rows = self.conn.execute(f"""SELECT a.id, {rank_sql} AS rank
+        scores = {}
+        with self._lock:
+            cursor = self.conn.execute(f"""SELECT a.id, {rank_sql} AS rank
                 FROM source_fts
                 JOIN source_messages s ON s.request_id=source_fts.request_id
                   AND s.message_index=source_fts.message_index
@@ -792,17 +844,22 @@ class Store(ProvenanceStore):
                   AND a.sensitivity!='suppressed' AND s.sensitivity!='suppressed'
                   AND a.view_status='ready' AND a.resolution_status!='retracted'
                   AND (? OR a.tier!='cold')
-                ORDER BY rank, a.id LIMIT ?""",
-                (*match_args, user_id, user_id, user_id, include_history, include_sensitive,
-                 include_cold, k * 10)).fetchall()
-        scores = {}
-        for row in rows:
-            scores.setdefault(row['id'], -float(row['rank']))
+                ORDER BY rank, a.id""",
+                (*rank_args, *match_args, user_id, user_id, user_id, include_history, include_sensitive,
+                 include_cold))
+            # Apply the limit to distinct AMUs, not source joins. A memory with
+            # hundreds of supporting messages must not crowd out other hits.
+            for row in cursor:
+                scores.setdefault(row['id'], -float(row['rank']))
+                if len(scores) >= k:
+                    break
+            cursor.close()
         ids = list(scores)[:k]
         found = {m['id']: m for m in self.get_amus_by_ids(ids, include_history, include_sensitive)}
         return [dict(found[mid], _score=scores[mid]) for mid in ids if mid in found]
 
     def get_by_entities(self, user_id, entities, k):
+        self._check_user(user_id)
         wanted = {graph.normalize_entity(e) for e in entities
                   if graph.normalize_entity(e)}
         if not wanted:
@@ -819,8 +876,9 @@ class Store(ProvenanceStore):
     # ---------------- triples / graph ----------------
     def insert_triple(self, user_id, subject, relation, object_, amu_id,
                       valid_from=None, valid_to=None):
+        self._check_user(user_id)
         integrity.validate_interval(valid_from, valid_to)
-        with _LOCK:
+        with self._lock:
             self._write(
                 "INSERT INTO triples (user_id,subject,relation,object,amu_id,valid_from,valid_to)"
                 " VALUES (?,?,?,?,?,?,?)",
@@ -829,33 +887,58 @@ class Store(ProvenanceStore):
             self.conn.commit()
 
     def triples_for_user(self, user_id: str, include_sensitive=False) -> List[Dict]:
-        with _LOCK:
+        self._check_user(user_id)
+        with self._lock:
             rows = self.conn.execute(
                 "SELECT t.* FROM triples t JOIN amu a ON a.id=t.amu_id "
-                "WHERE t.user_id=?" +
+                "WHERE t.user_id=? AND a.user_id=t.user_id" +
                 ("" if include_sensitive else " AND a.sensitivity!='sensitive'")
                 + " AND a.sensitivity!='suppressed' AND a.view_status='ready' AND a.resolution_status!='retracted'",
                 (user_id,)).fetchall()
         return [dict(r) for r in rows]
+
+    def graph_rows_for_candidates(self, user_id, ids, include_history=False,
+                                  include_sensitive=False, per_candidate=8, limit=512):
+        """Read only admitted candidates; each candidate gets a turn at the cap."""
+        self._check_user(user_id)
+        if not ids or per_candidate <= 0 or limit <= 0:
+            return []
+        lanes = []
+        with self._lock:
+            for mid in dict.fromkeys(ids):
+                budget.check()
+                rows = self.conn.execute(
+                    "SELECT t.* FROM triples t INDEXED BY idx_triples_candidate "
+                    "JOIN amu a ON a.id=t.amu_id WHERE t.user_id=? AND t.amu_id=? AND a.user_id=?"
+                    + ("" if include_history else " AND a.valid_to IS NULL AND t.valid_to IS NULL")
+                    + ("" if include_sensitive else " AND a.sensitivity!='sensitive'")
+                    + " AND a.sensitivity!='suppressed' AND a.view_status='ready'"
+                    " AND a.resolution_status!='retracted' ORDER BY t.id LIMIT ?",
+                    (user_id, mid, user_id, min(per_candidate, limit))).fetchall()
+                lanes.append([dict(r) for r in rows])
+        return [lane[index] for index in range(min(per_candidate, limit))
+                for lane in lanes if index < len(lane)][:limit]
 
     def get_amus_by_ids(self, ids: List[str], include_history=False,
                         include_sensitive=False) -> List[Dict]:
         if not ids:
             return []
         ph = ",".join("?" * len(ids))
-        with _LOCK:
+        scope, params = self._scope_clause()
+        with self._lock:
             rows = self.conn.execute(
                 f"SELECT * FROM amu WHERE id IN ({ph})"
                 + ("" if include_history else " AND valid_to IS NULL")
                 + ("" if include_sensitive else " AND sensitivity!='sensitive'")
-                + _SUPPRESSED,
-                ids).fetchall()
+                + _SUPPRESSED + scope,
+                [*ids, *params]).fetchall()
         return [self._row_to_dict(r) for r in rows]
 
     def core_profile(self, user_id: str, limit: int) -> List[Dict]:
         """MemGPT/MIRIX core memory: the user's active rule/profile/preference
         AMUs, rules first, then stable traits, then recent transient ones."""
-        with _LOCK:
+        self._check_user(user_id)
+        with self._lock:
             rows = self.conn.execute(
                 "SELECT * FROM amu WHERE user_id=? AND valid_to IS NULL"
                 " AND sensitivity NOT IN ('sensitive','suppressed')"
@@ -875,7 +958,7 @@ class Store(ProvenanceStore):
 
     def suppress(self, amu_id: str, when: str):
         """Zep-style invalidation: close validity and hide from all routes."""
-        with _LOCK:
+        with self._lock:
             row = self.conn.execute(
                 "SELECT user_id,valid_from,valid_to FROM amu WHERE id=?", (amu_id,)).fetchone()
             if row is None:
@@ -889,21 +972,24 @@ class Store(ProvenanceStore):
             self.conn.commit()
 
     def session_max_timestamp(self, user_id: str, session_id: str) -> Optional[int]:
-        with _LOCK:
+        self._check_user(user_id)
+        with self._lock:
             return self.conn.execute(
                 "SELECT MAX(timestamp) FROM source_messages "
                 "WHERE user_id=? AND session_id=?", (user_id, session_id)).fetchone()[0]
 
     # ---------------- sessions ----------------
     def get_summary(self, user_id: str, session_id: str) -> str:
-        with _LOCK:
+        self._check_user(user_id)
+        with self._lock:
             row = self.conn.execute(
                 "SELECT summary FROM sessions WHERE user_id=? AND session_id=?",
                 (user_id, session_id)).fetchone()
         return row["summary"] if row else ""
 
     def set_summary(self, user_id: str, session_id: str, summary: str):
-        with _LOCK:
+        self._check_user(user_id)
+        with self._lock:
             self._write(
                 "INSERT INTO sessions VALUES (?,?,?)"
                 " ON CONFLICT(user_id,session_id) DO UPDATE SET summary=?",
@@ -915,13 +1001,14 @@ class Store(ProvenanceStore):
             self.conn.commit()
 
     def summary_search(self, user_id, query, k):
+        self._check_user(user_id)
         import re
         import hashlib
         cjk = "".join(re.findall(r"[\u3400-\u9fff]", query))
         if len(cjk) >= 2:
             grams = list(dict.fromkeys(cjk[i:i + 2] for i in range(len(cjk) - 1)))[:20]
             clauses = " OR ".join("summary LIKE ?" for _ in grams)
-            with _LOCK:
+            with self._lock:
                 rows = self.conn.execute(
                     f"SELECT user_id,session_id,summary FROM sessions WHERE user_id=? "
                     f"AND ({clauses}) LIMIT ?",
@@ -932,7 +1019,7 @@ class Store(ProvenanceStore):
         if not terms:
             return []
         match = " OR ".join('"' + t + '"' for t in terms)
-        with _LOCK:
+        with self._lock:
             rows = self.conn.execute(
                 "SELECT user_id,session_id,summary,bm25(sessions_fts) AS rank "
                 "FROM sessions_fts WHERE sessions_fts MATCH ? AND user_id=? "
@@ -949,7 +1036,8 @@ class Store(ProvenanceStore):
                 "_score": float(score)}
 
     def sources_for_session(self, user_id, session_id):
-        with _LOCK:
+        self._check_user(user_id)
+        with self._lock:
             return [dict(r) for r in self.conn.execute(
                 "SELECT * FROM source_messages WHERE user_id=? AND session_id=? "
                 "ORDER BY timestamp,request_id,message_index", (user_id, session_id))]
@@ -970,7 +1058,8 @@ class Store(ProvenanceStore):
     # ---------------- ULM lifecycle: time anchor, scenes, heat, forgetting ----
     def latest_time(self, user_id: str) -> Optional[str]:
         """Most recent moment known for a user; anchors relative query times (§5.1)."""
-        with _LOCK:
+        self._check_user(user_id)
+        with self._lock:
             ts = self.conn.execute(
                 "SELECT MAX(timestamp) FROM source_messages WHERE user_id=?",
                 (user_id,)).fetchone()[0]
@@ -988,7 +1077,8 @@ class Store(ProvenanceStore):
         return max(candidates).isoformat() if candidates else None
 
     def list_scenes(self, user_id: str, include_cold=False) -> List[Dict]:
-        with _LOCK:
+        self._check_user(user_id)
+        with self._lock:
             rows = self.conn.execute(
                 "SELECT * FROM scenes WHERE user_id=?"
                 + ("" if include_cold else " AND tier!='cold'"), (user_id,)).fetchall()
@@ -997,16 +1087,18 @@ class Store(ProvenanceStore):
     def get_scenes_by_ids(self, ids: List[str]) -> List[Dict]:
         if not ids:
             return []
-        with _LOCK:
+        scope, params = self._scope_clause()
+        with self._lock:
             rows = self.conn.execute(
-                f"SELECT * FROM scenes WHERE id IN ({','.join('?' * len(ids))})", ids).fetchall()
+                f"SELECT * FROM scenes WHERE id IN ({','.join('?' * len(ids))})" + scope, [*ids, *params]).fetchall()
         return [self._scene_to_dict(r) for r in rows]
 
     def insert_scene(self, user_id, centroid: np.ndarray, keywords, summary="",
                      surprise=0.0) -> str:
+        self._check_user(user_id)
         scene_id = f"scene_{uuid.uuid4().hex[:12]}"
         now = _now()
-        with _LOCK:
+        with self._lock:
             self._write(
                 "INSERT INTO scenes (id,user_id,summary,keywords,centroid,embedding_space,"
                 "cell_count,visit_count,interaction_count,surprise,last_access,tier,"
@@ -1020,7 +1112,7 @@ class Store(ProvenanceStore):
 
     def update_scene(self, scene_id, *, centroid=None, keywords=None, summary=None,
                      surprise=None, cells_added=0):
-        with _LOCK:
+        with self._lock:
             row = self.conn.execute("SELECT user_id FROM scenes WHERE id=?", (scene_id,)).fetchone()
             if row is None:
                 raise ValueError("Unknown scene")
@@ -1042,20 +1134,21 @@ class Store(ProvenanceStore):
             self.conn.commit()
 
     def assign_scene(self, amu_ids: List[str], scene_id: str, cell_id: str):
-        with _LOCK:
+        with self._lock:
             for amu_id in amu_ids:
                 self._write("UPDATE amu SET scene_id=?,cell_id=? WHERE id=?",
                             (scene_id, cell_id, amu_id))
             self.conn.commit()
 
     def scene_cell_ids(self, scene_id: str) -> List[str]:
-        with _LOCK:
+        scope, params = self._scope_clause()
+        with self._lock:
             rows = self.conn.execute(
-                "SELECT id FROM amu WHERE scene_id=? AND valid_to IS NULL", (scene_id,)).fetchall()
+                "SELECT id FROM amu WHERE scene_id=? AND valid_to IS NULL" + scope, (scene_id, *params)).fetchall()
         return [r[0] for r in rows]
 
     def reset_scene_interactions(self, scene_id: str, tier: Optional[str] = None):
-        with _LOCK:
+        with self._lock:
             self._write("UPDATE scenes SET interaction_count=0,promoted_at=? WHERE id=?",
                         (_now(), scene_id))
             if tier:
@@ -1067,7 +1160,7 @@ class Store(ProvenanceStore):
     def set_tier(self, amu_ids: List[str], tier: str):
         if not amu_ids:
             return
-        with _LOCK:
+        with self._lock:
             for amu_id in amu_ids:
                 self._write("UPDATE amu SET tier=? WHERE id=?", (tier, amu_id))
             self.conn.commit()
@@ -1078,7 +1171,7 @@ class Store(ProvenanceStore):
         keys = [k for k in keys if k]
         if not keys:
             return
-        with _LOCK:
+        with self._lock:
             row = self.conn.execute("SELECT support_sessions FROM amu WHERE id=?",
                                     (amu_id,)).fetchone()
             if row is None:
@@ -1102,7 +1195,7 @@ class Store(ProvenanceStore):
         self.add_support_keys(amu_id, [session_id])
 
     def record_experience_feedback(self, amu_id: str, success: bool, session_id: str):
-        with _LOCK:
+        with self._lock:
             column = "helpful" if success else "harmful"
             self._write(f"UPDATE amu SET {column}={column}+1 WHERE id=?", (amu_id,))
             self.add_support_session(amu_id, session_id)
@@ -1110,7 +1203,7 @@ class Store(ProvenanceStore):
 
     def promote_scene_profiles(self, scene_id: str):
         """Materialize stable traits once enough distinct sessions support them."""
-        with _LOCK:
+        with self._lock:
             rows = self.conn.execute(
                 "SELECT id,support_sessions FROM amu WHERE scene_id=? "
                 "AND type='preference' AND valid_to IS NULL", (scene_id,)).fetchall()
@@ -1127,7 +1220,7 @@ class Store(ProvenanceStore):
         if not amu_ids and not scene_ids:
             return
         now = _now()
-        with _LOCK:
+        with self._lock:
             for amu_id in amu_ids:
                 self.conn.execute(
                     "UPDATE amu SET recall_count=recall_count+1,last_recalled=?,"
@@ -1142,7 +1235,8 @@ class Store(ProvenanceStore):
 
     def forgettable(self, user_id: str) -> List[Dict]:
         """Hot, non-rule memories with the fields the retention formula needs."""
-        with _LOCK:
+        self._check_user(user_id)
+        with self._lock:
             rows = self.conn.execute(
                 "SELECT id,type,created_at,last_recalled,strength FROM amu "
                 "WHERE user_id=? AND tier='hot' AND type NOT IN ('rule','profile')",

@@ -49,6 +49,8 @@ class SearchItem(BaseModel):
     id: str
     content: str
     score: Optional[float] = None
+    score_kind: str = 'unknown'
+    coverage_ids: List[str] = Field(default_factory=list)
     created_at: Optional[str] = None
     memory_type: str = "fact"
     is_constraint: bool = False
@@ -65,7 +67,7 @@ class SearchResponse(BaseModel):
     search_id: Optional[str] = None
     data: List[SearchItem]
     # retrieved means candidates were packed, not that an LLM proved sufficiency.
-    evidence_status: str = "not_found"  # retrieved | conflicting | not_found
+    evidence_status: str = "not_found"  # retrieved | conflicting | not_found | incomplete
     verification_status: str = "not_run"
     packet_hash: Optional[str] = None
     read_revision: Optional[int] = None

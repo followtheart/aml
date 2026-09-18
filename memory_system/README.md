@@ -18,7 +18,7 @@ app/
   experience.py      显式任务反馈→策略/工作流/技能/手册（成功与失败经验）
   graph.py           实体-AMU 二部图 + PPR（HippoRAG 式单步多跳）
   add_pipeline.py    切分→MemCell 抽取(episode+facts+triples)→新颖度门控→治理→多索引→场景巩固→滚动摘要
-  search_pipeline.py 查询规划→单轮多路召回(含冷记忆、图、场景)→RRF→一次重排→来源证据包
+  search_pipeline.py 查詢規劃→多路召回／多跳補查→圖融合→固定證據單元→粗排→Cross-Encoder→LLM 列表排序→證據組裝包
   eval_scoring.py    直接基于同一证据包回答；选择题确定性计分
   main.py            FastAPI: /add /search /feedback /memory/{user_id} /health
 scripts/
@@ -48,31 +48,77 @@ Search 的最終證據包預設上限為 32,000 UTF-8 bytes（保守 token 上�
 後讀取同一包，不再另行截斷。舊格式、沒有 hash 的輸入仍使用 24,000／2,400
 字符的總額／單條上限。
 
-读取链路使用 `single_pass_v2`：一次查询规划、一次多路召回、一次重排和打包。
-选项作为待验证假设参与检索，最多 6 个查询，原问题和选项优先于泛化扩展。
-冷记忆、图和场景在同一轮参与召回；不再运行充分性验证或第二轮检索。
+讀取鏈路使用 `graph_cascade_v7`：一次查詢規劃、多路召回、可選一次有來源依據的多跳補查、圖融合、三級排序和原子證據組裝包。
+規劃器以 `option_queries` 為每個選項返回一條不超過 240 字元的短前提查詢；通用建議用空字串。
+缺失／無效項目回退到選項首句或前提，保留否定與條件，不把選項寫成記憶。
+原問題、每個選項和最多 3 個子問題保留；6 條軟上限只限制額外擴展，不再擠掉第六個選項。
+選擇題不注入畫像 digest，初始擴展須限於題目／選項詞彙；無選項查詢仍可使用相關畫像。
+多跳可用已見證據中的新詞補查一次，預設最多 2 條；附帶種子證據並保留連接路徑，不能憑空添加實體。
+冷記憶仍可召回；不執行充分性模型。規劃或 embedding 失敗會記錄降級，詞面路徑仍可用。
+向量／原文／全文／畫像的預設配額為 40／40／20／8，規則獨立保留，配額不受 `top_k` 拉高。
+graph／scene 在多跳、敘事、文件查詢，或任一查詢匹配的獨立原始來源不足 3 個時啟用；
+兩者合計最多 12 條。可用 `AML_RECALL_*` 調整；`top_k` 是最終上限，不保證填滿。
 原文增加 `source_text` 检索路由，仍通过来源关联的 AMU 检查用户、历史和敏感权限。
-单次重排读取原文片段，用位置对应的分数数组返回，候选数为
-`min(候选总数, max(AML_RERANK_MAX_CANDIDATES, top_k + 20))`，配置默认 80。
-低分仅改变顺序；数组长度或数值无效时整体回退 RRF，不混用部分分数。
+圖融合以向量相似度和查詢詞匹配建立先驗，再沿已記錄的有向三元組、版本依賴及補查連接傳播。
+同一來源的重複項降權；重複命中路徑不累加票數。圖權重依查詢類型調整；沒有有效邊時使用內容先驗。
+圖 metadata 讀取前先准入最多 `AML_GRAPH_FUSION_MAX_CANDIDATES=256` 個候選，使用者規則另外保留。
+圖邊是检索關聯，不能當作因果、權威性或邏輯蘊涵的證明。
+
+三級排序預設為 **粗排 50 → Cross-Encoder 精排保留 12 → LLM 列表比較 10**，
+分別由 `AML_CASCADE_COARSE_LIMIT`、`AML_CASCADE_FINE_LIMIT`、`AML_CASCADE_LLM_LIMIT` 控制。
+粗排／精排保留有界的需求覆蓋位置，部分 CE 失敗時亦保留少量未評分候選給 LLM 比較。
+固定證據單元含必要原文、來源與版本依賴，上限是 `AML_SEARCH_ITEM_MAX_BYTES`、
+`AML_CE_MAX_DOCUMENT_BYTES` 和包預算的最小值，預設有效上限 4,000 UTF-8 bytes。
+無法容納的完整必要引文會明確省略，不會為模型默默截斷。
+
+Cross-Encoder 使用提供者的真正 Rerank API。DashScope 自動沿用相同服務商憑證及 `qwen3-rerank`；
+SiliconFlow 自動使用 `BAAI/bge-reranker-v2-m3`。其他部署可設定 `AML_CE_API_URL/MODEL/API_KEY`，
+支援平面 Cohere 相容格式及 DashScope 原生格式。憑證只會在相同 origin 自動沿用。
+CE 每批最多 24 條、最多 2 批並行，每次最多 10 秒、整階段最多 12 秒；仍受 Search 總預算限制。
+CE 分數保留原始有限值（包括負值／零值），作為排序訊號，沒有跨 LLM 批次校準或固定相關性門檻。
+
+LLM 一次看到最多 10 個候選，回傳完整索引排列、明確無用項和必須共同使用的證據組。
+完整提示詞最多 24,000 UTF-8 bytes；格式錯誤最多修復一次，連線錯誤直接降級。
+CE 與列表排序呼叫會先預留輸入／輸出 token 保守上界，並在結束、失敗或取消後釋放預留。
+CE 不可用時明確記錄降級；LLM 失敗時保留 CE 順序，兩者均不可用才使用圖先驗，
+未評分回退最多 `AML_EVIDENCE_FALLBACK_ITEMS=8` 條。明確拒絕的候選與未選中尾部不補包。
+`AML_FAKE=1` 的 CE 詞匹配只供離線管線測試，不代表模型品質。
+
+打包保留列表相對順序。證據組整組准入或省略，避免 `top_k`、字節預算、時間過濾或來源去重拆斷必要鏈。
+使用者指令及遺忘規則保留；來源、權限、版本與字節預算限制仍適用。
+`coverage_manifest.selection_mode=graph_cascade`；`fusion`、`cascade` 和 `evidence_groups` 記錄各階段選中與省略原因。
+`rerank_status` 區分 `ok/recovered/partial/fallback/not_run`，未恢復的錯誤會設置 `search_degraded=true`。
+舊 `AML_RERANK_MAX_CANDIDATES/BATCH_MAX_CANDIDATES/CALIBRATION_ANCHORS` 和
+`AML_EVIDENCE_MIN_RELEVANCE` 僅留給歷史回放，對 v7 線上級聯無效。
+完整設定、限制與驗證見 [GRAPH_CASCADE_IMPLEMENTATION.md](GRAPH_CASCADE_IMPLEMENTATION.md)。
 画像按查询相关性召回；相同偏好合并展示并保留全部来源 ID。遗忘规则优先装包，
 计入总字节预算但不占普通证据 `top_k`，因此返回条数可能超过 `top_k`。
 来源节录按相关性选取，正文优先于短润色请求，保留引文、邻近语境和消息角色。
+預覽與最終節錄使用相同短查詢，按句子局部匹配密度排序，避免長篇 persona 靠散落詞彙占位。
+同段的 `Marcus wrote:` 等人物歸屬與必要引文一起保留；最終裝包僅移除包內已可見的重複来源片段，保留引用。
+只有來源集合、預覽及語義狀態相同的 episode 才在重排前合併。
+trace 的 `query_specs` 記錄短查詢及選項對應，`expansion` 記錄擴展原因、直接命中數及配額。
 新版 episode 索引带角色的原始对话，不再用“请求润色”等摘要替代正文。
 抽取校验失败本身不再把普通原文标记成敏感；显式来源／模型隐私标签仍保留。
 推断型记忆显示来源归属提示；主体、个人前提和遗忘范围由回答模型统一判断。
 
 选择题使用 `direct_evidence_v2`，优先采用有证据支持的个性化选项，区分兴趣与拥有／习惯，
 先执行明确的遗忘约束。直接基于证据包回答，取消线上独立 alignment 和
-autopick。正常四选一、默认重排大小且无重试时，LLM 阶段从原双轮的 7 次降到
-3 次（规划、重排、回答），embedding 调用另计。`choice_alignment.py` 和其 replay
+autopick。無補查或格式重試時，四選一使用 3 次 LLM 呼叫（規劃、列表排序、回答）；
+Cross-Encoder 批次與 embedding 另計，也納入 Search 的提供者呼叫預算。`choice_alignment.py` 和其 replay
 脚本只作为离线诊断工具保留；`validate_choice_alignment.py --answer` 重放直接回答。
 
 已有数据库在打开时自动补建原文全文索引，旧敏感标签不会被自动清除。要验证新的
 episode 写入和抽取回退行为，需要重新运行 Add／从原始数据重新评测。
-证据包 hash 升至 v3，覆盖约束分类和合并 ID；旧 v1/v2 包仍可读取。
+證據包 hash 升至 v4，新增覆蓋需求 ID 與分數類型；舊 v1/v2/v3 包仍可讀取。
 
-`SearchResponse.evidence_status` 使用 `retrieved` / `conflicting` / `not_found`，
+`SearchResponse.evidence_status` 使用 `retrieved` / `conflicting` / `not_found` / `incomplete`；
+最後一項表示搜尋降級且沒有可交付證據，避免將失敗當成不存在。
+`coverage_manifest.coverage` 和 `missing_evidence` 區分候選已找到、已裝包、尚未覆蓋；僅表示可觀測覆蓋，不保證語義充分。
+普通檔案資料庫以唯讀 WAL 快照搜尋，向量快取按資料庫、使用者、空間、刪除 epoch 及更新代數隔離。
+預設精確分塊 top-k；近似搜尋需設定 `AML_VECTOR_APPROXIMATE=1`，診斷會標示近似與掃描上限。
+首次建索引、精確距離計算與歷史投影仍可能隨資料量增長；取消會等待背景工作停止後關閉快照。
+九項修正、設定與驗證限制見 [SEARCH_PIPELINE_REPAIRS.md](SEARCH_PIPELINE_REPAIRS.md)。
 `verification_status=not_run`；`retrieved` 不声明证据充分。旧的
 `AML_SEARCH_MAX_ROUNDS`、`AML_CHOICE_ALIGN`、`AML_CHOICE_AUTOPICK`、
 `AML_PERSONA_VIEW_FILTER`、`AML_CORE_PROFILE_INJECT`、`AML_CORE_PROFILE_TOKEN_BUDGET`、

@@ -59,11 +59,16 @@ def filter_triples(triples, query, entities, limit=120, seed_amu_ids=(), max_hop
 
 def ppr_recall(triples: List[Dict], seed_entities: List[str],
                damping: float = 0.5, iters: int = 20,
-               top_n: int = 30, seed_amu_ids=None, query='') -> List[str]:
-    """Return ranked amu_ids reachable from seed entities."""
+               top_n: int = 30, seed_amu_ids=None, query='', exclude_ids=()) -> List[str]:
+    """Return ranked amu_ids reachable from seed entities.
+
+    `exclude_ids` are removed before the cut so already-recalled seeds do not
+    consume the expansion slots their own teleport mass would otherwise win.
+    """
     if not triples or not (seed_entities or seed_amu_ids):
         return []
     seeds = {normalize_entity(s) for s in seed_entities}
+    excluded = set(exclude_ids or ())
     amus = set()
     adjacency = {}
     relation_terms = set(normalize_entity(query).split())
@@ -95,6 +100,6 @@ def ppr_recall(triples: List[Dict], seed_entities: List[str],
             for neighbor, weight in neighbors.items():
                 nxt[neighbor] = nxt.get(neighbor, 0.0) + share * weight
         p = nxt
-    amu_scores = [(amu, p.get('memory:' + amu, 0.0)) for amu in amus]
+    amu_scores = [(amu, p.get('memory:' + amu, 0.0)) for amu in amus if amu not in excluded]
     amu_scores.sort(key=lambda x: (-x[1], x[0]))
     return [a for a, s in amu_scores[:top_n] if s > 0]

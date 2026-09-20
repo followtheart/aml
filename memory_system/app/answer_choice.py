@@ -11,9 +11,9 @@ import re
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
-from . import answer_context, budget, llm, personal_evidence, profile, prompts
+from . import answer_context, budget, llm, persona_source, personal_evidence, profile, prompts
 
-VERSION = 'verified-source-choice-v1'
+VERSION = 'verified-source-choice-v2-partial'
 
 
 class StrictModel(BaseModel):
@@ -116,6 +116,9 @@ def build_catalog(memories):
                              and not _CONDITIONAL_SELF.search(text))
             cards = []
             spans = forget_spans if is_constraint else [(0, len(text))]
+            # A system-authored persona card is a first-party fact list about
+            # the user; it is flagged so citation checks skip "I ..." scoping.
+            declared = 'persona' if role == 'user' and persona_source.is_persona_message(text) else None
             for start, end in spans:
                 target = constraints if is_constraint else sources
                 sid = ('r' if is_constraint else 's') + str(len(target))
@@ -123,6 +126,8 @@ def build_catalog(memories):
                             request_id=source.get('request_id'), message_index=source.get('message_index'),
                             source_event_id=source.get('source_event_id'), content_span=source.get('content_span'),
                             timestamp=source.get('timestamp'))
+                if declared:
+                    card['declared'] = declared
                 if is_constraint:
                     card.update(source_text=text, constraint_span=dict(start=start, end=end))
                 target[sid] = card
@@ -157,9 +162,11 @@ _DENIAL = re.compile(r"\b(?:I|we)\s+(?:(?:have|had|do|did|am|are)\s+)?(?:not|nev
                      r"\b(?:I|we)\s+(?:don['’]t|didn['’]t|haven['’]t|hadn['’]t)\b|"
                      r'\bno\s+\w+(?:\s+\w+){0,2}\s+(?:ever|has|have|had)\b|我(?:沒有|没有|從未|从未)', re.I)
 _NEGATIVE_CLAIM = re.compile(r"\b(?:not|never|no|without)\b|n['’]t\b|沒有|没有|從未|从未", re.I)
-_INTEREST = re.compile(r'\b(?:interested|interest|curious|curiosity|drawn to|captivated|fascinat\w*)\b|感興趣|感兴趣|好奇', re.I)
+_INTEREST = re.compile(r'\b(?:interested|interest|curious|curiosity|drawn to|captivated|fascinat\w*|'
+                       r'enjoy\w*|passion\w*|hobby|hobbies|fan of|keen on|fond of|like|likes|love|loves|'
+                       r'exploring|learning about)\b|感興趣|感兴趣|好奇|喜歡|喜欢|爱好|愛好', re.I)
 _STRONG_TRAIT = re.compile(r'\b(?:own\w*|diagnos\w*|asthma|diabet\w*|daily|every day|habit\w*|'
-                           r'passion\w*|favorite|favourite|mentored|experienced|visited|grew|parenting)\b', re.I)
+                           r'mentored|experienced|visited|grew|parenting|professional\w*|expert\w*|certif\w*)\b', re.I)
 _RELATION_SUBJECT = re.compile(r'\b(?:my|our)\s+(friend|colleague|mother|father|sister|brother|'
                                r'daughter|son|child|children|spouse|wife|husband)\b', re.I)
 
@@ -190,8 +197,16 @@ def _check_citation(citation, claim, sources):
     c = citation.model_dump()
     source = sources.get(citation.source_id)
     errors = []
+    persona = bool(source and source.get('declared') == 'persona')
     if not source or citation.quote not in source['text']:
         errors.append('quote_not_in_source')
+    elif persona:
+        # Persona attributes describe the user directly; there is no first-person
+        # assertion, denial or third-party frame to scope.
+        if citation.subject != 'current_user':
+            errors.append('not_current_user')
+        else:
+            c['basis'] = 'self_report'
     elif citation.basis == 'context':
         # Context may resolve a pronoun in a separately cited user confirmation,
         # but cannot anchor a personal claim on its own.
@@ -207,18 +222,51 @@ def _check_citation(citation, claim, sources):
         errors.append('not_current_user')
     elif citation.basis == 'self_report':
         failure = _self_scope(source, citation.quote, claim)
-        if failure:
+        # A user question about a topic asserts no fact about the user, but it
+        # does witness interest: fall back to the topic_interest basis instead
+        # of rejecting an interest-type premise outright.
+        if (failure == 'no_user_assertion' and _INTEREST.search(claim) and not _STRONG_TRAIT.search(claim)
+                and not _FRAME.search(source['text']) and not _ATTRIBUTED.search(source['text'])):
+            c['basis'] = 'topic_interest'
+        elif failure:
             errors.append(failure)
     elif not _INTEREST.search(claim) or _STRONG_TRAIT.search(claim):
         errors.append('interest_does_not_prove_trait')
     elif _FRAME.search(source['text']) or _ATTRIBUTED.search(source['text']):
         errors.append('third_party_or_hypothetical')
-    c.update(source_role=source.get('role') if source else None, validation_errors=errors,
+    c.update(source_role=_display_role(source) if source else None, validation_errors=errors,
              valid=not errors, anchor=not errors and c['basis'] != 'context')
     if source and not errors:
         start = source['text'].find(citation.quote)
         c['source_span'] = dict(start=start, end=start + len(citation.quote))
     return c
+
+
+def _primary_index(claims, option_text):
+    """The premise that leads the option ("Since you X, ...") is its core claim."""
+    best = None
+    for index, claim in enumerate(claims):
+        match = re.search(re.escape(claim['text']), option_text, flags=re.I)
+        position = match.start() if match else len(option_text) + index
+        if best is None or position < best[0]:
+            best = (position, index)
+    return best[1] if best else None
+
+
+def _option_status(kind, claims, errors, option_text):
+    """supported: every premise verified; partial: the core premise verified,
+    a secondary detail missing; generic: no personal premise; else unsupported."""
+    if errors:
+        return 'unsupported'
+    if kind == 'generic':
+        return 'generic'
+    if not claims:
+        return 'unsupported'
+    verified = [c['status'] == 'supported' for c in claims]
+    if all(verified):
+        return 'supported'
+    primary = _primary_index(claims, option_text)
+    return 'partial' if primary is not None and verified[primary] else 'unsupported'
 
 
 def validate_assessments(payload, options, sources):
@@ -238,18 +286,19 @@ def validate_assessments(payload, options, sources):
             exact = re.search(re.escape(claim.text), expected[option.letter], flags=re.I)
             if exact is None:
                 invalid.append('claim_not_in_option')
+                errors.append('claim_not_in_option')
             citations = [_check_citation(c, claim.text, sources) for c in claim.citations]
+            # An invalid citation only demotes its own claim; the option is
+            # still judged on which premises remain verified.
             if claim.status == 'supported' and (not any(c['anchor'] for c in citations)
                                                or any(not c['valid'] for c in citations)):
                 invalid.append('no_valid_user_support')
             claims.append(dict(text=exact[0] if exact else claim.text, status='unsupported' if invalid else claim.status,
                                proposed_status=claim.status, citations=citations, validation_errors=invalid))
-            errors.extend(invalid)
-        status = ('generic' if option.kind == 'generic' and not errors else
-                  'supported' if claims and not errors and all(c['status'] == 'supported' for c in claims)
-                  else 'unsupported')
+        status = _option_status(option.kind, claims, errors, expected[option.letter])
         entries[option.letter] = dict(letter=option.letter, kind=option.kind, status=status,
-                                     claims=claims, validation_errors=errors)
+                                     option=expected[option.letter], primary_claim=_primary_index(claims, expected[option.letter]),
+                                     claims=claims, validation_errors=errors, warnings=[])
     return [entries[k] for k in expected]
 
 
@@ -293,9 +342,14 @@ def validate_constraints(payload, options, constraints):
 
 
 def eligible_choices(entries, blocked):
+    """Fully verified personal options first, then core-premise-verified ones,
+    then generic advice. Structurally invalid or blocked options never qualify."""
     eligible = [e for e in entries if e['letter'] not in blocked and not e.get('validation_errors')]
-    supported = [e['letter'] for e in eligible if e['status'] == 'supported']
-    return supported or [e['letter'] for e in eligible if e['status'] == 'generic']
+    for tier in ('supported', 'partial', 'generic'):
+        letters = [e['letter'] for e in eligible if e['status'] == tier]
+        if letters:
+            return letters
+    return []
 
 
 def entailment_checks(entries, sources, options):
@@ -303,7 +357,7 @@ def entailment_checks(entries, sources, options):
     # Always expose the COMPLETE option, including options labelled generic.
     # Otherwise a missed premise can bypass both extraction and verification.
     def citations(claims):
-        return [dict(id=ref['source_id'], role=sources[ref['source_id']]['role'],
+        return [dict(id=ref['source_id'], role=_display_role(sources[ref['source_id']]),
                      quote=ref['quote'], context=sources[ref['source_id']]['text'],
                      timestamp=sources[ref['source_id']].get('timestamp'))
                 for c in claims for ref in c['citations'] if ref['valid']]
@@ -325,14 +379,10 @@ def validate_entailments(payload, entries, checks):
     if len(parsed.checks) != len(expected) or {c.claim_id for c in parsed.checks} != expected:
         raise ValueError('Verify every complete option exactly once')
     rejected = {c.claim_id for c in parsed.checks if not c.entailed}
+    option_text = {c['claim_id'].split(':')[0]: c['option'] for c in checks if c['check_type'] == 'option'}
     # The callers retain the source checks; semantic verification can only
     # demote a claim. It cannot invent citations or promote unsupported options.
     for entry in entries:
-        cid = f"{entry['letter']}:option"
-        entry['entailment_verified'] = cid not in rejected
-        if cid in rejected:
-            entry['status'] = 'unsupported'
-            entry['validation_errors'].append('not_entailed')
         for index, claim in enumerate(entry['claims']):
             cid = f"{entry['letter']}:{index}"
             if cid in expected:
@@ -340,9 +390,26 @@ def validate_entailments(payload, entries, checks):
             if cid in rejected:
                 claim['status'] = 'unsupported'
                 claim['validation_errors'].append('not_entailed')
-                entry['status'] = 'unsupported'
+        text = entry.get('option') or option_text.get(entry['letter'], '')
+        status = _option_status(entry['kind'], entry['claims'], entry['validation_errors'], text)
+        cid = f"{entry['letter']}:option"
+        entry['entailment_verified'] = cid not in rejected
+        if cid in rejected:
+            # A whole-option rejection is decisive for generic labels (a hidden
+            # personal premise) and for options whose core premise failed. When
+            # the core premise is verified it only downgrades: a missing
+            # secondary detail is a weaker match, not a disqualification.
+            if entry['kind'] == 'generic' or status == 'unsupported':
+                status = 'unsupported'
                 if 'not_entailed' not in entry['validation_errors']:
                     entry['validation_errors'].append('not_entailed')
+            else:
+                status = 'partial'
+                entry.setdefault('warnings', []).append('option_not_entailed')
+        elif status == 'unsupported' and entry['status'] != 'unsupported':
+            if 'not_entailed' not in entry['validation_errors']:
+                entry['validation_errors'].append('not_entailed')
+        entry['status'] = status
     return entries
 
 
@@ -366,8 +433,12 @@ def validate_decisions(payload, pairs, options, constraints):
     return blocked, judgments
 
 
+def _display_role(card):
+    return card.get('declared') or card['role']
+
+
 def _cards(catalog):
-    return [dict(id=c['id'], role=c['role'], text=c['text'], timestamp=c.get('timestamp')) for c in catalog.values()]
+    return [dict(id=c['id'], role=_display_role(c), text=c['text'], timestamp=c.get('timestamp')) for c in catalog.values()]
 
 
 async def _judge(prompt, schema, validator, stage, diagnostics):

@@ -56,6 +56,8 @@ def parse_args():
     p.add_argument("--no-governance", action="store_true")
     p.add_argument("--no-rerank", action="store_true")
     p.add_argument("--no-keyexp", action="store_true")
+    p.add_argument("--no-sensitive", action="store_true",
+                   help="send include_sensitive=false on every search (default follows the schema: true)")
     p.add_argument("--no-progress", action="store_true",
                    help="disable the live progress bar")
     return p.parse_args()
@@ -265,6 +267,7 @@ async def main():
                                                       options=qa.get("options"),
                                                       user_id=uid, top_k=args.answer_top_k,
                                                       evidence_token_budget=args.evidence_token_budget,
+                                                      include_sensitive=not args.no_sensitive,
                                                       reference_time=qa.get("question_date"))),
                         f"Search conv {ci}/{conv_count} QA {qi}/{len(qas)}")
                 except Exception as exc:
@@ -324,7 +327,8 @@ async def main():
     flags = [k for k, v in [("graph", not args.no_graph),
                             ("governance", not args.no_governance),
                             ("rerank", not args.no_rerank),
-                            ("keyexp", not args.no_keyexp)] if v]
+                            ("keyexp", not args.no_keyexp),
+                            ("sensitive", not args.no_sensitive)] if v]
     print(f"config: {'+'.join(flags)}")
     for cat, (c, t) in sorted(per_cat.items()):
         print(f"  {cat:20s} {c}/{t} = {c/t:.2%}")

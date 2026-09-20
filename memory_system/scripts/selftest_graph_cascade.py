@@ -144,7 +144,10 @@ class CascadeTests(unittest.IsolatedAsyncioTestCase):
                 patch.object(llm, 'complete_json', side_effect=rank):
             result = await self.cascade.rank(self.req(), {}, self.rows())
         self.assertIn(49, {evidence_number(t) for t in seen})
-        self.assertNotIn(0, {evidence_number(t) for t in seen})
+        # The fused head keeps a bounded seat; the rest of the low-CE coarse tail does not.
+        numbers = {evidence_number(t) for t in seen}
+        self.assertTrue({0, 1, 2} <= numbers)
+        self.assertNotIn(3, numbers)
         self.assertEqual(selected(result)[0]['id'], 'm49')
 
     async def test_listwise_permutation_changes_order_without_fabricating_scores(self):

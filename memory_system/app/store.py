@@ -447,6 +447,26 @@ class Store(ProvenanceStore):
             "JOIN amu a ON a.id=s.amu_id AND a.user_id=m.user_id "
             "WHERE s.amu_id=?" + scope + " ORDER BY m.request_id,m.message_index", (amu_id, *params))]
 
+    def sources_for_amus(self, amu_ids) -> Dict[str, List[Dict]]:
+        """One read for many memories; same rows and order as sources_for_amu."""
+        ids = list(dict.fromkeys(amu_ids))
+        out = {mid: [] for mid in ids}
+        scope, params = self._scope_clause('m.')
+        # Chunk to stay under SQLite's bound-parameter limit on wide recalls.
+        for start in range(0, len(ids), 400):
+            chunk = ids[start:start + 400]
+            ph = ",".join("?" * len(chunk))
+            rows = self.conn.execute(
+                "SELECT s.amu_id AS _amu_id, m.* FROM source_messages m JOIN amu_sources s "
+                "ON m.request_id=s.request_id AND m.message_index=s.message_index "
+                "JOIN amu a ON a.id=s.amu_id AND a.user_id=m.user_id "
+                f"WHERE s.amu_id IN ({ph})" + scope + " ORDER BY m.request_id,m.message_index",
+                (*chunk, *params)).fetchall()
+            for row in rows:
+                source = dict(row)
+                out[source.pop('_amu_id')].append(source)
+        return out
+
     def replace_fact(self, amu_id, fact, embedding):
         """Replace derived representations together; caller supplies final-text vector."""
         integrity.validate_interval((fact.get("temporal") or {}).get("start"), (fact.get("temporal") or {}).get("end"))
@@ -886,12 +906,13 @@ class Store(ProvenanceStore):
             self._touch_user(user_id)
             self.conn.commit()
 
-    def triples_for_user(self, user_id: str, include_sensitive=False) -> List[Dict]:
+    def triples_for_user(self, user_id: str, include_sensitive=False, include_history=True) -> List[Dict]:
         self._check_user(user_id)
         with self._lock:
             rows = self.conn.execute(
                 "SELECT t.* FROM triples t JOIN amu a ON a.id=t.amu_id "
                 "WHERE t.user_id=? AND a.user_id=t.user_id" +
+                ("" if include_history else " AND a.valid_to IS NULL AND t.valid_to IS NULL") +
                 ("" if include_sensitive else " AND a.sensitivity!='sensitive'")
                 + " AND a.sensitivity!='suppressed' AND a.view_status='ready' AND a.resolution_status!='retracted'",
                 (user_id,)).fetchall()

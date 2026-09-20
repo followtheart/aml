@@ -129,9 +129,12 @@ class SearchTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn('pipeline_version', trace['versions'])
         self.assertIn('ranked', trace)
         self.assertTrue(trace['include_history'])
-        for channel in ['vector', 'full_text', 'graph']:
+        for channel in ['vector', 'full_text']:
             ids = {c['id'] for r in trace['routes'] if r['channel'] == channel for c in r['candidates']}
             self.assertIn(old, ids)
+        # Historical memories seed the graph walk; seeds themselves are not re-listed by it.
+        self.assertIn(old, trace['graph_seed_ids'])
+        self.assertNotIn(old, {c['id'] for r in trace['routes'] if r['channel'] == 'graph' for c in r['candidates']})
         response = await self.run_search(self.req(include_history=False))
         self.assertEqual([x.id for x in response.data], [current])
         vec = (await embed(['Alice work']))[0]

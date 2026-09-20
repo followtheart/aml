@@ -194,6 +194,17 @@ class AssessmentTests(OfflineCase):
         self.assertEqual(self.eligible(text, 'you are interested in photography', basis='topic_interest'), ['A'])
         self.assertEqual(self.eligible(text, 'you own a camera', basis='topic_interest'), ['B'])
 
+    def test_self_report_citation_of_a_topic_question_falls_back_to_interest(self):
+        text = 'Which anime studios produce the best sakuga this season?'
+        self.assertEqual(self.eligible(text, 'you enjoy anime'), ['A'])
+        self.assertEqual(self.eligible(text, 'you are interested in anime'), ['A'])
+        self.assertEqual(self.eligible(text, 'you work professionally in anime'), ['B'])
+        self.assertEqual(self.eligible(text, 'you own an anime studio'), ['B'])
+        sources, _ = self.catalog(text)
+        payload = assessment('you enjoy anime', next(iter(sources)), text)
+        entries = self.gate.validate_assessments(payload, ['A. Since you enjoy anime, watch a film.', 'B. Rest.'], sources)
+        self.assertEqual(entries[0]['claims'][0]['citations'][0]['basis'], 'topic_interest')
+
     def test_context_basis_uses_actual_source_scope_and_role(self):
         self.assertEqual(self.eligible('I have twin boys.', 'you have twin boys', basis='context'), ['A'])
         self.assertEqual(self.eligible('I have twin boys.', 'you have twin boys',
@@ -246,13 +257,47 @@ class AssessmentTests(OfflineCase):
                     assessment('you have twin boys', fake_sid, quote), options, sources)
                 self.assertEqual(self.gate.eligible_choices(entries, set()), ['B'])
 
-    def test_every_personal_claim_must_be_supported(self):
+    def test_missing_secondary_claim_only_downgrades_to_partial(self):
         sources, _ = self.catalog('I have twin boys.')
         sid = next(iter(sources))
         options = ['A. Since you have twin boys and you own a camera, rest.', 'B. Take a break.']
         data = assessment('you have twin boys', sid, 'I have twin boys.')
         data['options'][0]['claims'].append(dict(text='you own a camera', status='unsupported', citations=[]))
         entries = self.gate.validate_assessments(data, options, sources)
+        self.assertEqual(entries[0]['status'], 'partial')
+        self.assertEqual(entries[0]['primary_claim'], 0)
+        self.assertEqual(self.gate.eligible_choices(entries, set()), ['A'])
+
+    def test_missing_primary_claim_is_still_unsupported(self):
+        sources, _ = self.catalog('I own a camera.')
+        sid = next(iter(sources))
+        options = ['A. Since you have twin boys and you own a camera, rest.', 'B. Take a break.']
+        data = {'options': [
+            dict(letter='A', kind='personal', claims=[
+                dict(text='you have twin boys', status='unsupported', citations=[]),
+                dict(text='you own a camera', status='supported',
+                     citations=[dict(source_id=sid, quote='I own a camera.', basis='self_report', subject='current_user')])]),
+            dict(letter='B', kind='generic', claims=[])]}
+        entries = self.gate.validate_assessments(data, options, sources)
+        self.assertEqual(entries[0]['status'], 'unsupported')
+        self.assertEqual(self.gate.eligible_choices(entries, set()), ['B'])
+
+    def test_fully_supported_option_outranks_partial_one(self):
+        packet = seal(memory('I have twin boys.', mid='boys'), memory('I own a camera.', mid='camera'))
+        sources, _ = self.gate.build_catalog(packet)
+        sid = {source['text']: key for key, source in sources.items()}
+        options = ['A. Since you have twin boys and you live in Oslo, rest.',
+                   'B. Since you own a camera, take photos.', 'C. Take a break.']
+        data = {'options': [
+            dict(letter='A', kind='personal', claims=[
+                dict(text='you have twin boys', status='supported', citations=[dict(
+                    source_id=sid['I have twin boys.'], quote='I have twin boys.', basis='self_report', subject='current_user')]),
+                dict(text='you live in Oslo', status='unsupported', citations=[])]),
+            dict(letter='B', kind='personal', claims=[dict(text='you own a camera', status='supported', citations=[dict(
+                source_id=sid['I own a camera.'], quote='I own a camera.', basis='self_report', subject='current_user')])]),
+            dict(letter='C', kind='generic', claims=[])]}
+        entries = self.gate.validate_assessments(data, options, sources)
+        self.assertEqual([e['status'] for e in entries], ['partial', 'supported', 'generic'])
         self.assertEqual(self.gate.eligible_choices(entries, set()), ['B'])
 
     def test_missing_duplicate_unknown_option_and_extra_fields_are_rejected(self):
@@ -324,16 +369,26 @@ class EntailmentTests(OfflineCase):
             self.assertEqual(source['timestamp'], 1700000000000)
             self.assertEqual(source['context'], sources[source['id']]['text'])
 
-    def test_unentailed_full_option_is_disqualified_without_changing_citations(self):
+    def test_unentailed_full_option_with_verified_core_only_downgrades(self):
         _, entries, checks = self.fixture()
         original_citations = copy.deepcopy([c['citations'] for e in entries for c in e['claims']])
         payload = entailed(*(c['claim_id'] for c in checks))
         for row in payload['checks']:
             row['entailed'] = row['claim_id'] != 'A:option'
         result = self.gate.validate_entailments(payload, entries, checks)
-        self.assertEqual(result[0]['status'], 'unsupported')
-        self.assertEqual(self.gate.eligible_choices(result, set()), ['C'])
+        self.assertEqual(result[0]['status'], 'partial')
+        self.assertIn('option_not_entailed', result[0]['warnings'])
+        self.assertEqual(self.gate.eligible_choices(result, set()), ['A'])
         self.assertEqual([c['citations'] for e in result for c in e['claims']], original_citations)
+
+    def test_unentailed_generic_labelled_option_is_disqualified(self):
+        _, entries, checks = self.fixture()
+        payload = entailed(*(c['claim_id'] for c in checks))
+        for row in payload['checks']:
+            row['entailed'] = row['claim_id'] not in ('C:option', 'A:option', 'A:0')
+        result = self.gate.validate_entailments(payload, entries, checks)
+        self.assertEqual([e['status'] for e in result], ['unsupported', 'unsupported', 'unsupported'])
+        self.assertEqual(self.gate.eligible_choices(result, set()), [])
 
     def test_true_entailment_never_promotes_an_unsupported_option(self):
         _, entries, checks = self.fixture()
@@ -368,7 +423,7 @@ class EntailmentTests(OfflineCase):
         with self.assertRaises(ValueError):
             self.gate.validate_entailments(payload, entries, checks)
 
-    def test_rejected_premise_demotes_option_even_when_full_option_check_says_true(self):
+    def test_rejected_primary_premise_demotes_option_even_when_full_option_check_says_true(self):
         _, entries, checks = self.fixture()
         payload = entailed(*(c['claim_id'] for c in checks))
         for row in payload['checks']:
@@ -376,6 +431,16 @@ class EntailmentTests(OfflineCase):
         result = self.gate.validate_entailments(payload, entries, checks)
         self.assertEqual(self.gate.eligible_choices(result, set()), ['C'])
         self.assertEqual(result[0]['status'], 'unsupported')
+
+    def test_rejected_secondary_premise_keeps_option_partial(self):
+        _, entries, checks = self.fixture()
+        payload = entailed(*(c['claim_id'] for c in checks))
+        for row in payload['checks']:
+            row['entailed'] = row['claim_id'] != 'A:1'
+        result = self.gate.validate_entailments(payload, entries, checks)
+        self.assertEqual(result[0]['status'], 'partial')
+        self.assertEqual(result[0]['claims'][1]['status'], 'unsupported')
+        self.assertEqual(self.gate.eligible_choices(result, set()), ['A'])
 
 
 class ConstraintTests(OfflineCase):
@@ -638,7 +703,7 @@ class AnswerFlowTests(OfflineCase, unittest.IsolatedAsyncioTestCase):
             self.assertIn(option, mock.call_args_list[1].args[0])
         self.assertEqual(diagnostics['answer_eligible_options'], ['B'])
 
-    async def test_partial_claim_cannot_hide_professional_wedding_photography_premise(self):
+    async def test_hidden_secondary_premise_downgrades_option_to_partial_but_keeps_it_eligible(self):
         packet = seal(memory('I own a camera.'))
         sources, _ = self.gate.build_catalog(packet)
         qa = self.qa(['A. Since you own a camera and photograph weddings professionally, advertise wedding shoots.',
@@ -647,12 +712,14 @@ class AnswerFlowTests(OfflineCase, unittest.IsolatedAsyncioTestCase):
         mock = staged_mock(support, lambda prompt: entailment_response(prompt, {'A:option'}))
         diagnostics = {}
         with patch.object(llm, 'complete_json', mock):
-            self.assertEqual(await self.gate.answer(qa, packet, diagnostics), 'B')
+            self.assertEqual(await self.gate.answer(qa, packet, diagnostics), 'A')
         self.assertEqual([c.kwargs['stage'] for c in mock.call_args_list],
                          ['eval.choice_support', 'eval.choice_entailment'])
         self.assertIn(qa['options'][0], mock.call_args_list[1].args[0])
         self.assertIn('I own a camera.', mock.call_args_list[1].args[0])
-        self.assertEqual(diagnostics['answer_eligible_options'], ['B'])
+        self.assertEqual(diagnostics['answer_eligible_options'], ['A'])
+        self.assertEqual(diagnostics['choice_alignment'][0]['status'], 'partial')
+        self.assertIn('option_not_entailed', diagnostics['choice_alignment'][0]['warnings'])
 
     async def test_unsupported_nonliteral_claims_do_not_block_another_supported_answer(self):
         packet = seal(memory('I have twin boys.'))

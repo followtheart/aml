@@ -12,6 +12,10 @@ False means ANY personal premise is unsupported, even if omitted from claims or
 incorrectly labelled generic. A generic label is never permission to skip a check.
 An option saying "you own a camera and photograph weddings professionally" needs
 both facts; a source saying only "I own a camera" is insufficient.
+The caller treats premise checks as the decisive verdict per premise and uses the
+option check only to catch premises that were never listed. Judge each premise on
+its own sources; never fail a premise because a DIFFERENT premise of the same
+option is unsupported.
 
 Question: {question}
 Question date: {question_date}
@@ -23,7 +27,12 @@ into the user's life. A broad activity does not prove a specific subtype or a
 different activity. A profession does not establish an unrelated preference.
 
 Accept clear semantic descriptions of the SAME activity even if the exact name
-is absent. Respect negation, hypothetical frames, past versus current states,
+is absent. A user who repeatedly asks about, plans around or requests guidance on
+a topic HAS an interest in that topic; treat "you are interested in X" or
+"you enjoy X" as established by such questions, but not ownership, expertise or
+professional status. A persona or profile source describing the user (name, age,
+location, occupation, family, hobbies) is a valid statement of the user's facts.
+Respect negation, hypothetical frames, past versus current states,
 and the subject of pasted stories. Assistant text alone is not personal proof.
 Do not require proof of newly proposed advice or a future conditional scenario.
 "When a colleague is distressed, listen carefully" asserts no past event.

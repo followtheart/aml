@@ -160,6 +160,12 @@ Qwen3 对话模型默认开启思考模式，隐藏推理 token 会显著拖慢�
 当 `AML_LLM_MODEL` 含 `qwen3` 时默认在请求体附带 `enable_thinking: false`，
 设 `AML_LLM_DISABLE_THINKING=0` 可恢复思考模式。
 
+DeepSeek V4.1 Flash 的 API 模型設定為 `AML_LLM_MODEL=deepseek/deepseek-flash`。
+使用 `deepseek/` provider 時，同一開關預設傳送 `thinking: {type: disabled}`，
+以支援結構化輸出的強制 `tool_choice`；開啟思考模式時，此強制選擇會被 API 拒絕。
+`qwen3.7-text-embedding`／`qwen3.7-text-embedding-flash` 會傳送 `AML_EMBED_DIM`
+指定的原生輸出維度，可維持 256 維而不在本地截斷向量。
+
 文本数据集现已支持 **LoCoMo-Refined、LongMemEval-S、BEAM-100K、CLBench、PersonaMem-v2**，
 并提供 ScriptMem/Refined 授权数据导入入口。下载、转换、评分差异及命令见
 [DATASETS.md](DATASETS.md)。ScriptMem 原始剧本仍需另行提供；LoCoMo-Refined 已从公开仓库下载。

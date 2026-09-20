@@ -174,6 +174,10 @@ def _provider_kwargs() -> dict:
         kwargs["api_key"] = config.LLM_API_KEY
     if config.LLM_DISABLE_THINKING and "qwen3" in config.LLM_MODEL.lower():
         kwargs["extra_body"] = {"enable_thinking": False}
+    elif config.LLM_DISABLE_THINKING and config.LLM_MODEL.lower().startswith("deepseek/"):
+        # DeepSeek defaults to thinking mode, which rejects our forced tool
+        # choice for structured output. Honor the shared non-thinking setting.
+        kwargs["extra_body"] = {"thinking": {"type": "disabled"}}
     return kwargs
 
 

@@ -71,7 +71,12 @@ Extract atomic memory units from the NEW messages only. Rules:
    one `preference` fact "The user has a strong personal interest in <topic>"
    supported by those questions. State interests directly: "The user is
    interested in <topic>" — never "The user is interested in understanding or
-   learning why <topic>". Writing/editing assistance is no exception: when
+   learning why <topic>", and NEVER as a report of the asking itself ("The
+   user asked about <topic>", "The user inquired how to ..."): a question the
+   user asks reveals an interest, so record the interest. Even a single
+   substantive question about a leisure topic (a hobby, a genre, a collecting
+   area, a craft, a sport, a cuisine) yields "The user is interested in
+   <topic>" with triple (user, interested_in, <topic>). Writing/editing assistance is no exception: when
    the user asks the assistant to improve a text they wrote, first-person
    states, symptoms, circumstances and preferences inside that text are facts
    about the user ("pollen makes it difficult for me to stay outside" yields

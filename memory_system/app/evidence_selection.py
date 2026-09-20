@@ -47,7 +47,7 @@ def represented_by(row, selected, cache=None):
     return sorted(owners)
 
 
-def select(rows, count, requirements, key, reserve_ids=(), *, carry_ids=(), trace=None):
+def select(rows, count, requirements, key, reserve_ids=(), *, carry_ids=(), fused_ids=(), trace=None):
     """Keep score order; defer only evidence completely represented by selected units.
 
     Coverage labels are a soft retrieval diagnostic. Only source-witnessed labels
@@ -65,7 +65,8 @@ def select(rows, count, requirements, key, reserve_ids=(), *, carry_ids=(), trac
             entry['requirement_ids'].append(requirement['id'])
             if 'supported_coverage' not in entry['reasons']:
                 entry['reasons'].append('supported_coverage')
-    for reason, members in (('unscored_rescue', reserve_ids), ('carried_reservation', carry_ids)):
+    for reason, members in (('unscored_rescue', reserve_ids), ('carried_reservation', carry_ids),
+                            ('fused_head', fused_ids)):
         for mid in members:
             if mid in by_id:
                 entry = reservations.setdefault(mid, dict(requirement_ids=[], reasons=[]))

@@ -13,7 +13,7 @@ from typing import Dict, List, Optional
 
 import numpy as np
 
-from . import config, integrity, llm, memory_debug, profile, prompts, scenes, schemas, segment, store
+from . import config, integrity, llm, memory_debug, persona_source, profile, prompts, scenes, schemas, segment, store
 from .embeddings import embed
 
 log = logging.getLogger("aml.add")
@@ -529,6 +529,11 @@ async def _run_add(st: store.Store, req: schemas.AddRequest) -> None:
         "_sources": list(range(len(req.messages))), "_segment": 0}]
     # Deletion requests must be remembered even when the extractor drops them.
     facts = profile.ensure_forget_rules(req, facts, data.get("segments") or [])
+    # A persona card is flattened into atomic profile facts the extractor skips.
+    try:
+        facts = persona_source.persona_facts(req, facts, data.get("segments") or [])
+    except Exception:
+        log.warning("Persona extraction failed; continuing with extracted facts", exc_info=True)
     vecs = await embed([_embed_text(f) for f in facts], stage="add.embed_facts")
     if len(vecs) != len(facts):
         raise ValueError("Embedding count does not match extracted facts")

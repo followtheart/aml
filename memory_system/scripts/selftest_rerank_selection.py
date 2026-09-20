@@ -124,6 +124,64 @@ class RecoveryTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([c['id'] for c in result],['rule'])
         self.assertIsNone(result[0].get('_final'))
 
+    async def test_rules_are_capped_by_topical_overlap_with_the_question(self):
+        rows=self.rows(4)
+        rules=[dict(id='r_cycling',content='The user asked the assistant to forget that they took up cycling.',type='rule',_user_rule=True,_fused=.1),
+               dict(id='r_tax',content='The user asked the assistant to forget their tax bracket.',type='rule',_user_rule=True,_fused=.9),
+               dict(id='r_cooking',content='The user asked the assistant to forget that they love cooking.',type='rule',_user_rule=True,_fused=.2),
+               dict(id='r_pet',content='The user asked the assistant to forget their cat allergy.',type='rule',_user_rule=True,_fused=.8),
+               dict(id='r_films',content='The user asked the assistant to forget their favourite films.',type='rule',_user_rule=True,_fused=.05)]
+        plan={}
+        with patch.object(config,'PACKET_RULE_LIMIT',3), \
+                patch.object(cross_encoder,'rerank',side_effect=self.ce), \
+                patch.object(llm,'complete_json',side_effect=self.identity):
+            ranked=await cascade.rank(self.req(),plan,rows+rules)
+        result=search._select_evidence(self.req(),plan,ranked)
+        kept=[c['id'] for c in result if c.get('type')=='rule']
+        self.assertEqual(sorted(kept),['r_cooking','r_cycling','r_films'])
+        self.assertEqual(sorted(plan['_cascade']['rule_cap']['kept_ids']),sorted(kept))
+        self.assertEqual({d['id'] for d in plan['_cascade']['rule_cap']['dropped']},{'r_tax','r_pet'})
+        self.assertEqual({o['id'] for o in plan['_cascade']['omitted'] if o['stage']=='rules'},{'r_tax','r_pet'})
+        self.assertFalse(any(c['_cascade_selected'] for c in ranked if c['id'] in ('r_tax','r_pet')))
+        self.assertEqual(len([c for c in result if c.get('type')!='rule']),4)
+
+    async def test_rule_cap_zero_keeps_every_rule(self):
+        rules=[dict(id=f'r{i}',content=f'Forget rule {i}.',type='rule',_user_rule=True,_fused=0) for i in range(6)]
+        plan={}
+        with patch.object(config,'PACKET_RULE_LIMIT',0), \
+                patch.object(cross_encoder,'rerank',side_effect=self.ce), \
+                patch.object(llm,'complete_json',side_effect=self.identity):
+            ranked=await cascade.rank(self.req(),plan,self.rows(2)+rules)
+        result=search._select_evidence(self.req(),plan,ranked)
+        self.assertEqual(len([c for c in result if c.get('type')=='rule']),6)
+        self.assertEqual(plan['_cascade']['rule_cap']['dropped'],[])
+
+    async def test_top_fused_candidates_keep_a_seat_when_ce_scores_them_low(self):
+        rows=self.rows(20)
+        async def ce(query,documents,**kwargs):
+            # The best fused hit gets the worst CE score; everything else follows the fused order.
+            indices=[int(re.search(r'Evidence (\d+)',text)[1]) for text in documents]
+            return [-5. if i==0 else 1-i/100 for i in indices]
+        plan={}
+        with patch.object(config,'CASCADE_FINE_LIMIT',5), patch.object(config,'CASCADE_LLM_LIMIT',5), \
+                patch.object(config,'CASCADE_FUSED_RESERVE',1), \
+                patch.object(cross_encoder,'rerank',side_effect=ce), \
+                patch.object(llm,'complete_json',side_effect=self.identity):
+            ranked=await cascade.rank(self.req(),plan,rows)
+        fine=plan['_cascade']['fine']
+        self.assertIn('m0',fine['selected_ids'])
+        self.assertEqual(fine['fused_reserved_ids'],['m0'])
+        self.assertIn('m0',plan['_cascade']['listwise']['candidate_ids'])
+        reasons={r['candidate_id']:r['reasons'] for r in fine['selection']['reservations']}
+        self.assertEqual(reasons['m0'],['fused_head'])
+        with patch.object(config,'CASCADE_FINE_LIMIT',5), patch.object(config,'CASCADE_LLM_LIMIT',5), \
+                patch.object(config,'CASCADE_FUSED_RESERVE',0), \
+                patch.object(cross_encoder,'rerank',side_effect=ce), \
+                patch.object(llm,'complete_json',side_effect=self.identity):
+            plan={}
+            await cascade.rank(self.req(),plan,self.rows(20))
+        self.assertNotIn('m0',plan['_cascade']['fine']['selected_ids'])
+
     async def test_ce_and_listwise_failure_have_a_bounded_unknown_fallback(self):
         plan={}
         with patch.object(config,'EVIDENCE_FALLBACK_ITEMS',3), \

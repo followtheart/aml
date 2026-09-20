@@ -24,12 +24,15 @@ async def embed(texts: List[str], stage: str = "embedding") -> np.ndarray:
     # would distort the similarity space (REVIEW P0-1). LiteLLM accepts the
     # top-level parameter only for OpenAI's own text-embedding-3 models and
     # rejects it for any other `openai/` model, so compatible providers
-    # (Qwen3-Embedding, DashScope text-embedding-v3/v4) get it as a raw
+    # (Qwen3-Embedding, Qwen3.7 text embedding, DashScope v3/v4) get it as a raw
     # request-body field instead.
     model_lower = config.EMBED_MODEL.lower()
     if "text-embedding-3" in model_lower:
         kwargs["dimensions"] = config.EMBED_DIM
-    elif "qwen3-embedding" in model_lower or re.search(r"text-embedding-v[34]", model_lower):
+    elif ("qwen3-embedding" in model_lower
+          or model_lower.rsplit("/", 1)[-1] in {
+              "qwen3.7-text-embedding", "qwen3.7-text-embedding-flash"}
+          or re.search(r"text-embedding-v[34]", model_lower)):
         kwargs["extra_body"] = {"dimensions": config.EMBED_DIM}
 
     async def _embed_batch(batch: List[str]) -> np.ndarray:

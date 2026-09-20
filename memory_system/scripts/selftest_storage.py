@@ -133,6 +133,22 @@ class IntegrityTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(call.await_args.kwargs['extra_body'],
                          {'dimensions': config.EMBED_DIM})
 
+    async def test_qwen37_requests_native_dimension_instead_of_provider_default(self):
+        import litellm
+
+        async def provider(**kwargs):
+            dimension = kwargs.get('extra_body', {}).get('dimensions', 1024)
+            return {'data': [{'embedding': [1.0] * dimension} for _ in kwargs['input']]}
+
+        for model in ('openai/qwen3.7-text-embedding', 'openai/qwen3.7-text-embedding-flash'):
+            with self.subTest(model=model), patch.object(config, 'FAKE', False), \
+                    patch.object(config, 'EMBED_MODEL', model), \
+                    patch.object(config, 'EMBED_DIM', 256), \
+                    patch.object(litellm, 'aembedding', AsyncMock(side_effect=provider)):
+                vecs = await embeddings.embed(['dimension probe'], stage='test.embedding')
+            self.assertEqual(vecs.shape, (1, 256))
+            np.testing.assert_allclose(np.linalg.norm(vecs, axis=1), [1.0])
+
     def test_embedding_dimension_mismatch_is_never_sliced_or_padded(self):
         with self.assertRaisesRegex(ValueError, 'returned 3 dimensions'):
             embeddings._fit_dim(np.ones((1, 3), dtype=np.float32))

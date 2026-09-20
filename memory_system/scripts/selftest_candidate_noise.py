@@ -123,16 +123,26 @@ class RecallTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse({'graph', 'scene'} & {r['channel'] for r in plan['_routes']})
 
     async def test_multi_hop_and_sparse_recall_keep_bounded_expansion(self):
+        # Unsourced fillers own the direct top-3 seats, so the bridge is never a seed.
+        for i in range(3):
+            self.st.insert_amu(user_id='u', session_id='s', content=f'Nora visited Kyoto in spring {i}.',
+                               embedding=(await embed([f'Nora visited Kyoto in spring {i}.']))[0])
         for intent, reason in [('multi_hop', 'intent'), ('fact', 'sparse_direct')]:
             aid = await self.memory('Nora teaches Japanese in Kyoto.')
+            bridge = await self.memory('The Gion festival runs every July.')
             self.st.insert_triple('u', 'Nora', 'lives_in', 'Kyoto', aid)
+            self.st.insert_triple('u', 'Kyoto', 'hosts', 'Gion festival', bridge)
             plan = {'intent': intent, 'entities': ['Nora']}
             with patch.object(config, 'RECALL_EXPANSION_LIMIT', 4):
                 await search._recall(self.st, schemas.SearchRequest(user_id='u', query='Nora Kyoto'), plan)
             expanded = [r for r in plan['_routes'] if r['channel'] in ('graph', 'scene')]
             self.assertEqual(plan['_expansion']['reason'], reason)
             self.assertLessEqual(sum(len(r['candidates']) for r in expanded), 4)
-            self.assertIn(aid, {c['id'] for r in expanded for c in r['candidates']})
+            graph_ids = {c['id'] for r in plan['_routes'] if r['channel'] == 'graph' for c in r['candidates']}
+            # The graph lane brings what the seeds lead to, never a seed itself.
+            self.assertIn(bridge, graph_ids)
+            self.assertFalse(graph_ids & set(plan['_graph_seed_ids']))
+            self.assertIn(aid, {c['id'] for r in plan['_routes'] for c in r['candidates']})
 
     async def test_choice_planner_does_not_read_unverified_profile(self):
         with patch.object(config, 'QUERY_PROFILE_DIGEST', True), \

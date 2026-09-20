@@ -212,6 +212,8 @@ def _lexical_recall(st, req, plan, specs):
             include_history=history, include_sensitive=sensitive, include_cold=True))
     merged = [_merge_query_results(fts, config.RECALL_FTS_LIMIT),
               _merge_query_results(sources, config.RECALL_SOURCE_LIMIT)]
+    # Two reads for every lexical hit instead of two reads per hit.
+    _prime_source_cache(st, req, plan, [c for group in fts + sources for c in group])
     # Count independent original observations per query, never AMUs from one source.
     coverage = []
     for index, spec in enumerate(specs):
@@ -287,16 +289,15 @@ def _expand_recall(st, req, plan, routes, specs, vecs):
     graph_count = 0
     if expansion_limit // 2:
         budget.check()
-        triples = st.triples_for_user(req.user_id, include_sensitive=sensitive)
-        if not history:
-            valid = {a['id'] for a in st.get_amus_by_ids(
-                list({t['amu_id'] for t in triples}), include_sensitive=sensitive)}
-            triples = [t for t in triples if t['amu_id'] in valid]
+        # Validity is filtered in SQL; loading every memory row to check
+        # valid_to was the single largest read of the search.
+        triples = st.triples_for_user(req.user_id, include_sensitive=sensitive, include_history=history)
         seed_ids = list(dict.fromkeys(c['id'] for r in routes[:3] for c in r[:3]))
         plan['_graph_seed_ids'] = seed_ids
         triples = graph.filter_triples(triples, req.query, plan.get('entities') or [], seed_amu_ids=seed_ids)
+        # Seeds are already recalled; the graph lane is for what they lead to.
         ppr_ids = graph.ppr_recall(triples, plan.get('entities') or [], top_n=expansion_limit // 2,
-                                   seed_amu_ids=seed_ids, query=req.query)
+                                   seed_amu_ids=seed_ids, query=req.query, exclude_ids=seed_ids)
         by_id = {a['id']: a for a in st.get_amus_by_ids(ppr_ids, include_history=history, include_sensitive=sensitive)}
         for triple in triples:
             if triple['amu_id'] in by_id:
@@ -331,12 +332,11 @@ def _expand_recall(st, req, plan, routes, specs, vecs):
     terms = personal_evidence.terms(' '.join(queries))
     for c in profiles:
         c['_score'] = len(personal_evidence.terms(c['content']) & terms)
-    profiles = [c for c in profiles if not (c.get('type') == 'rule' and c.get('epistemic_status') == 'inferred'
-                and not any(s.get('role') == 'user' for s in st.sources_for_amu(c['id'])))]
     profiles = [c for c in profiles if c['_score'] > 0 or c.get('type') == 'rule' or plan.get('intent') == 'profile']
     ordered = sorted(profiles, key=lambda c: (-c['_score'], c['id']))
+    rules = _bounded_rules(st, req, plan, [c for c in ordered if c.get('type') == 'rule'])
     _route(plan, routes, 'profile_rule', [c for c in ordered if c.get('type') != 'rule'][:config.RECALL_PROFILE_LIMIT]
-           + [c for c in ordered if c.get('type') == 'rule'])
+           + rules)
     if plan.get('intent') == 'procedural':
         _route(plan, routes, 'experience', st.get_by_type(req.user_id, ['strategy', 'workflow', 'skill', 'playbook'],
                include_history=history, include_sensitive=sensitive))
@@ -459,6 +459,31 @@ def _coalesce_preferences(items, plan):
     return out
 
 
+def _bounded_rules(st, req, plan, rules):
+    """Keep forget constraints and the most topical rules; check sources lazily.
+
+    Inferred rules need a user-authored source to be recalled at all. Only the
+    rules that can still fit the lane are checked, so a user with hundreds of
+    rules no longer costs one source read per rule per search.
+    """
+    limit = config.RECALL_RULE_LIMIT
+    kept, dropped = [], []
+    for c in rules:
+        budget.check()
+        constraint = profile.is_forget_rule(c)
+        if limit > 0 and not constraint and sum(1 for k in kept if not profile.is_forget_rule(k)) >= limit:
+            dropped.append(dict(id=c['id'], reason='rule_recall_limit'))
+            continue
+        if c.get('epistemic_status') == 'inferred':
+            _, sources = _candidate_sources(st, req, plan, c)
+            if not any(s.get('role') == 'user' for s in sources):
+                dropped.append(dict(id=c['id'], reason='inferred_without_user_source'))
+                continue
+        kept.append(c)
+    plan['_rule_recall'] = dict(limit=limit, input_count=len(rules), kept_ids=[c['id'] for c in kept], dropped=dropped)
+    return kept
+
+
 def _candidate_sources(st, req, plan, candidate):
     ids = [candidate['id']] + candidate.get('_equivalent_ids', [])
     key = tuple(ids)
@@ -473,6 +498,30 @@ def _candidate_sources(st, req, plan, candidate):
         sources = list({(s['request_id'], s['message_index']): dict(s) for s in sources}.values())
         cache[key] = (full, sources)
     return cache[key]
+
+
+def _prime_source_cache(st, req, plan, candidates):
+    """Fill the per-search source cache for many plain candidates in two reads.
+
+    Entries match what _candidate_sources would build for a candidate without
+    equivalents; stores lacking the batch reader keep the per-candidate path.
+    """
+    if not hasattr(st, 'sources_for_amus'):
+        return
+    cache = plan.setdefault('_source_cache', {})
+    ids = list(dict.fromkeys(c['id'] for c in candidates
+               if c.get('type') != 'session_summary' and not c.get('_equivalent_ids')
+               and (c['id'],) not in cache))
+    if not ids:
+        return
+    budget.check()
+    full = {m['id']: m for m in st.get_amus_by_ids(ids, include_history=True,
+            include_sensitive=bool(config.SENSITIVE_RECALL_ENABLED and req.include_sensitive))}
+    grouped = st.sources_for_amus(ids)
+    for mid in ids:
+        sources = list({(s['request_id'], s['message_index']): dict(s) for s in grouped.get(mid, [])}.values())
+        cache[(mid,)] = ([full[mid]] if mid in full else [], sources)
+    plan['_source_cache_primed'] = plan.get('_source_cache_primed', 0) + len(ids)
 
 
 def _prepare_candidates(st, req, plan, fused):

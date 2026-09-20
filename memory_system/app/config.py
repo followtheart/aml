@@ -8,7 +8,7 @@ AML_LLM_MODEL   : litellm model string for all LLM calls.
                                  (SILICONFLOW_API_KEY)
                     DashScope    dashscope/qwen3-14b   (DASHSCOPE_API_KEY,
                                  Alibaba Cloud Bailian OpenAI-compatible mode)
-                    DeepSeek     deepseek/deepseek-chat (DEEPSEEK_API_KEY)
+                    DeepSeek     deepseek/deepseek-flash (DEEPSEEK_API_KEY)
                     Ollama       ollama/qwen2.5
                     Any OpenAI-compatible endpoint:
                       AML_LLM_MODEL=openai/<model> + AML_LLM_API_BASE=<url>
@@ -161,6 +161,7 @@ PROVIDER_CONCURRENCY = max(1, int(os.environ.get("AML_PROVIDER_CONCURRENCY", "4"
 # Qwen3 chat models reason by default on OpenAI-compatible endpoints; the
 # hidden reasoning tokens multiply latency for structured extraction, and
 # DashScope rejects non-streaming requests while thinking is enabled.
+# DeepSeek also defaults to thinking; disable it for forced tool selection.
 LLM_DISABLE_THINKING = os.environ.get("AML_LLM_DISABLE_THINKING", "1") == "1"
 LLM_MAX_TOKENS = 1200   # caps runaway repetition from small models
 LLM_JSON_MAX_TOKENS = int(os.environ.get("AML_LLM_JSON_MAX_TOKENS", "2048"))
@@ -186,6 +187,8 @@ RECALL_VECTOR_LIMIT = max(1, int(os.environ.get("AML_RECALL_VECTOR_LIMIT", "40")
 RECALL_SOURCE_LIMIT = max(1, int(os.environ.get("AML_RECALL_SOURCE_LIMIT", "40")))
 RECALL_FTS_LIMIT = max(1, int(os.environ.get("AML_RECALL_FTS_LIMIT", "20")))
 RECALL_PROFILE_LIMIT = max(1, int(os.environ.get("AML_RECALL_PROFILE_LIMIT", "8")))
+# Rules recalled per search besides forget constraints; 0 keeps every rule.
+RECALL_RULE_LIMIT = max(0, int(os.environ.get("AML_RECALL_RULE_LIMIT", "12")))
 RECALL_EXPANSION_LIMIT = max(0, int(os.environ.get("AML_RECALL_EXPANSION_LIMIT", "12")))
 RECALL_EXPANSION_MIN_DIRECT = max(1, int(os.environ.get("AML_RECALL_EXPANSION_MIN_DIRECT", "3")))
 # Historical replay settings; v7 uses CASCADE_* and CE_BATCH_SIZE instead.
@@ -255,6 +258,15 @@ SUMMARY_ROUTE = os.environ.get("AML_SUMMARY_ROUTE", "0") == "1"
 # P0: interest consolidation after each Add promotes repeated "user asked
 # about X" signals into first-person `preference` AMUs.
 PROFILE_CONSOLIDATION_ENABLED = os.environ.get("AML_PROFILE_CONSOLIDATION", "1") == "1"
+# Deterministic ingestion of a "[system] ... persona: {json}" opening message
+# into atomic profile/preference memories tagged source_role=persona.
+PERSONA_SOURCE_EXTRACTION = os.environ.get("AML_PERSONA_EXTRACTION", "1") == "1"
+# Protected rules admitted to one evidence packet (0 = unlimited); the rest of
+# the budget goes to ordinary evidence.
+PACKET_RULE_LIMIT = int(os.environ.get("AML_PACKET_RULE_LIMIT", "3"))
+# Top fused-retrieval candidates that keep a seat in the fine list even when
+# the cross-encoder scores them low.
+CASCADE_FUSED_RESERVE = int(os.environ.get("AML_CASCADE_FUSED_RESERVE", "3"))
 # Support keys (Add request ids / supporting AMU ids) needed to confirm a
 # consolidated preference and to promote it transient -> static.
 PROFILE_MIN_SUPPORT = max(1, int(os.environ.get("AML_PROFILE_MIN_SUPPORT", "2")))

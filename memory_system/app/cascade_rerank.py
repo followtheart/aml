@@ -5,16 +5,47 @@ import math
 import re
 import time
 import httpx
-from . import budget, config, cross_encoder, evidence_selection, listwise_recovery, llm, profile, prompts, rerank_query
+from . import budget, config, cross_encoder, evidence_selection, listwise_recovery, llm, personal_evidence, profile, prompts, rerank_query
+
+# Wording shared by every forget/instruction rule; it must not count as topical overlap.
+_RULE_BOILERPLATE = set('user asked assistant forget forgot forgotten requested request information detail details '
+                        'never mention mentioned remember delete remove erase told said should always please '
+                        'recently anymore longer previously earlier'.split())
 
 
 def protected(item):
     return bool(item.get('_user_rule')) or profile.is_forget_rule(item)
 
 
-def shortlist(rows, count, requirements, key, reserve_ids=(), *, trace=None, carry_ids=()):
+def rule_overlap(item, needles):
+    """Topical terms a rule shares with the question and its options."""
+    text = item.get('_rank_text', item.get('content', ''))
+    return len((personal_evidence.terms(text) - _RULE_BOILERPLATE) & needles)
+
+
+def cap_rules(req, plan, rules):
+    """Keep only the rules that can bear on this question.
+
+    Every protected rule used to bypass ranking and ride into the packet, so a
+    user with many forget requests spent most of the evidence budget on
+    constraints unrelated to the question. Rules are ordered by topical
+    overlap with the query/options, then by fused retrieval score, and cut at
+    PACKET_RULE_LIMIT. Dropped rules are recorded in the cascade trace.
+    """
+    limit = config.PACKET_RULE_LIMIT
+    needles = personal_evidence.terms(' '.join([req.query] + list(req.options or []))) - _RULE_BOILERPLATE
+    overlaps = {c['id']: rule_overlap(c, needles) for c in rules}
+    ordered = sorted(rules, key=lambda c: (-overlaps[c['id']], -(c.get('_fused') or 0), c['id']))
+    kept = ordered if limit <= 0 else ordered[:limit]
+    dropped = ordered[len(kept):]
+    plan['_cascade']['rule_cap'] = dict(limit=limit, input_count=len(rules), kept_ids=[c['id'] for c in kept],
+                                       dropped=[dict(id=c['id'], overlap=overlaps[c['id']]) for c in dropped])
+    return kept, dropped
+
+
+def shortlist(rows, count, requirements, key, reserve_ids=(), *, trace=None, carry_ids=(), fused_ids=()):
     return evidence_selection.select(rows, count, requirements, key, reserve_ids,
-                                     trace=trace, carry_ids=carry_ids)
+                                     trace=trace, carry_ids=carry_ids, fused_ids=fused_ids)
 
 
 def query_text(req, plan):
@@ -90,7 +121,8 @@ async def rank(req, plan, candidates):
     if not candidates:
         plan['_rerank_status'] = 'not_run'
         return []
-    rules = [c for c in candidates if protected(c)]
+    rules, dropped_rules = cap_rules(req, plan, [c for c in candidates if protected(c)])
+    trace['omitted'].extend(dict(id=c['id'], stage='rules', reason='rule_limit') for c in dropped_rules)
     ordinary = [c for c in candidates if not protected(c)]
     requirements = plan.get('_coverage_requirements', [])
     coarse_selection = {}
@@ -254,26 +286,35 @@ async def rank(req, plan, candidates):
     reserve_count = min(max(1, min(config.CASCADE_FINE_LIMIT, config.CASCADE_LLM_LIMIT) // 4), len(failed)) if scores else 0
     failed_ids = {c['id'] for c in evidence_selection.rescue(failed, reserve_count, req.query,
                                                            plan.get('_query_specs', []))}
+    # The cross-encoder is a single opinion; the top fused retrieval hits keep a
+    # bounded seat in the fine list so one bad CE score cannot discard them.
+    fused_head = sorted(coarse, key=lambda c: -(c.get('_fused') or 0))[:max(0, config.CASCADE_FUSED_RESERVE)]
+    fused_ids = {c['id'] for c in fused_head} - failed_ids if scores else set()
     fine_selection = {}
     fine = shortlist(coarse, min(config.CASCADE_FINE_LIMIT, len(coarse)), requirements,
         lambda c: (c['_ce_score'] if c.get('_ce_score') is not None else -1e30, c.get('_fused', 0)),
-        reserve_ids=failed_ids, trace=fine_selection) if scores else shortlist(coarse, config.CASCADE_FINE_LIMIT,
+        reserve_ids=failed_ids, fused_ids=fused_ids, trace=fine_selection) if scores else shortlist(coarse, config.CASCADE_FINE_LIMIT,
             requirements, lambda c: (c.get('_fused', 0),), trace=fine_selection)
     fine_ids = {c['id'] for c in fine}
     reservations = [r for r in fine_selection['reservations'] if r['selected']]
     carried_ids = {r['candidate_id'] for r in reservations}
+    # Fused-head seats are a soft guard against one bad CE score; witnessed
+    # coverage and rescue reservations outrank them at every later cap.
+    soft_ids = {r['candidate_id'] for r in reservations if r['reasons'] == ['fused_head']}
     trace['fine'] = dict(input_count=len(coarse), output_count=len(fine), selected_ids=[c['id'] for c in fine],
-                         selection=fine_selection, reserved_ids=sorted(carried_ids))
+                         selection=fine_selection, reserved_ids=sorted(carried_ids),
+                         fused_reserved_ids=sorted(fused_ids & fine_ids))
     for stage, selection in (('coarse', coarse_selection), ('fine', fine_selection)):
         for r in selection['reservations']:
-            if not r['selected']:
+            if not r['selected'] and r['reasons'] != ['fused_head']:
                 trace['reservation_missing'].extend(dict(requirement_id=rid, candidate_id=r['candidate_id'],
                     stage=stage, reason='capacity') for rid in r['requirement_ids'] or [None])
     trace['omitted'].extend(dict(id=c['id'], stage='fine', reason='fine_limit') for c in coarse if c['id'] not in fine_ids)
     # Preserve the fine rank and its coverage reservations at the listwise cap.
     positions = {c['id']: len(fine) - i for i, c in enumerate(fine)}
     admission_selection = {}
-    ordered = shortlist(fine, config.CASCADE_LLM_LIMIT, [], lambda c: (positions[c['id']],),
+    ordered = shortlist(fine, config.CASCADE_LLM_LIMIT, [],
+                        lambda c: (c['id'] in carried_ids and c['id'] not in soft_ids, positions[c['id']]),
                         carry_ids=carried_ids, trace=admission_selection)
     submitted, token_limited = [], False
     mandatory = carried_ids
@@ -291,7 +332,7 @@ async def rank(req, plan, candidates):
     trace['omitted'].extend(dict(id=c['id'], stage='listwise', reason='listwise_limit')
                             for c in fine if c['id'] not in submitted_ids and c not in ordered)
     for r in reservations:
-        if r['candidate_id'] not in submitted_ids:
+        if r['candidate_id'] not in submitted_ids and r['reasons'] != ['fused_head']:
             omission = next((o for o in reversed(trace['omitted']) if o['id'] == r['candidate_id']), {})
             reason = omission.get('reason', 'capacity')
             if reason == 'listwise_limit':

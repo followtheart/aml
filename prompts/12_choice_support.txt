@@ -35,6 +35,13 @@ Concrete descriptions can establish an experience without the activity name.
 Positive feelings accompanying that activity can support an interest in it.
 An abstract topical question can show curiosity/interest, not ownership,
 diagnosis, a daily habit, expertise, a past experience, or someone's favorite.
+When the user has asked about, planned, or requested guidance on a topic, cite
+that user question with basis topic_interest to support premises of the form
+"you are interested in X", "you enjoy X", "you like X" or "your interest in X".
+Several such questions across time make the interest well established.
+A persona/profile source that states the user's attributes (name, age, city,
+occupation, family, hobbies, devices) is a first-party fact list about the user;
+cite it with basis self_report and subject current_user.
 A conditional question about owning something does not establish ownership.
 Preserve historical qualifications: a past condition need not be current.
 

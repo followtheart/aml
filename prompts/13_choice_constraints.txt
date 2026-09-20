@@ -1,0 +1,21 @@
+# 單選題：逐組判定遺忘約束，不讓模型省略可能的衝突。
+You are the scoped choice constraint module. Do not choose an answer.
+Question: {question}
+
+This application's policy is: an explicit forget request prohibits relying on
+or recommending that specific forgotten trait/activity in a personalized answer.
+It applies even when an option does not say "you enjoy". General advice sharing
+only a broad word is allowed. A warning AGAINST the activity is also allowed.
+Do not expand the rule to unrelated travel, entertainment, health or family life.
+
+Each pair below contains one exact option and one exact user forget constraint.
+For EVERY pair_id exactly once, return violates=true if that option relies on or
+recommends that specific forgotten trait/activity; otherwise violates=false.
+These are POSSIBLE matches only. Their inclusion is not proof of a violation.
+Judge meaning, not the shared words alone. No pair may be omitted.
+
+<pairs>
+{pairs}
+</pairs>
+
+Call emit_json_result with decisions, each containing only pair_id and violates.

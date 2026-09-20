@@ -2,9 +2,9 @@
 import hashlib
 from functools import lru_cache
 from pathlib import Path
-from . import config
+from . import answer_choice, config
 
-SEARCH_POLICY = 'graph_cascade_v9'
+SEARCH_POLICY = 'graph_cascade_v10'
 
 
 @lru_cache(maxsize=1)
@@ -16,7 +16,7 @@ def versions():
               hashlib.sha256(p.read_bytes()).hexdigest() for p in files}
     fingerprint = hashlib.sha256(repr(sorted(hashes.items())).encode()).hexdigest()
     return {'pipeline_version': fingerprint, 'search_policy': SEARCH_POLICY,
-            'answer_policy': 'direct_evidence_v2', 'file_hashes': hashes,
+            'answer_policy': answer_choice.VERSION, 'file_hashes': hashes,
             'model': config.LLM_MODEL, 'embedding_model': config.EMBED_MODEL,
             'cross_encoder_model': config.CE_MODEL,
             'settings': {key: getattr(config, key) for key in (

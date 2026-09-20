@@ -2,7 +2,7 @@
 import json
 import re
 
-from . import answer_context, llm, prompts
+from . import answer_choice, answer_context, llm, prompts
 
 PROTOCOL = "local-text-proxy-v1"
 REFINED_POLICY = "locomo-refined-local-v1"
@@ -131,9 +131,14 @@ async def evaluate(qa, memories):
     scoring = qa.get("scoring", "binary")
     diagnostics = {}
     if scoring == "choice":
-        diagnostics["answer_policy"] = "direct_evidence_v2"
+        diagnostics["answer_policy"] = (answer_choice.VERSION
+                                        if qa.get("qa_type") == "single_choice"
+                                        else "direct_evidence_v2")
     try:
-        pred = (await llm.complete(answer_prompt(qa, memories), stage="eval.answer")).strip()
+        if scoring == "choice" and qa.get("qa_type") == "single_choice":
+            pred = (await answer_choice.answer(qa, memories, diagnostics)).strip()
+        else:
+            pred = (await llm.complete(answer_prompt(qa, memories), stage="eval.answer")).strip()
     except Exception as exc:
         return "", 0.0, {**diagnostics, "error_stage": "answer", "error_type": type(exc).__name__}
     if scoring == "choice":

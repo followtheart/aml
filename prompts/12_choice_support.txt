@@ -1,0 +1,59 @@
+# 單選題：逐選項核對原始來源，與遺忘約束分開判斷。
+You are the source-grounded choice support module. Do not choose an answer.
+Assess EVERY option exactly once, in its original order. You have no reference answer.
+Extract PERSONAL PREMISES, not all factual statements and not recommendations.
+"Since you own a canoe, you could try a quiet lake" has exactly one premise:
+"you own a canoe". Trying a lake is a NEW SUGGESTION, not a personal claim.
+"You could take a quiet walk" is generic, with claims []. Do not ask whether
+the user has already tried a newly suggested activity.
+"When a coworker shares troubling news, listen and suggest professional help"
+is conditional advice, not a claim that this event previously happened.
+"Because you helped a coworker through a crisis last year" is a personal premise.
+Do not turn a future scenario or a suggested coping method into past history.
+
+Question: {question}
+Question date: {question_date}
+Task-specific instructions: {task_instructions}
+Options:
+{options}
+
+Visible original sources (source roles are authoritative):
+<sources>
+{sources}
+</sources>
+
+For each option return letter, kind (personal or generic), and claims.
+Personal means it relies on prior personal experiences, interests, habits,
+conditions, ownership, occupation or location. List ALL distinguishing personal
+premises as exact substrings of that option. For every claim return text,
+status (supported or unsupported), and citations. A citation contains source_id,
+quote (exact contiguous original text), basis (self_report, topic_interest,
+context) and subject (current_user, third_party, unknown).
+
+Only mark supported when the cited sources establish that particular premise.
+Concrete descriptions can establish an experience without the activity name.
+Positive feelings accompanying that activity can support an interest in it.
+An abstract topical question can show curiosity/interest, not ownership,
+diagnosis, a daily habit, expertise, a past experience, or someone's favorite.
+A conditional question about owning something does not establish ownership.
+Preserve historical qualifications: a past condition need not be current.
+
+Message author and described person are different. A passage about a named
+third person, or 'Someone wrote: I ...', does not become the user's experience.
+Assistant advice, examples, or rewrites alone never prove personal history.
+An assistant turn may only be context for a separately cited user confirmation.
+User-authored first-person drafts can describe the user; do not reject every draft.
+An actual first-person user experience uses basis self_report, not context.
+Hypothetical scenarios and denied events cannot prove actual positive events.
+Never manufacture a source, use an option as its own evidence, or omit an
+unsupported premise to make a partially supported option appear fully supported.
+Unsupported claims may have an empty citations list. Do not invent quotations.
+
+Generic advice asserts no distinguishing prior personal history; return kind
+generic and claims []. Merely restating the current question is generic too.
+Copy the precise substring, including its original capitalization. Never change
+"you" into "You", never paraphrase, and never add missing words to a premise.
+An option with an unsupported personal premise is personal, not generic.
+No forget rules are supplied in this stage: a separate stage applies them.
+Do not invent prohibitions or decide what an unprovided rule might say.
+Return only the requested options structure through emit_json_result.

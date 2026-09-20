@@ -378,6 +378,10 @@ class FakeLLM:
         if "evidence listwise ranking module" in prompt:
             count = len(re.findall(r'^\d+: ', prompt, re.M))
             return json.dumps({'ranking': list(range(count)), 'irrelevant': [], 'groups': []})
+        if 'source-grounded deleted evidence review module' in prompt:
+            candidates = json.loads(prompt.split('<candidates>\n', 1)[1].split('\n</candidates>', 1)[0])
+            return json.dumps({'decisions': [dict(candidate_id=c['candidate_id'], useful=False,
+                target_id='', target_quote='', evidence_kind='none', citations=[]) for c in candidates]})
         if "relevance scoring module" in prompt:
             return json.dumps({"scores": self._fake_rerank(prompt)})
         if "sufficiency verifier" in prompt:
@@ -397,6 +401,20 @@ class FakeLLM:
                  "evidence_id": "", "evidence": "", "unsupported_claims": [],
                  "forbidden": False, "constraint_id": "", "constraint_span": ""}
                 for l in letters]})
+        if 'source-grounded choice support module' in prompt:
+            section = prompt.split('Options:\n', 1)[1].split('\n\nVisible original sources', 1)[0]
+            letters = re.findall(r'^\s*([A-Z])[.)]\s', section, re.M)
+            return json.dumps({'options': [dict(letter=l, kind='generic', claims=[]) for l in letters]})
+        if 'scoped choice constraint module' in prompt:
+            pairs = json.loads(prompt.split('<pairs>\n', 1)[1].split('\n</pairs>', 1)[0])
+            return json.dumps({'decisions': [dict(pair_id=p['pair_id'], violates=False) for p in pairs]})
+        if 'independent premise entailment module' in prompt:
+            checks = json.loads(prompt.split('<checks>\n', 1)[1].split('\n</checks>', 1)[0])
+            return json.dumps({'checks': [dict(claim_id=c['claim_id'], entailed=c.get('claimed_kind') == 'generic') for c in checks]})
+        if 'verified choice selection module' in prompt:
+            section = prompt.split('Eligible options:\n', 1)[1].split('\nVerified judgments:', 1)[0]
+            letters = re.findall(r'^\s*([A-Z])[.)]\s', section, re.M)
+            return json.dumps({'answer': letters[0] if letters else 'A'})
         if "memory invalidation module" in prompt:
             ids = re.findall(r"^(amu_\w+):", prompt, re.M)
             return json.dumps({"invalidate_ids": ids[:1]})

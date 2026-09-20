@@ -13,7 +13,7 @@ from unittest.mock import AsyncMock, patch
 
 os.environ["AML_FAKE"] = "1"
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from app import eval_data as data, eval_scoring as scoring, schemas
+from app import eval_data as data, eval_scoring as scoring, run_metadata, schemas
 import local_eval
 
 
@@ -214,13 +214,73 @@ class DatasetTests(unittest.TestCase):
 
     def test_choice_skips_judge(self):
         qa = data.scriptmem(script(), "angry", None)["qa"][0]
-        with patch.object(scoring.llm, "complete", AsyncMock(return_value="A")), \
-             patch.object(scoring.llm, "complete_json", AsyncMock(return_value={"options": []})) as judge:
+        answer = AsyncMock(return_value="A")
+        unexpected = AsyncMock(side_effect=AssertionError("Unexpected direct answer or judge"))
+        with patch.object(scoring.answer_choice, "answer", answer), \
+             patch.object(scoring.llm, "complete", unexpected), \
+             patch.object(scoring.llm, "complete_json", unexpected):
             self.assertEqual(asyncio.run(scoring.evaluate(qa, []))[1], 1)
-            # Choice questions never reach the judge; the only structured call
-            # allowed is the pre-answer option/persona-evidence alignment.
-            for call in judge.call_args_list:
-                self.assertEqual(call.kwargs.get("stage"), "eval.choice_align")
+        answer.assert_awaited_once()
+        unexpected.assert_not_awaited()
+
+    def test_non_single_choice_modes_keep_direct_answer_and_scoring_contracts(self):
+        cases = [
+            ({"scoring": "choice", "qa_type": "multi_select", "options": ["A. Red", "B. Blue"],
+              "gold_labels": ["A", "B"]}, "B,A", None, 1.0),
+            ({"scoring": "choice", "qa_type": "ordering", "options": ["A. Red", "B. Blue"],
+              "gold_labels": ["A", "B"]}, "B,A", None, 0.0),
+            ({"scoring": "binary", "answer": "GOLD_ONLY_REFERENCE"},
+             "Red", {"label": "CORRECT"}, 1.0),
+            ({"scoring": "refined_binary", "answer": ["GOLD_ONLY_REFERENCE"]},
+             "Red", {"label": "CORRECT"}, 1.0),
+            ({"scoring": "rubric_all", "rubrics": ["GOLD_ONLY_RUBRIC"]},
+             "Red", {"scores": [{"index": 0, "score": 1}]}, 1.0),
+            ({"scoring": "rubric_mean", "rubrics": ["GOLD_ONLY_RUBRIC"]},
+             "Red", {"scores": [{"index": 0, "score": 0.5}]}, 0.5),
+        ]
+        for fields, reply, verdict, expected in cases:
+            qa = {"question": "What color?", **fields}
+            with self.subTest(scoring=qa["scoring"], qa_type=qa.get("qa_type")), \
+                 patch.object(scoring.answer_choice, "answer", AsyncMock(
+                     side_effect=AssertionError("Single-choice route must not run"))) as verified, \
+                 patch.object(scoring.llm, "complete", AsyncMock(return_value=reply)) as direct, \
+                 patch.object(scoring.llm, "complete_json", AsyncMock(return_value=verdict)) as judge:
+                pred, score, diagnostics = asyncio.run(scoring.evaluate(qa, []))
+                self.assertEqual((pred, score), (reply, expected))
+                verified.assert_not_awaited()
+                direct.assert_awaited_once()
+                self.assertEqual(direct.call_args.kwargs["stage"], "eval.answer")
+                self.assertNotIn("GOLD_ONLY", direct.call_args.args[0])
+                self.assertNotIn("error_stage", diagnostics)
+                if qa["scoring"] == "choice":
+                    judge.assert_not_awaited()
+                    self.assertEqual(diagnostics["answer_policy"], "direct_evidence_v2")
+                else:
+                    judge.assert_awaited_once()
+
+    def test_single_choice_request_excludes_gold_and_rubrics(self):
+        qa = {"question": "Weekend ideas?", "options": ["A. Hiking", "B. Reading"],
+              "qa_type": "single_choice", "scoring": "choice", "gold_labels": ["A"],
+              "answer": "GOLD_ONLY_REFERENCE", "rubrics": ["GOLD_ONLY_RUBRIC"]}
+        requests = []
+
+        async def capture(prompt, *args, **kwargs):
+            requests.append((prompt, kwargs))
+            raise RuntimeError("Stop before any provider call")
+
+        with patch.object(scoring.llm, "complete", side_effect=capture), \
+             patch.object(scoring.llm, "complete_json", side_effect=capture):
+            _, _, diagnostics = asyncio.run(scoring.evaluate(qa, []))
+        self.assertTrue(requests, "Exercise the actual verified-answer request builder")
+        for prompt, kwargs in requests:
+            self.assertNotIn("GOLD_ONLY", prompt)
+            self.assertNotIn("GOLD_ONLY", json.dumps(kwargs))
+            self.assertIn("Weekend ideas?", prompt)
+            self.assertIn("Hiking", prompt)
+        self.assertEqual(diagnostics["answer_policy"], scoring.answer_choice.VERSION)
+
+    def test_answer_policy_metadata_uses_verified_answer_version(self):
+        self.assertEqual(run_metadata.versions()["answer_policy"], scoring.answer_choice.VERSION)
 
     def test_provider_error_reported(self):
         qa = data.longmemeval(lme(), "longmemeval-s")["qa"][0]
@@ -242,6 +302,41 @@ class DatasetTests(unittest.TestCase):
         self.assertEqual(result[1], 0.0)
         self.assertNotIn("error_stage", result[2])
 
+    def test_local_eval_preserves_manifest_degradation_and_constraint_delivery(self):
+        cases = [
+            ({'rerank_status': 'ok', 'search_degraded': True,
+              'planning_error': 'TimeoutError'}, True),
+            ({'rerank_status': 'ok', 'search_degraded': True,
+              'cascade': {'listwise': {'recovery': {'status': 'budget_skipped'}}}}, True),
+            ({'rerank_status': 'partial', 'search_degraded': False}, False),
+            ({'rerank_status': 'partial'}, True),
+            ({'rerank_status': 'ok', 'search_degraded': False}, False),
+        ]
+        c = data.scriptmem(script(), 'angry', None)
+        rule = schemas.SearchItem(id='rule', content='Do not use the forgotten address.',
+                                  memory_type='rule', is_constraint=True)
+        for manifest, expected in cases:
+            with self.subTest(manifest=manifest), tempfile.TemporaryDirectory() as tmp:
+                path, out = Path(tmp)/'in.jsonl', Path(tmp)/'out.jsonl'
+                path.write_text(json.dumps(c), encoding='utf-8')
+                response = schemas.SearchResponse(data=[rule], evidence_status='incomplete' if expected else 'not_found',
+                    coverage_manifest=manifest)
+                answer = AsyncMock(return_value=('A', 1.0, {}))
+                progress = io.StringIO()
+                argv = ['local_eval', '--data', str(path), '--limit', '1', '--output', str(out), '--no-progress']
+                with patch.object(sys, 'argv', argv), \
+                        patch.object(local_eval.add_pipeline, 'run_add', AsyncMock()), \
+                        patch.object(local_eval.search_pipeline, 'run_search', AsyncMock(return_value=response)), \
+                        patch.object(local_eval.eval_scoring, 'evaluate', answer), redirect_stdout(progress):
+                    asyncio.run(local_eval.main())
+                answer.assert_awaited_once()
+                self.assertEqual(answer.call_args.args[1], [rule.model_dump()])
+                result = json.loads(out.read_text(encoding='utf-8'))
+                self.assertEqual(result['search_degraded'], expected)
+                self.assertEqual(result['coverage_manifest'], manifest)
+                self.assertEqual(result['evidence_status'], response.evidence_status)
+                self.assertEqual('[search degraded:' in progress.getvalue(), expected)
+
     def test_local_eval_end_to_end_contract(self):
         c = data.scriptmem(script(), "angry", None)
         c["sessions"][0] *= 21
@@ -250,14 +345,24 @@ class DatasetTests(unittest.TestCase):
         async def search(st, req):
             searches.append(req)
             return schemas.SearchResponse(data=[])
+        async def answer(qa, memories, diagnostics):
+            self.assertEqual(qa["qa_type"], "single_choice")
+            self.assertEqual(memories, [])
+            diagnostics.update(answer_policy=scoring.answer_choice.VERSION,
+                               answer_validation="ok", choice_alignment=[
+                                   {"letter": "A", "status": "supported", "claims": [],
+                                    "validation_errors": []}])
+            return "A"
         with tempfile.TemporaryDirectory() as tmp:
             path, out = Path(tmp)/"in.jsonl", Path(tmp)/"out.jsonl"
             path.write_text(json.dumps(c))
             argv = ["local_eval", "--data", str(path), "--limit", "1", "--output", str(out), "--no-progress"]
             with patch.object(sys, "argv", argv), patch.object(local_eval.add_pipeline, "run_add", add), \
                  patch.object(local_eval.search_pipeline, "run_search", search), \
-                 patch.object(scoring.llm, "complete", AsyncMock(return_value="A")), redirect_stdout(io.StringIO()):
+                 patch.object(scoring.answer_choice, "answer", side_effect=answer) as verified, \
+                 redirect_stdout(io.StringIO()):
                 asyncio.run(local_eval.main())
+            verified.assert_awaited_once()
             self.assertEqual(len(adds), 2)
             self.assertEqual(adds[0].session_id, adds[1].session_id)
             self.assertNotEqual(adds[0].request_id, adds[1].request_id)
@@ -269,6 +374,10 @@ class DatasetTests(unittest.TestCase):
             result = json.loads(out.read_text())
             self.assertEqual(result["score"], 1)
             self.assertTrue(result["fake"])
+            self.assertEqual(result["answer_policy"], scoring.answer_choice.VERSION)
+            self.assertEqual(result["versions"]["answer_policy"], scoring.answer_choice.VERSION)
+            self.assertEqual(result["answer_validation"], "ok")
+            self.assertEqual(result["choice_alignment"][0]["status"], "supported")
 
 
 if __name__ == "__main__":

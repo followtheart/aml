@@ -51,6 +51,69 @@ class SearchTests(unittest.IsolatedAsyncioTestCase):
                 search.llm, 'complete_json', side_effect=score_all):
             return await search.run_search(self.st, req)
 
+    async def status_response(self, *, keep_ordinary=False, recovery=None):
+        """Exercise packet/status wiring with an already-decided rerank result."""
+        async def decided(req, plan, candidates):
+            plan['_rerank_status'] = 'ok'
+            plan['_cascade'] = {'omitted': [], 'listwise': {'status': 'ok'}}
+            if recovery is not None:
+                plan['_cascade']['listwise']['recovery'] = recovery
+            return [dict(c, _cascade_selected=(keep_ordinary or search._protected_rule(c)),
+                         _listwise_rank=i) for i, c in enumerate(candidates)]
+
+        with patch.object(search, '_understand', AsyncMock(return_value={'intent': 'fact'})), \
+                patch.object(search, '_filter_rerank', side_effect=decided):
+            return await search.run_search(self.st, self.req())
+
+    async def test_constraints_are_delivered_without_claiming_ordinary_evidence(self):
+        rule = await self.memory('The user asked to forget their address.', type='rule')
+        result = await self.status_response()
+        self.assertEqual([item.id for item in result.data], [rule])
+        self.assertTrue(result.data[0].is_constraint)
+        self.assertEqual(result.evidence_status, 'not_found')
+        self.assertEqual(result.coverage_manifest['evidence_count'], 0)
+        self.assertEqual(result.coverage_manifest['constraint_count'], 1)
+        self.assertTrue(result.coverage_manifest['constraint_only'])
+        self.assertFalse(result.coverage_manifest['search_degraded'])
+        trace = json.loads(self.path.read_text().splitlines()[-1])
+        self.assertEqual(trace['status'], 'not_found')
+        self.assertEqual(trace['returned'][0]['id'], rule)
+
+    async def test_unfinished_recovery_marks_constraint_only_result_incomplete(self):
+        await self.memory('The user asked to forget their address.', type='rule')
+        for status in ('error', 'budget_skipped', 'partial'):
+            with self.subTest(status=status):
+                result = await self.status_response(recovery={'status': status, 'restored_ids': []})
+                self.assertEqual(result.evidence_status, 'incomplete')
+                self.assertTrue(result.coverage_manifest['search_degraded'])
+                self.assertTrue(result.coverage_manifest['constraint_only'])
+                self.assertEqual(result.coverage_manifest['cascade']['listwise']['recovery']['status'], status)
+                self.assertEqual(len(result.data), 1)
+
+    async def test_recovery_degradation_remains_visible_when_evidence_survives(self):
+        aid = await self.memory('Alice work evidence')
+        result = await self.status_response(keep_ordinary=True,
+            recovery={'status': 'budget_skipped', 'restored_ids': []})
+        self.assertEqual([item.id for item in result.data], [aid])
+        self.assertEqual(result.evidence_status, 'retrieved')
+        self.assertTrue(result.coverage_manifest['search_degraded'])
+        self.assertFalse(result.coverage_manifest['constraint_only'])
+
+    async def test_completed_recovery_and_empty_store_keep_status_contracts(self):
+        empty = await self.status_response()
+        self.assertEqual(empty.evidence_status, 'not_found')
+        self.assertEqual(empty.data, [])
+        self.assertFalse(empty.coverage_manifest['constraint_only'])
+        self.assertFalse(empty.coverage_manifest['search_degraded'])
+        aid = await self.memory('Alice work evidence')
+        for status in ('ok', 'recovered', 'not_needed'):
+            with self.subTest(status=status):
+                result = await self.status_response(keep_ordinary=True,
+                    recovery={'status': status, 'restored_ids': [aid] if status != 'not_needed' else []})
+                self.assertEqual(result.evidence_status, 'retrieved')
+                self.assertFalse(result.coverage_manifest['search_degraded'])
+                self.assertFalse(result.coverage_manifest['constraint_only'])
+
     async def test_history_across_vector_fts_graph_and_current_exclusion(self):
         old = await self.memory('Alice work Shanghai', valid_from='2020-01-01', valid_to='2024-01-01')
         current = await self.memory('Alice work Hangzhou', valid_from='2024-01-01')

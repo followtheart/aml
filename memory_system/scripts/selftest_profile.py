@@ -5,6 +5,7 @@ import os
 import sys
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 os.environ['AML_FAKE'] = '1'
@@ -218,11 +219,26 @@ class SearchInjectionTests(unittest.IsolatedAsyncioTestCase):
         return self.st.insert_amu(user_id='u', session_id='s', content=content,
                                   embedding=vec, **kwargs)
 
+    def assert_source_less_rejection_is_unreviewed(self, response, rejected_ids):
+        manifest = response.coverage_manifest
+        recovery = manifest['cascade']['listwise']['recovery']
+        self.assertEqual(manifest['cascade']['listwise']['status'], 'ok')
+        self.assertEqual(manifest['rerank_status'], 'partial')
+        self.assertTrue(manifest['search_degraded'])
+        self.assertEqual(recovery['status'], 'partial')
+        self.assertEqual(recovery['reason'], 'no_admissible_review')
+        self.assertEqual(set(recovery['unreviewed_ids']), set(rejected_ids))
+        self.assertEqual(recovery['reviewed_ids'], [])
+        self.assertEqual(recovery['restored_ids'], [])
+        self.assertEqual({r['candidate_id'] for r in recovery['omitted']}, set(rejected_ids))
+        self.assertEqual({r['reason'] for r in recovery['omitted']}, {'no_visible_source'})
+        self.assertEqual(manifest['rerank_errors'], [
+            {'stage': 'listwise_recovery', 'error': 'ReviewIncomplete'}])
+
     async def test_core_profile_shares_final_packet_budget(self):
         rule = await self.memory('Always answer the user in Chinese', type='rule')
         pref = await self.memory('The user bakes bread at home', type='preference')
-        for i in range(5):
-            await self.memory(f'generic fact {i} about kitchens')
+        rejected = [await self.memory(f'generic fact {i} about kitchens') for i in range(5)]
         req = schemas.SearchRequest(user_id='u', query='kitchen ideas', top_k=2)
         plan = {'intent': 'preference', 'entities': ['kitchen']}
 
@@ -232,8 +248,7 @@ class SearchInjectionTests(unittest.IsolatedAsyncioTestCase):
                 return from_scores([0.9 if 'bakes bread' in row else
                                    0.8 if 'Chinese' in row else 0.1
                                    for row in re.findall(r'^\d+: (.*)$', prompt, re.M)])
-            return {'sufficient': True, 'confidence': 0.9, 'missing': '',
-                    'follow_up_queries': []}
+            self.fail(f'No original sources are available for another model stage: {k.get("stage")}')
 
         with patch.object(search, '_understand', AsyncMock(return_value=plan)), \
              patch.object(search.llm, 'complete_json', side_effect=scorer):
@@ -244,7 +259,9 @@ class SearchInjectionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(set(ids), {rule, pref})
         self.assertEqual(len(resp.data), 2)
         self.assertTrue(resp.packet_hash)
-        self.assertEqual(resp.coverage_manifest['rerank_status'], 'ok')
+        # These synthetic rejected facts have no original source to review;
+        # useful survivors retain their budget, but deletion is unverified.
+        self.assert_source_less_rejection_is_unreviewed(resp, rejected)
 
         # Fact intents retain general memories without a fixed profile prefix.
         req2 = schemas.SearchRequest(user_id='u', query='kitchen ideas', top_k=2)
@@ -255,11 +272,11 @@ class SearchInjectionTests(unittest.IsolatedAsyncioTestCase):
         ids2 = [d.id for d in resp2.data]
         self.assertEqual(len(ids2), 2)  # Core profile shares top_k and token budget
         self.assertEqual(resp2.coverage_manifest['core_bytes'], 0)
-        self.assertEqual(resp2.coverage_manifest['rerank_status'], 'ok')
+        self.assert_source_less_rejection_is_unreviewed(resp2, rejected)
 
     async def test_rule_survives_rerank_rejection(self):
         rule = await self.memory('Always respond politely to the user', type='rule')
-        await self.memory('jazz festival lineups 2023')
+        rejected = await self.memory('jazz festival lineups 2023')
         req = schemas.SearchRequest(user_id='u', query='jazz events', top_k=5,
                                     options=['A. x', 'B. y'])
 
@@ -269,19 +286,18 @@ class SearchInjectionTests(unittest.IsolatedAsyncioTestCase):
                 self.assertNotIn('Always respond politely', prompt)
                 return from_scores([0.0
                                    for i in re.findall(r'^\d+:', prompt, re.M)])
-            return {'sufficient': True, 'confidence': 0.9, 'missing': '',
-                    'follow_up_queries': []}
+            self.fail(f'No original sources are available for another model stage: {k.get("stage")}')
 
         with patch.object(search, '_understand', AsyncMock(return_value={
                 'intent': 'preference', 'entities': ['jazz']})), \
              patch.object(search.llm, 'complete_json', side_effect=scorer):
             resp = await search.run_search(self.st, req)
         self.assertEqual([d.id for d in resp.data], [rule])
-        self.assertEqual(resp.coverage_manifest['rerank_status'], 'ok')
+        self.assert_source_less_rejection_is_unreviewed(resp, [rejected])
 
 
 class DirectChoiceTests(unittest.IsolatedAsyncioTestCase):
-    async def test_one_answer_call_uses_sources_and_constraints_without_alignment(self):
+    async def test_single_choice_routes_original_packet_to_verified_answer(self):
         qa = {'question': 'Summer event ideas?',
               'options': ['A. An electronic music festival', 'B. A local food fair'],
               'gold_labels': ['B'], 'qa_type': 'single_choice', 'scoring': 'choice'}
@@ -289,28 +305,47 @@ class DirectChoiceTests(unittest.IsolatedAsyncioTestCase):
                      'The user requested to forget their electronic music festival interest'},
                     {'memory_type': 'episode', 'content':
                      'Claire shared a story about her garden; the user asked to edit it.'}]
-        answer = AsyncMock(return_value='B')
-        extra = AsyncMock(side_effect=AssertionError('unexpected alignment or judge'))
-        with patch.object(scoring.llm, 'complete_json', extra), patch.object(scoring.llm, 'complete', answer):
+        entries = [{'letter': 'A', 'kind': 'persona', 'status': 'forbidden',
+                    'claims': [], 'validation_errors': []},
+                   {'letter': 'B', 'kind': 'generic', 'status': 'eligible',
+                    'claims': [], 'validation_errors': []}]
+
+        async def verified_answer(actual_qa, packet, diagnostics):
+            self.assertIs(actual_qa, qa)
+            self.assertIs(packet, memories)
+            diagnostics.update(answer_policy='verified-source-choice-v1',
+                               choice_alignment=entries, answer_validation='ok')
+            return 'B'
+
+        answer = AsyncMock(side_effect=verified_answer)
+        module = SimpleNamespace(VERSION='verified-source-choice-v1', answer=answer)
+        unexpected = AsyncMock(side_effect=AssertionError('unexpected direct answer or judge'))
+        with patch.object(scoring, 'answer_choice', module, create=True), \
+             patch.object(scoring.llm, 'complete_json', unexpected), \
+             patch.object(scoring.llm, 'complete', unexpected):
             pred, score, diag = await scoring.evaluate(qa, memories)
         self.assertEqual((pred, score), ('B', 1.0))
-        self.assertEqual(diag['answer_policy'], 'direct_evidence_v2')
-        extra.assert_not_awaited()
+        self.assertEqual(diag['answer_policy'], module.VERSION)
+        self.assertEqual(diag['choice_alignment'], entries)
+        self.assertEqual(diag['answer_validation'], 'ok')
+        unexpected.assert_not_awaited()
         answer.assert_awaited_once()
-        prompt = answer.call_args.args[0]
-        self.assertIn('Claire shared a story', prompt)
-        self.assertIn('requested to forget', prompt)
-        self.assertIn('Distinguish the speaker from people in pasted stories', prompt)
-        self.assertIn('Apply explicit forget constraints first', prompt)
-        self.assertNotIn('Persona evidence alignment', prompt)
 
     async def test_answer_failure_keeps_explicit_diagnostics(self):
         qa = {'question': 'q', 'options': ['A. x', 'B. y'], 'gold_labels': ['B'],
               'qa_type': 'single_choice', 'scoring': 'choice'}
-        with patch.object(scoring.llm, 'complete', AsyncMock(side_effect=RuntimeError('offline'))):
+
+        async def failure(qa, memories, diagnostics):
+            diagnostics['answer_validation_errors'] = ['missing_options']
+            raise RuntimeError('offline')
+
+        with patch.object(scoring.answer_choice, 'answer', AsyncMock(side_effect=failure)):
             pred, score, diag = await scoring.evaluate(qa, [])
         self.assertEqual((pred, score), ('', 0.0))
         self.assertEqual(diag['error_stage'], 'answer')
+        self.assertEqual(diag['error_type'], 'RuntimeError')
+        self.assertEqual(diag['answer_policy'], scoring.answer_choice.VERSION)
+        self.assertEqual(diag['answer_validation_errors'], ['missing_options'])
 
 
 if __name__ == '__main__':

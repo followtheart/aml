@@ -91,11 +91,18 @@ async def main():
                 else:
                     _, entries = await alignment.align(qa, memories, row)
                     row['choice_alignment'] = entries
-                ranked = alignment.rank_alignment(entries or [])
-                best = alignment.unique_supported_choice(entries or [])
-                row['top_tier'] = [e['letter'] for e in ranked if alignment.rank_key(e) == alignment.rank_key(ranked[0])]
-                row['unique_supported_choice'] = best['letter'] if best else None
-                row['invalid_citations'] = sum('unsupported_citation' in e.get('validation_errors', []) for e in entries or [])
+                if args.answer and 'answer_eligible_options' in row:
+                    row['top_tier'] = row['answer_eligible_options']
+                    row['unique_supported_choice'] = (row['top_tier'][0] if len(row['top_tier']) == 1
+                        and any(e['letter'] == row['top_tier'][0] and e.get('status') == 'supported' for e in entries) else None)
+                    row['invalid_citations'] = sum(not c['valid'] for e in entries for claim in e.get('claims', [])
+                                                   for c in claim.get('citations', []))
+                else:
+                    ranked = alignment.rank_alignment(entries or [])
+                    best = alignment.unique_supported_choice(entries or [])
+                    row['top_tier'] = [e['letter'] for e in ranked if alignment.rank_key(e) == alignment.rank_key(ranked[0])]
+                    row['unique_supported_choice'] = best['letter'] if best else None
+                    row['invalid_citations'] = sum('unsupported_citation' in e.get('validation_errors', []) for e in entries or [])
             except Exception as exc:
                 row.update(error_stage='alignment_replay', error_type=type(exc).__name__)
             if output:

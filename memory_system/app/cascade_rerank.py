@@ -5,7 +5,7 @@ import math
 import re
 import time
 import httpx
-from . import budget, config, cross_encoder, evidence_selection, llm, profile, prompts, rerank_query
+from . import budget, config, cross_encoder, evidence_selection, listwise_recovery, llm, profile, prompts, rerank_query
 
 
 def protected(item):
@@ -300,8 +300,10 @@ async def rank(req, plan, candidates):
                 stage='listwise',reason=reason) for rid in r['requirement_ids'] or [None])
     selected, irrelevant, status, errors = list(submitted), set(), 'not_run', []
     attempts = []
+    listwise_deadline = None
     if submitted:
         seconds = min(config.RERANK_DEADLINE_SECONDS, max(.01, limits.deadline - time.monotonic() - 2)) if limits else config.RERANK_DEADLINE_SECONDS
+        listwise_deadline = time.monotonic() + seconds
         try:
             async with asyncio.timeout(seconds):
                 for attempt in range(1 + min(1, config.RERANK_REPAIR_MAX_CALLS)):
@@ -343,12 +345,23 @@ async def rank(req, plan, candidates):
             # CE's ordering and the existing bounded fallback, rather than lose
             # all successfully scored evidence solely on LLM admission.
             selected = list(ordered)
+    primary_selected_ids = [c['id'] for c in selected]
+    recovery = dict(status='not_needed', reviewed_ids=[], restored_ids=[], unreviewed_ids=[], judgments=[], errors=[])
+    if status in ('ok', 'recovered') and irrelevant:
+        selected, recovery = await listwise_recovery.recover(req, submitted, selected, irrelevant,
+                                                            deadline=listwise_deadline)
+        errors.extend(dict(stage='listwise_recovery', **error) for error in recovery['errors'])
+        if recovery['status'] == 'recovered':
+            status = 'recovered'
     trace['listwise'] = dict(status=status, input_count=len(submitted), output_count=len(selected),
         candidate_ids=[c['id'] for c in submitted], selected_ids=[c['id'] for c in selected],
         input_bytes=len(listwise_prompt(req, plan, submitted).encode('utf-8')) if submitted else 0,
-        attempts=attempts, errors=errors, selection=admission_selection, carried_ids=sorted(carried_ids))
+        attempts=attempts, errors=errors, selection=admission_selection, carried_ids=sorted(carried_ids),
+        primary_selected_ids=primary_selected_ids, primary_irrelevant_ids=[submitted[i]['id'] for i in sorted(irrelevant)],
+        recovery=recovery)
     for i in irrelevant:
-        trace['omitted'].append(dict(id=submitted[i]['id'], stage='listwise', reason='irrelevant'))
+        if submitted[i]['id'] not in recovery['restored_ids']:
+            trace['omitted'].append(dict(id=submitted[i]['id'], stage='listwise', reason='irrelevant'))
     if status == 'fallback':
         unknown = [c for c in selected if c.get('_ce_score') is None]
         excess = {c['id'] for c in unknown[config.EVIDENCE_FALLBACK_ITEMS:]}

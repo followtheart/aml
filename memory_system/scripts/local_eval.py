@@ -279,8 +279,10 @@ async def main():
                         f"{qa['question'][:60]}")
                 else:
                     rerank_status = resp.coverage_manifest.get('rerank_status')
-                    if rerank_status in ('partial', 'fallback'):
-                        progress.write(f'[search degraded: rerank {rerank_status}] ' + qa['question'][:60])
+                    search_degraded = bool(resp.coverage_manifest.get(
+                        'search_degraded', rerank_status in ('partial', 'fallback')))
+                    if search_degraded:
+                        progress.write(f'[search degraded: {resp.evidence_status}, rerank {rerank_status}] ' + qa['question'][:60])
                     pred, score, diagnostics = await progress.run(
                         eval_scoring.evaluate(
                             qa,
@@ -288,7 +290,7 @@ async def main():
                         f"Answer/Judge conv {ci}/{conv_count} QA {qi}/{len(qas)}")
                     diagnostics.update(search_id=resp.search_id, packet_hash=resp.packet_hash,
                                        evidence_status=resp.evidence_status,
-                                       search_degraded=rerank_status in ('partial', 'fallback'),
+                                       search_degraded=search_degraded,
                                        coverage_manifest=resp.coverage_manifest)
                 n_qa += 1
                 score_sum += score

@@ -907,7 +907,9 @@ async def _run_search(st: store.Store,
         manifest['followup'] = plan.get('_followup', {'status': 'not_needed'})
         manifest['vector_search'] = plan.get('_vector_diagnostics', [])
         manifest['coverage'] = search_coverage.report(plan.get('_coverage_requirements', []), candidates, packed)
+        recovery_status = manifest['cascade'].get('listwise', {}).get('recovery', {}).get('status', 'not_needed')
         manifest['search_degraded'] = bool(manifest['planning_error'] or manifest['recall_errors'] or manifest['rerank_errors'] or plan.get('_unit_omitted')
+            or recovery_status not in ('not_needed', 'ok', 'recovered')
             or any(q.get('candidate_budget_exhausted') for v in manifest['vector_search'] for q in v.get('queries', []))
             or manifest['followup'].get('status') in ('error', 'budget_skipped'))
         trace["pipeline"] = run_metadata.SEARCH_POLICY
@@ -920,8 +922,12 @@ async def _run_search(st: store.Store,
         data = [schemas.SearchItem(**item) for item in packed]
         conflicts = [c['id'] for c in ranked if c.get('resolution_status') == 'disputed'
                      and c['id'] in manifest['included_ids']]
-        status = ('incomplete' if not data and manifest['search_degraded'] else
-                  'not_found' if not data else 'conflicting' if conflicts else
+        # Protected rules are still delivered, but do not establish that any
+        # ordinary evidence survived retrieval and selection.
+        has_evidence = manifest['evidence_count'] > 0
+        manifest['constraint_only'] = not has_evidence and manifest['constraint_count'] > 0
+        status = ('incomplete' if not has_evidence and manifest['search_degraded'] else
+                  'not_found' if not has_evidence else 'conflicting' if conflicts else
                   'retrieved')
         manifest['conflicting_ids'] = conflicts
         trace['top_k_excluded'] = [x for x in manifest['omitted'] if x['reason'] == 'top_k']

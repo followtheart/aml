@@ -125,7 +125,7 @@ class SinglePassTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn(target, [x.id for x in response.data])
         self.assertNotIn('spaceship', answer_context.build([x.model_dump() for x in response.data]))
 
-    async def test_default_choice_has_plan_ce_listwise_answer_stages(self):
+    async def test_default_choice_has_plan_ce_listwise_verified_answer_stages(self):
         await self.memory('The user lives in Kansas.')
         stages = []
         original_ce = cross_encoder.rerank
@@ -137,26 +137,38 @@ class SinglePassTests(unittest.IsolatedAsyncioTestCase):
             if kwargs['stage'] == 'search.understand':
                 return {'intent': 'preference', 'entities': []}
             return await self.rank(prompt, *args, **kwargs)
-        async def answer(prompt, **kwargs):
-            stages.append(kwargs['stage'])
+        answer_packets = []
+        async def answer(actual_qa, packet, diagnostics):
+            stages.append('answer_choice.answer')
+            self.assertIs(actual_qa, qa)
+            answer_packets.append(packet)
+            diagnostics.update(answer_policy=eval_scoring.answer_choice.VERSION)
             return 'A'
         qa = {'question': 'Weekend ideas?', 'options': ['A. A local event', 'B. Travel'],
               'scoring': 'choice', 'qa_type': 'single_choice', 'gold_labels': ['A']}
         with tempfile.TemporaryDirectory() as temp, patch.object(search.config, 'SEARCH_DEBUG_LOG',
                 str(Path(temp) / 'trace.jsonl')), patch.object(search.llm, 'complete_json',
-                side_effect=json_call), patch.object(eval_scoring.llm, 'complete', side_effect=answer), \
+                side_effect=json_call), patch.object(eval_scoring.answer_choice, 'answer', side_effect=answer), \
                 patch.object(cross_encoder, 'rerank', side_effect=ce):
             response = await search.run_search(self.st, schemas.SearchRequest(
                 user_id='u', query=qa['question'], options=qa['options']))
-            _, score, _ = await eval_scoring.evaluate(qa, [x.model_dump() for x in response.data])
+            _, score, diagnostics = await eval_scoring.evaluate(qa, [x.model_dump() for x in response.data])
             trace = json.loads((Path(temp) / 'trace.jsonl').read_text())
         self.assertEqual(stages, ['search.understand', 'search.cross_encoder.batch_1',
-                                  'search.listwise', 'eval.answer'])
+                                  'search.listwise', 'answer_choice.answer'])
         self.assertEqual(score, 1.0)
+        self.assertEqual(diagnostics['answer_policy'], eval_scoring.answer_choice.VERSION)
+        self.assertEqual(answer_packets, [[x.model_dump() for x in response.data]])
+        self.assertEqual(answer_context.build(answer_packets[0]),
+                         answer_context.build(trace['returned']))
         self.assertEqual(response.coverage_manifest['rerank_status'], 'ok')
+        recovery = response.coverage_manifest['cascade']['listwise']['recovery']
+        self.assertEqual(recovery['status'], 'not_needed')
+        self.assertEqual(recovery['reviewed_ids'], [])
+        self.assertEqual(recovery['restored_ids'], [])
         self.assertEqual(len(trace['rounds']), 1)
-        self.assertEqual(trace['pipeline'], 'graph_cascade_v9')
-        self.assertEqual(trace['versions']['search_policy'], 'graph_cascade_v9')
+        self.assertEqual(trace['pipeline'], search.run_metadata.SEARCH_POLICY)
+        self.assertEqual(trace['versions']['search_policy'], search.run_metadata.SEARCH_POLICY)
         self.assertEqual(trace['versions']['settings']['SEARCH_DEADLINE_SECONDS'], search.config.SEARCH_DEADLINE_SECONDS)
 
     async def test_no_keyexp_ablation_uses_current_planner_signature(self):

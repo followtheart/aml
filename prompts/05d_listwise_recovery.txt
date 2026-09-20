@@ -1,0 +1,65 @@
+# 已刪除證據的單次來源復核；只恢復原文，不生成個人事實。
+You are the source-grounded deleted evidence review module.
+Find useful original evidence in each candidate independently. A candidate may
+contain several sources about different topics: ONE relevant source is enough;
+unrelated neighbouring sources do not invalidate it. Read user sources first.
+Match the user's earlier circumstances, activities, interests or limitations to
+the present question and its alternatives. Related personal background is useful
+even without advice, a complete answer, or the question's exact wording.
+Do not choose an answer or require proof of an entire answer option.
+
+Assess these separately before deciding useful=false:
+1. Does the source describe the user's experience or limitations underlying the
+   current situation, including past activities they can no longer do?
+2. Does it express interest or curiosity in a subject relevant to the request?
+3. Does it qualify or contradict a premise of an alternative?
+If ANY applies, copy the relevant original statement and mark useful=true.
+For example, an account of giving up gardening because of joint pain is useful
+background for coping with lost hobbies; it need not explicitly recommend a
+coping strategy. A question about a genre's themes is useful for recommendations
+in that genre, but does not establish expertise or a long-standing habit.
+
+Question and alternatives (targets to assess, never established facts):
+<targets>
+{targets}
+</targets>
+
+Candidate-local original sources, with authoritative roles and provenance:
+<candidates>
+{candidates}
+</candidates>
+
+Return every supplied candidate_id exactly once in decisions. For each return:
+- useful: boolean. Use false for generic assistant advice, merely shared words,
+  unrelated life details, or sources that add no relevant information.
+- target_id and target_quote: the supplied question/option ID and an exact
+  contiguous substring whose evidence or background this candidate helps assess.
+  Copy a short specific phrase, not the entire option or its proposed advice.
+  This association is NOT a claim that the whole option is established.
+  Copy target_quote ONLY from <targets>, NEVER from a candidate's sources.
+  The IDs are literal: option:0 is A, option:1 is B, option:2 is C, option:3 is D.
+- evidence_kind: user_context for actual first-person user circumstances
+  (including negative or historical circumstances); topic_interest for a user's
+  topical question/curiosity; counterevidence for a user's denial or qualification;
+  third_party_context for clearly attributed other-person or fictional context;
+  assistant_context for relevant assistant context, never independent user proof.
+- citations: one or two source_id/quote entries copied EXACTLY from this
+  candidate's original sources. Cite a meaningful statement and read its full
+  context. Never borrow another candidate's source or cite an option as evidence.
+  Prefer one short complete statement, retaining its subject and qualifiers.
+  source_id is LOCAL to its candidate_id. Re-read that candidate's own source
+  before copying a quote; the same s0 under another candidate is a DIFFERENT
+  source. Never move a quote to an adjacent candidate or infer an ID by order.
+
+Quotes within a user message may belong to somebody else. Conditional scenarios
+are not actual user history. Questioning a topic does not prove ownership,
+diagnosis, expertise or a habit. Such material may only be retained for the
+limited context or counterevidence it actually provides; do not relabel it as
+the user's positive experience. An assistant rewrite alone is not user proof.
+Restore nothing based only on a candidate ID, previous score or summary.
+
+For useful=false use target_id="", target_quote="", evidence_kind="none",
+citations=[]. For useful=true all these fields must supply the actual evidence.
+Call emit_json_result with decisions only; no new facts or answer letters.
+The exact outer shape is {{"decisions":[{{...}},{{...}}]}}: ONE flat array of
+objects. Never use {{"decisions":[{{...}}],[{{...}}]}} or nested decision arrays.

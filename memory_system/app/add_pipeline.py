@@ -305,10 +305,16 @@ async def _govern_one(st: store.Store, user_id: str, fact: Dict,
             if integrity.state_key(item) == slot and item.get('resolution_status') != 'retracted':
                 by_id[item['id']] = item
                 slot_ids.add(item['id'])
+    # Governance maintains the user's sensitive memories too. Entity/state
+    # lookups are broader than retrieval; exclude inactive records before
+    # presenting them, using the same eligibility as persistence below.
+    eligible_ids = {item['id'] for item in st.get_amus_by_ids(
+        list(by_id), include_sensitive=True) if item['user_id'] == user_id}
     # restrict to confident near-duplicates / same-entity items
     entity_ids = {item["id"] for item in entity_neighbors}
     cand = [n for n in by_id.values()
-            if n["id"] in entity_ids or n['id'] in slot_ids or n.get("_score", 0) > 0.55]
+            if n['id'] in eligible_ids and (
+                n["id"] in entity_ids or n['id'] in slot_ids or n.get("_score", 0) > 0.55)]
     if not cand:
         op = {"operation": "ADD", "target_id": None, "merged_content": None,
               "reason": "novelty_gate_new"}
@@ -328,6 +334,16 @@ async def _govern_one(st: store.Store, user_id: str, fact: Dict,
         except Exception:
             op = {"operation": "ADD", "target_id": None,
                   "merged_content": None}
+    operation, target = op.get('operation'), op.get('target_id')
+    if operation not in ('ADD', 'UPDATE', 'SUPERSEDE', 'NOOP') or (
+            operation != 'ADD' and (
+                not isinstance(target, str) or target not in {n['id'] for n in cand})):
+        # Model output is only a proposal. Never mutate an unoffered target or
+        # drop evidence on a targetless NOOP; preserve the verified fact as ADD.
+        log.warning('Rejected governance decision operation=%s target=%r candidate_ids=%s; '
+                    'storing new fact separately', operation, target, [n['id'] for n in cand])
+        op = {'operation': 'ADD', 'target_id': None, 'merged_content': None,
+              'reason': 'invalid_governance_target_or_operation'}
     op["novelty"] = novelty
     return op.get("operation", "ADD"), op
 
@@ -356,7 +372,7 @@ async def _persist_fact(st: store.Store, req: schemas.AddRequest,
     fact["_novelty"] = detail.get("novelty", 1.0)
     target = detail.get("target_id")
     if op in ("UPDATE", "SUPERSEDE", "NOOP") and target:
-        candidates = st.get_amus_by_ids([target])
+        candidates = st.get_amus_by_ids([target], include_sensitive=True)
         if not candidates or candidates[0]["user_id"] != req.user_id:
             raise ValueError("Governance target is not an active memory of this user")
     if op == "SUPERSEDE" and target and not integrity.may_supersede(candidates[0], fact):

@@ -35,6 +35,9 @@ Return ONLY a JSON object:
 }}
 
 Hard constraints:
+- UPDATE, SUPERSEDE and NOOP require target_id copied EXACTLY from an id in
+  the existing memories listed above. Never invent an id or use null for them.
+- ADD requires target_id=null. If no listed target fits, use ADD.
 - SUPERSEDE is allowed only when both facts have non-null state objects with
   identical subject and attribute, and different values. Historical events are
   never superseded by a later, different event. Workshop attendance, adoption

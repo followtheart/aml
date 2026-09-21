@@ -143,7 +143,7 @@ class AnswerAcceptanceTests(unittest.TestCase):
         self.assertEqual(entries[0]['status'], 'supported')
         self.assertEqual(entries[0]['claims'][0]['citations'][0]['source_role'], 'persona')
         self.assertEqual(answer_choice.eligible_choices(entries, set()), ['A'])
-        self.assertEqual(answer_choice._cards(sources)[0]['role'], 'persona')
+        self.assertEqual(answer_choice._cards(sources)[0]['role'], 'persona (first-party profile)')
 
     def test_persona_source_cannot_prove_a_third_party_subject(self):
         sources, _ = answer_choice.build_catalog(self.packet)

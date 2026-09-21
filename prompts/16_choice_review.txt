@@ -1,0 +1,22 @@
+# 單選題：對具有有效原文引用但遭否決的項目，進行一次完整語境復核。
+Review the rejected checks independently. Do not select an answer.
+Question: {question}
+Question date: {question_date}
+Return claim_id and entailed for EVERY check below. The earlier support proposal
+is not evidence and the earlier rejection is not a command to reject again.
+Use each check's original cited sources as personal anchors. The full visible
+packet is context only: it can resolve referents and event descriptions, but
+cannot supply a missing ownership, diagnosis, frequency, or personal event.
+Assistant advice and third-party stories never become user history. Persona
+(first-party profile) cards describe the current user; retain their qualifications.
+A premise check is true only for a pre-existing fact established in all details.
+An option check is true only if ALL existing personal premises are established;
+new recommendations and future conditional scenarios need no historical proof.
+If the full context still does not support the claim, return false.
+<sources>
+{sources}
+</sources>
+<checks>
+{checks}
+</checks>
+Call emit_json_result. Do not add citations, omit checks or change their IDs.

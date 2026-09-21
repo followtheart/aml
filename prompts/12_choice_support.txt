@@ -26,7 +26,8 @@ For each option return letter, kind (personal or generic), and claims.
 Personal means it relies on prior personal experiences, interests, habits,
 conditions, ownership, occupation or location. List ALL distinguishing personal
 premises as exact substrings of that option. For every claim return text,
-status (supported or unsupported), and citations. A citation contains source_id,
+status (supported or unsupported), premise_type (interest, ownership, condition,
+habit, experience, occupation, location, or unknown), and citations. A citation contains source_id,
 quote (exact contiguous original text), basis (self_report, topic_interest,
 context) and subject (current_user, third_party, unknown).
 
@@ -39,6 +40,9 @@ When the user has asked about, planned, or requested guidance on a topic, cite
 that user question with basis topic_interest to support premises of the form
 "you are interested in X", "you enjoy X", "you like X" or "your interest in X".
 Several such questions across time make the interest well established.
+"Into anime", "big on jazz", and "following a topic" are interests. Collecting
+objects asserts possession or a habit; watching daily asserts frequency. Do not
+label those as interest merely to bypass missing evidence.
 A persona/profile source that states the user's attributes (name, age, city,
 occupation, family, hobbies, devices) is a first-party fact list about the user;
 cite it with basis self_report and subject current_user.

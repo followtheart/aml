@@ -43,6 +43,15 @@ personal premise from these sources alone, use false. Never add missing context 
 For an option check, wholly generic advice has NO personal premises to prove:
 return true even when sources are empty, unrelated, or the advice is less useful.
 For a premise check, unrelated or empty sources must result in false.
+context_neighbors are original visible excerpts from the same request, within
+two messages of the cited source. They may resolve "this project", "it" or "they"
+but are NOT new personal anchors. A preceding assistant explanation may identify
+what the user's confirmation refers to, never manufacture that confirmation.
+The role "persona (first-party profile)" remains authoritative for headerless
+profile excerpts. Do not require first-person wording in those excerpts.
+A proposed_status of inferred is experimental: accept only a strongly implied
+interest or experience from its current-user anchor, never missing frequency,
+ownership, diagnosis, expertise, subtype, or an actual event from a hypothetical.
 
 <checks>
 {checks}

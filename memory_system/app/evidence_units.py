@@ -1,6 +1,6 @@
 """Prepare complete, traceable evidence units before either ranking or packing."""
 import re
-from . import answer_context, budget, config, personal_evidence as pe
+from . import answer_context, budget, config, persona_source, personal_evidence as pe
 
 
 def _span(source, start, end):
@@ -15,6 +15,10 @@ def _span(source, start, end):
 def passages(source, queries, quotes, cap):
     """Select whole sentences, retaining explicit support and attribution spans."""
     text = source.get('content', '')
+    # Stamp identity on the original message BEFORE truncating its header. This
+    # source metadata travels inside the packet hash, alongside the real role.
+    if source.get('role') == 'user' and persona_source.is_persona_message(text):
+        source = dict(source, source_role='persona')
     if len(text.encode('utf-8')) <= cap:
         return [dict(source)] if text else []
     sentences = pe._sentences(text)

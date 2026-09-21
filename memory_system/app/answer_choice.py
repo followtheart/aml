@@ -8,12 +8,13 @@ from contextlib import nullcontext
 import hashlib
 import json
 import re
+import time
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
-from . import answer_context, budget, llm, persona_source, personal_evidence, profile, prompts
+from . import answer_context, budget, choice_premises, config, llm, metrics, persona_source, personal_evidence, profile, prompts
 
-VERSION = 'verified-source-choice-v2-partial'
+VERSION = 'verified-source-choice-v3-funnel'
 
 
 class StrictModel(BaseModel):
@@ -29,7 +30,8 @@ class Citation(StrictModel):
 
 class Claim(StrictModel):
     text: str = Field(min_length=1, description='Exact option substring asserting a pre-existing personal fact. Never a new suggestion or recommendation.')
-    status: Literal['supported', 'unsupported']
+    status: Literal['supported', 'unsupported', 'inferred']
+    premise_type: Literal['interest', 'ownership', 'condition', 'habit', 'experience', 'occupation', 'location', 'unknown'] = 'unknown'
     citations: list[Citation] = Field(max_length=3)
 
 
@@ -118,7 +120,9 @@ def build_catalog(memories):
             spans = forget_spans if is_constraint else [(0, len(text))]
             # A system-authored persona card is a first-party fact list about
             # the user; it is flagged so citation checks skip "I ..." scoping.
-            declared = 'persona' if role == 'user' and persona_source.is_persona_message(text) else None
+            declared = 'persona' if role == 'user' and (persona_source.is_persona_message(text)
+                or (source.get('source_role') == 'persona' and memory.get('packet_hash_version') in (2, 3, 4)
+                    and memory.get('packet_hash'))) else None
             for start, end in spans:
                 target = constraints if is_constraint else sources
                 sid = ('r' if is_constraint else 's') + str(len(target))
@@ -164,11 +168,19 @@ _DENIAL = re.compile(r"\b(?:I|we)\s+(?:(?:have|had|do|did|am|are)\s+)?(?:not|nev
 _NEGATIVE_CLAIM = re.compile(r"\b(?:not|never|no|without)\b|n['’]t\b|沒有|没有|從未|从未", re.I)
 _INTEREST = re.compile(r'\b(?:interested|interest|curious|curiosity|drawn to|captivated|fascinat\w*|'
                        r'enjoy\w*|passion\w*|hobby|hobbies|fan of|keen on|fond of|like|likes|love|loves|'
-                       r'exploring|learning about)\b|感興趣|感兴趣|好奇|喜歡|喜欢|爱好|愛好', re.I)
+                       r'into|big on|obsessed|follow|following|exploring|learning about)\b|感興趣|感兴趣|好奇|喜歡|喜欢|爱好|愛好', re.I)
 _STRONG_TRAIT = re.compile(r'\b(?:own\w*|diagnos\w*|asthma|diabet\w*|daily|every day|habit\w*|'
-                           r'mentored|experienced|visited|grew|parenting|professional\w*|expert\w*|certif\w*)\b', re.I)
+                           r'weekly|monthly|every\s+\w+|collect\w*|watch a lot|mentored|experienced|visited|grew|'
+                           r'parenting|professional\w*|expert\w*|certif\w*|recover\w*)\b|'
+                           r'\byou\s+(?:have|had|live|work|are an?)\b|\byour\s+(?:own|job|diagnosis)\b', re.I)
 _RELATION_SUBJECT = re.compile(r'\b(?:my|our)\s+(friend|colleague|mother|father|sister|brother|'
                                r'daughter|son|child|children|spouse|wife|husband)\b', re.I)
+
+
+def _strong_trait(text):
+    neutral = re.sub(r'\byou\s+(?:have\s+(?:an?\s+)?(?:interest|passion)|are\s+a\s+fan)\b',
+                     'interest', text, flags=re.I)
+    return bool(_STRONG_TRAIT.search(neutral))
 
 
 def _self_scope(source, quote, claim):
@@ -185,19 +197,27 @@ def _self_scope(source, quote, claim):
         return 'third_party_or_hypothetical'
     if _DENIAL.search(sentence) and not _NEGATIVE_CLAIM.search(claim):
         return 'denied_event'
-    relation = _RELATION_SUBJECT.search(quote)
+    # A separate conjunct with an explicit first-person subject resets local
+    # ownership: "My wife reads ... and I collect ..." is still a self report.
+    clauses = list(re.finditer(r'\b(?:and|but|while|whereas)\s+(?=I\b|we\b|my\b|our\b)', sentence, re.I))
+    local_sentence = sentence[clauses[-1].end():] if clauses else sentence
+    relation = _RELATION_SUBJECT.search(local_sentence)
     if relation and not re.search(r'\b' + re.escape(relation[1]) + r'\b', claim, re.I):
         return 'different_person'
-    if not _SELF.search(quote):
+    if not _SELF.search(sentence):
         return 'no_user_assertion'
     return None
 
 
-def _check_citation(citation, claim, sources):
+def _check_citation(citation, claim, sources, premise_type='unknown'):
     c = citation.model_dump()
     source = sources.get(citation.source_id)
     errors = []
     persona = bool(source and source.get('declared') == 'persona')
+    # Model-supplied types constrain the gate; they cannot reclassify arbitrary
+    # ownership, illness or frequency as interest to bypass provenance checks.
+    interest = premise_type in ('interest', 'unknown') and _INTEREST.search(claim)
+    interest = bool(interest and not _strong_trait(claim))
     if not source or citation.quote not in source['text']:
         errors.append('quote_not_in_source')
     elif persona:
@@ -225,16 +245,18 @@ def _check_citation(citation, claim, sources):
         # A user question about a topic asserts no fact about the user, but it
         # does witness interest: fall back to the topic_interest basis instead
         # of rejecting an interest-type premise outright.
-        if (failure == 'no_user_assertion' and _INTEREST.search(claim) and not _STRONG_TRAIT.search(claim)
+        if (failure == 'no_user_assertion' and interest
                 and not _FRAME.search(source['text']) and not _ATTRIBUTED.search(source['text'])):
             c['basis'] = 'topic_interest'
         elif failure:
             errors.append(failure)
-    elif not _INTEREST.search(claim) or _STRONG_TRAIT.search(claim):
+    elif not interest:
         errors.append('interest_does_not_prove_trait')
-    elif _FRAME.search(source['text']) or _ATTRIBUTED.search(source['text']):
-        errors.append('third_party_or_hypothetical')
-    c.update(source_role=_display_role(source) if source else None, validation_errors=errors,
+    else:
+        failure = _self_scope(source, citation.quote, claim)
+        if failure and failure != 'no_user_assertion':
+            errors.append(failure)
+    c.update(source_role=(source.get('declared') or source['role']) if source else None, validation_errors=errors,
              valid=not errors, anchor=not errors and c['basis'] != 'context')
     if source and not errors:
         start = source['text'].find(citation.quote)
@@ -266,6 +288,8 @@ def _option_status(kind, claims, errors, option_text):
     if all(verified):
         return 'supported'
     primary = _primary_index(claims, option_text)
+    if (config.CHOICE_ALLOW_INFERRED and primary is not None and claims[primary]['status'] == 'inferred'):
+        return 'inferred'
     return 'partial' if primary is not None and verified[primary] else 'unsupported'
 
 
@@ -276,29 +300,44 @@ def validate_assessments(payload, options, sources):
         raise ValueError('Assess every option exactly once')
     entries = {}
     for option in parsed.options:
-        errors, claims = [], []
+        errors, claims, warnings, removed = [], [], [], []
         if option.kind == 'personal' and not option.claims:
             errors.append('missing_personal_claim')
-        if option.kind == 'generic' and option.claims:
-            errors.append('generic_with_personal_claims')
         for claim in option.claims:
             invalid = []
-            exact = re.search(re.escape(claim.text), expected[option.letter], flags=re.I)
+            exact, repaired = choice_premises.canonical_span(claim.text, expected[option.letter])
             if exact is None:
                 invalid.append('claim_not_in_option')
                 errors.append('claim_not_in_option')
-            citations = [_check_citation(c, claim.text, sources) for c in claim.citations]
-            # An invalid citation only demotes its own claim; the option is
-            # still judged on which premises remain verified.
-            if claim.status == 'supported' and (not any(c['anchor'] for c in citations)
-                                               or any(not c['valid'] for c in citations)):
+            elif choice_premises.is_suggestion(exact, expected[option.letter]):
+                removed.append(dict(text=exact, reason='proposed_advice'))
+                continue
+            if repaired:
+                warnings.append('claim_text_normalized')
+            citations = [_check_citation(c, exact or claim.text, sources, claim.premise_type) for c in claim.citations]
+            # Duplicate citations cannot launder a shotgun of invalid sources.
+            citations = list({(c['source_id'], c['quote'], c['basis'], c['subject']): c for c in citations}.values())
+            valid = [c for c in citations if c['valid']]
+            dropped = [c for c in citations if not c['valid']]
+            if claim.status in ('supported', 'inferred') and (not any(c['anchor'] for c in valid)
+                                                            or len(dropped) > len(valid)):
                 invalid.append('no_valid_user_support')
-            claims.append(dict(text=exact[0] if exact else claim.text, status='unsupported' if invalid else claim.status,
-                               proposed_status=claim.status, citations=citations, validation_errors=invalid))
-        status = _option_status(option.kind, claims, errors, expected[option.letter])
-        entries[option.letter] = dict(letter=option.letter, kind=option.kind, status=status,
+            if dropped:
+                warnings.append('citation_dropped')
+            status = claim.status
+            if status == 'inferred' and (not config.CHOICE_ALLOW_INFERRED or _strong_trait(exact or claim.text)
+                                        or claim.premise_type not in ('interest', 'experience')):
+                invalid.append('inference_not_allowed')
+            claims.append(dict(text=exact or claim.text, premise_type=claim.premise_type,
+                               status='unsupported' if invalid else status, proposed_status=claim.status,
+                               citations=valid, dropped_citations=dropped, validation_errors=invalid))
+        kind = 'generic' if removed and not claims else option.kind
+        if kind == 'generic' and claims:
+            errors.append('generic_with_personal_claims')
+        status = _option_status(kind, claims, errors, expected[option.letter])
+        entries[option.letter] = dict(letter=option.letter, kind=kind, status=status,
                                      option=expected[option.letter], primary_claim=_primary_index(claims, expected[option.letter]),
-                                     claims=claims, validation_errors=errors, warnings=[])
+                                     claims=claims, removed_claims=removed, validation_errors=errors, warnings=list(dict.fromkeys(warnings)))
     return [entries[k] for k in expected]
 
 
@@ -345,8 +384,9 @@ def eligible_choices(entries, blocked):
     """Fully verified personal options first, then core-premise-verified ones,
     then generic advice. Structurally invalid or blocked options never qualify."""
     eligible = [e for e in entries if e['letter'] not in blocked and not e.get('validation_errors')]
-    for tier in ('supported', 'partial', 'generic'):
-        letters = [e['letter'] for e in eligible if e['status'] == tier]
+    for tier in ('supported', 'partial', 'inferred', 'generic'):
+        letters = [e['letter'] for e in eligible if e.get('selection_tier', e['status']) == tier
+                   and (tier != 'inferred' or config.CHOICE_ALLOW_INFERRED)]
         if letters:
             return letters
     return []
@@ -361,15 +401,29 @@ def entailment_checks(entries, sources, options):
                      quote=ref['quote'], context=sources[ref['source_id']]['text'],
                      timestamp=sources[ref['source_id']].get('timestamp'))
                 for c in claims for ref in c['citations'] if ref['valid']]
+    def neighbors(refs):
+        cited = {r['id'] for r in refs}
+        anchors = [sources[sid] for sid in cited]
+        # These are already-visible packet excerpts, never fetched history. They
+        # resolve referents but cannot act as independent personal anchors.
+        return [dict(id=sid, role=_display_role(s), text=s['text'], anchor=False,
+                     request_id=s.get('request_id'), message_index=s.get('message_index'))
+                for sid, s in sources.items() if sid not in cited and any(
+                    s.get('request_id') and s.get('request_id') == a.get('request_id')
+                    and type(s.get('message_index')) is int and type(a.get('message_index')) is int
+                    and abs(s['message_index'] - a['message_index']) <= 2 for a in anchors)]
     checks = []
     for e in entries:
         checks.append(dict(claim_id=f"{e['letter']}:option", check_type='option',
                            option=letters[e['letter']], claimed_kind=e['kind'],
                            sources=citations(e['claims'])))
         for index, claim in enumerate(e['claims']):
-            if claim['status'] == 'supported':
+            if claim['status'] in ('supported', 'inferred'):
                 checks.append(dict(claim_id=f"{e['letter']}:{index}", check_type='premise',
-                                   claim=claim['text'], sources=citations([claim])))
+                                   claim=claim['text'], premise_type=claim.get('premise_type', 'unknown'),
+                                   proposed_status=claim['status'], sources=citations([claim])))
+    for check in checks:
+        check['context_neighbors'] = neighbors(check['sources'])
     return checks
 
 
@@ -399,7 +453,7 @@ def validate_entailments(payload, entries, checks):
             # personal premise) and for options whose core premise failed. When
             # the core premise is verified it only downgrades: a missing
             # secondary detail is a weaker match, not a disqualification.
-            if entry['kind'] == 'generic' or status == 'unsupported':
+            if entry['kind'] == 'generic' or status in ('unsupported', 'inferred'):
                 status = 'unsupported'
                 if 'not_entailed' not in entry['validation_errors']:
                     entry['validation_errors'].append('not_entailed')
@@ -410,6 +464,17 @@ def validate_entailments(payload, entries, checks):
             if 'not_entailed' not in entry['validation_errors']:
                 entry['validation_errors'].append('not_entailed')
         entry['status'] = status
+        # A whole-option approval alone cannot upgrade an unsupported premise.
+        # It can soften the *selection* tier when the core separately passes and
+        # missing secondary details contain only valid original user anchors.
+        primary = entry.get('primary_claim')
+        entry['selection_tier'] = status
+        if (status == 'partial' and cid not in rejected and primary is not None
+                and entry['claims'][primary].get('entailment_verified') is True
+                and all(c['status'] == 'supported' or (not c['validation_errors']
+                    and any(r['anchor'] for r in c['citations'])) for c in entry['claims'])):
+            entry['selection_tier'] = 'supported'
+            entry.setdefault('warnings', []).append('whole_option_core_verified')
     return entries
 
 
@@ -434,16 +499,16 @@ def validate_decisions(payload, pairs, options, constraints):
 
 
 def _display_role(card):
-    return card.get('declared') or card['role']
+    return 'persona (first-party profile)' if card.get('declared') == 'persona' else card['role']
 
 
 def _cards(catalog):
     return [dict(id=c['id'], role=_display_role(c), text=c['text'], timestamp=c.get('timestamp')) for c in catalog.values()]
 
 
-async def _judge(prompt, schema, validator, stage, diagnostics):
+async def _judge(prompt, schema, validator, stage, diagnostics, *, attempts=2):
     """One bounded repair from the original input; never trust malformed output."""
-    for attempt in range(2):
+    for attempt in range(attempts):
         actual = prompt + ('\nReturn ONLY the exact required schema with every required field and no extra fields. '
                            'Copy any requested claims and quotations verbatim. Do not add commentary.' if attempt else '')
         call = dict(stage=stage + ('.repair' if attempt else ''),
@@ -455,6 +520,16 @@ async def _judge(prompt, schema, validator, stage, diagnostics):
                 'Call emit_json_result with only the requested fields.'),
                 stage=call['stage'], max_tokens=3072, attempts=1, timeout=60)
         except Exception as exc:
+            cause = exc
+            malformed = isinstance(exc, ValueError)
+            while cause is not None:
+                malformed = malformed or isinstance(cause, metrics.ResponseParseError)
+                cause = cause.__cause__
+            if malformed:
+                call.update(status='invalid', error_type=type(exc).__name__)
+                if attempt == attempts - 1:
+                    raise ValueError('Malformed structured judgment after bounded repair') from exc
+                continue
             call.update(status='error', error_type=type(exc).__name__)
             raise
         try:
@@ -463,8 +538,56 @@ async def _judge(prompt, schema, validator, stage, diagnostics):
             return validated
         except (ValueError, TypeError, KeyError) as exc:
             call.update(status='invalid', error_type=type(exc).__name__)
-            if attempt:
+            if attempt == attempts - 1:
                 raise
+
+
+def _verdicts(payload, checks):
+    parsed = Entailments.model_validate(payload)
+    if (len(parsed.checks) != len(checks) or {v.claim_id for v in parsed.checks}
+            != {c['claim_id'] for c in checks}):
+        raise ValueError('Verify every requested check exactly once')
+    return parsed.model_dump()
+
+
+async def review_entailments(verdicts, checks, entries, sources, qa, diagnostics):
+    """One contextual second opinion before a supported claim is demoted.
+
+    A failed, unaffordable or malformed review preserves the first verdict. Full
+    packet context cannot replace the original validated personal anchors.
+    """
+    if not config.CHOICE_ENTAILMENT_REVIEW:
+        return verdicts
+    rejected = {v['claim_id'] for v in verdicts['checks'] if not v['entailed']}
+    proposed = {f"{e['letter']}:{i}" for e in entries for i, c in enumerate(e['claims'])
+                if c['status'] == 'supported' and any(r['anchor'] for r in c['citations'])}
+    proposed.update(f"{e['letter']}:option" for e in entries
+                    if e['status'] == 'supported' and e['claims'])
+    review = [c for c in checks if c['claim_id'] in rejected & proposed]
+    if not review:
+        return verdicts
+    prompt = prompts.render('16_choice_review.txt', question=qa['question'],
+        question_date=qa.get('question_date', ''), checks=json.dumps(review, ensure_ascii=False),
+        sources=json.dumps(_cards(sources), ensure_ascii=False))
+    schema = Entailments.model_json_schema()
+    limits = budget.current.get()
+    cost = len(prompt.encode('utf-8')) + len(json.dumps(schema).encode('utf-8')) + 4096
+    if (len(prompt.encode('utf-8')) > 48000 or (limits and (
+            limits.calls + limits.reserved_calls + 3 > limits.max_calls
+            or limits.tokens + limits.reserved_tokens + cost + 8192 > limits.max_tokens
+            or limits.deadline - time.monotonic() < 65))):
+        diagnostics['answer_entailment_review'] = dict(status='skipped_budget', check_ids=[c['claim_id'] for c in review])
+        return verdicts
+    try:
+        second = await _judge(prompt, schema, lambda result: _verdicts(result, review),
+                              'eval.choice_entailment_review', diagnostics, attempts=1)
+    except (ValueError, TypeError, KeyError, budget.BudgetExceeded, TimeoutError, llm.LLMError) as exc:
+        diagnostics['answer_entailment_review'] = dict(status='kept_first_verdict', error_type=type(exc).__name__)
+        return verdicts
+    approved = {v['claim_id'] for v in second['checks'] if v['entailed']}
+    diagnostics['answer_entailment_review'] = dict(status='reviewed', first=verdicts, second=second,
+                                                  restored_check_ids=sorted(approved))
+    return dict(checks=[dict(v, entailed=True) if v['claim_id'] in approved else v for v in verdicts['checks']])
 
 
 async def answer(qa, memories, diagnostics):
@@ -486,6 +609,11 @@ async def _answer(qa, memories, diagnostics):
         question_date=qa.get('question_date', ''),
         task_instructions=qa.get('system_prompt', ''), options='\n'.join(options),
         sources=json.dumps(_cards(sources), ensure_ascii=False))
+    if config.CHOICE_ALLOW_INFERRED:
+        support_prompt += ('\nControlled inference is enabled: status inferred is allowed only for a strongly '
+            'implied interest or experience with a valid current-user anchor. Never infer ownership, '
+            'diagnosis, frequency, expertise, a specific subtype or a denied/hypothetical event. '
+            'Prefer unsupported when the implication is merely possible.')
     def validate_support(result):
         entries = validate_assessments(result, options, sources)
         if any(set(e['validation_errors']) & {'generic_with_personal_claims', 'missing_personal_claim'}
@@ -493,15 +621,29 @@ async def _answer(qa, memories, diagnostics):
                       for c in e['claims']) for e in entries):
             raise ValueError('Use exact personal premises only; generic advice has no personal claims')
         return entries
-    entries = await _judge(support_prompt, Assessments.model_json_schema(),
-        validate_support, 'eval.choice_support', diagnostics)
+    try:
+        support_schema = Assessments.model_json_schema()
+        if not config.CHOICE_ALLOW_INFERRED:
+            support_schema['$defs']['Claim']['properties']['status']['enum'] = ['supported', 'unsupported']
+        entries = await _judge(support_prompt, support_schema,
+            validate_support, 'eval.choice_support', diagnostics)
+    except (ValueError, TypeError, KeyError) as exc:
+        # A third malformed extraction adds no value. Independently check the
+        # complete options as generic-only candidates, with NO personal support.
+        # Only a verified generic option can survive; constraints still run.
+        diagnostics['answer_support_fallback'] = dict(mode='generic_only', error_type=type(exc).__name__)
+        entries = [dict(letter=letter, kind='generic', status='generic', option=text,
+                        primary_claim=None, claims=[], validation_errors=[], warnings=['support_format_fallback'])
+                   for letter, text in letters.items()]
     diagnostics['choice_alignment'] = entries
     checks = entailment_checks(entries, sources, options)
     if checks:
         entailment_prompt = prompts.render('15_choice_entailment.txt', question=qa['question'],
             question_date=qa.get('question_date', ''), checks=json.dumps(checks, ensure_ascii=False))
-        entries = await _judge(entailment_prompt, Entailments.model_json_schema(),
-            lambda result: validate_entailments(result, entries, checks), 'eval.choice_entailment', diagnostics)
+        verdicts = await _judge(entailment_prompt, Entailments.model_json_schema(),
+            lambda result: _verdicts(result, checks), 'eval.choice_entailment', diagnostics)
+        verdicts = await review_entailments(verdicts, checks, entries, sources, qa, diagnostics)
+        entries = validate_entailments(verdicts, entries, checks)
     blocked, matches = set(), []
     pairs = constraint_pairs(options, constraints)
     if pairs:

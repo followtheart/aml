@@ -64,8 +64,18 @@ class SafetyTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(prefs[0]['support_sessions']), 1)
         self.assertEqual(self.st.core_profile('u', 10), [])
 
-    def test_sensitive_requires_request_opt_in(self):
-        self.assertFalse(schemas.SearchRequest(user_id='u', query='x').include_sensitive)
+    def test_sensitive_default_and_explicit_opt_out(self):
+        # Public request default changed in 15501fc; an explicit opt-out must
+        # still reach the storage filter instead of being replaced by a default.
+        self.assertTrue(schemas.SearchRequest(user_id='u', query='x').include_sensitive)
+        request = schemas.SearchRequest(user_id='u', query='x', include_sensitive=False)
+        self.assertFalse(request.include_sensitive)
+        private = self.st.insert_amu(user_id='u', session_id='s', content='private', sensitivity='sensitive')
+        public = self.st.insert_amu(user_id='u', session_id='s', content='public')
+        hidden = self.st.get_by_type('u', ['fact'], include_sensitive=request.include_sensitive)
+        self.assertEqual({row['id'] for row in hidden}, {public})
+        visible = self.st.get_by_type('u', ['fact'], include_sensitive=True)
+        self.assertEqual({row['id'] for row in visible}, {public, private})
 
 
 if __name__ == '__main__':

@@ -1,6 +1,24 @@
 """Score-ordered selection with witnessed reservations and visible-source coverage."""
 import re
-from . import budget, personal_evidence as pe
+import math
+from . import budget, personal_evidence as pe, search_coverage
+
+# Retrieval-only topic families. They do not imply ownership, preference, or
+# entailment. Alias matching is kept out of personal-evidence validation.
+_TOPIC_FAMILIES = (
+    ('vinyl', 'lps', 'lp', 'pressings', 'pressing', 'phonograph'),
+    ('cryptocurrency', 'cryptocurrencies', 'crypto', 'blockchain', 'stablecoins', 'stablecoin'),
+    ('cholesterol', 'lipid', 'lipids'),
+)
+
+
+def _topic_concepts(text):
+    concepts = search_coverage._concepts(text)
+    words = pe.terms(text)
+    for index, family in enumerate(_TOPIC_FAMILIES):
+        if words.intersection(family):
+            concepts.add(f'topic_family:{index}')
+    return concepts
 
 
 def _text(value):
@@ -50,8 +68,8 @@ def represented_by(row, selected, cache=None):
 def select(rows, count, requirements, key, reserve_ids=(), *, carry_ids=(), fused_ids=(), trace=None):
     """Keep score order; defer only evidence completely represented by selected units.
 
-    Coverage labels are a soft retrieval diagnostic. Only source-witnessed labels
-    can reserve slots. Reservations are explicit and portable to the next cap.
+    Strong source witnesses and bounded option-topic champions reserve slots.
+    Option-topic matching admits evidence for inspection; it never proves a fact.
     """
     ordered = sorted(rows, key=key, reverse=True)
     visible = {c['id']: fragments(c) for c in ordered}
@@ -65,6 +83,13 @@ def select(rows, count, requirements, key, reserve_ids=(), *, carry_ids=(), fuse
             entry['requirement_ids'].append(requirement['id'])
             if 'supported_coverage' not in entry['reasons']:
                 entry['reasons'].append('supported_coverage')
+    # One champion per option, chosen on visible source passages rather than the
+    # question's CE score. No gold labels, summaries or hidden source metadata.
+    # A set-cover gain lets one passage satisfy multiple option facets.
+    for mid, rids in option_champions(ordered, requirements, visible, max(1, count // 2)).items():
+        entry = reservations.setdefault(mid, dict(requirement_ids=[], reasons=[]))
+        entry['requirement_ids'] = list(dict.fromkeys(entry['requirement_ids'] + rids))
+        entry['reasons'].append('option_topic_coverage')
     for reason, members in (('unscored_rescue', reserve_ids), ('carried_reservation', carry_ids),
                             ('fused_head', fused_ids)):
         for mid in members:
@@ -72,8 +97,20 @@ def select(rows, count, requirements, key, reserve_ids=(), *, carry_ids=(), fuse
                 entry = reservations.setdefault(mid, dict(requirement_ids=[], reasons=[]))
                 entry['reasons'].append(reason)
     reserved = [c for c in ordered if c['id'] in reservations]
-    selected = reserved[:count]
+    # Soft fused-head reserves must not crowd out option or carried witnesses.
+    reserved.sort(key=lambda c: reservations[c['id']]['reasons'] == ['fused_head'])
+    selected = []
     deferred = []
+    for c in reserved:
+        owners = represented_by(c, selected, visible)
+        if owners:
+            deferred.append(c)
+            for owner in owners:
+                entry = reservations[owner]
+                for field in ('requirement_ids', 'reasons'):
+                    entry[field] = list(dict.fromkeys(entry[field] + reservations[c['id']][field]))
+        elif len(selected) < count:
+            selected.append(c)
     for c in ordered:
         budget.check()
         if c in selected or c in reserved:
@@ -103,6 +140,50 @@ def select(rows, count, requirements, key, reserve_ids=(), *, carry_ids=(), fuse
                 score=c.get('_ce_score'), represented_by=owners,
                 visible_sources=sorted({s[0] for s, _ in visible[c['id']]})))
     return [c for c in ordered if c['id'] in chosen_ids]
+
+
+def option_champions(ordered, requirements, visible, limit):
+    """Bounded per-option topical witnesses, deliberately separate from support."""
+    requirements = [r for r in requirements if r['id'].startswith('option:')]
+    if not requirements or not ordered:
+        return {}
+    passages = {c['id']: [(role, _topic_concepts(text)) for (_, role), text in visible[c['id']]]
+                for c in ordered}
+    corpus = {mid: set().union(*(terms for _, terms in pieces)) for mid, pieces in passages.items()}
+    def weight(term):
+        return 1 + math.log((len(corpus) + 1) / (1 + sum(term in words for words in corpus.values())))
+    selected, covered = {}, set()
+    for requirement in requirements:
+        rid = requirement['id']
+        if rid in covered:
+            continue
+        wanted = _topic_concepts(requirement['text'])
+        total = sum(weight(w) for w in wanted)
+        if not total:
+            continue
+        scores = {}
+        for c in ordered:
+            best = 0
+            for role, terms in passages[c['id']]:
+                hits = wanted & terms
+                ratio = sum(weight(w) for w in hits) / total
+                family_hit = any(w.startswith('topic_family:') for w in hits)
+                if family_hit or (len(hits) >= min(2, len(wanted)) and ratio >= .3):
+                    # For comparable topical coverage, prefer a first-party
+                    # question over a long assistant essay with many keywords.
+                    score = (role == 'user', family_hit, ratio)
+                    best = max(best, score) if best else score
+            if best:
+                scores[c['id']] = best
+        if not scores:
+            continue
+        champion = max((c for c in ordered if c['id'] in scores), key=lambda c: scores[c['id']])
+        mid = champion['id']
+        if mid not in selected and len(selected) >= limit:
+            continue
+        selected.setdefault(mid, []).append(rid)
+        covered.add(rid)
+    return selected
 
 
 def rescue(rows, count, query, specs=()):

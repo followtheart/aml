@@ -640,7 +640,7 @@ class AnswerFlowTests(OfflineCase, unittest.IsolatedAsyncioTestCase):
                 self.assertEqual([c.kwargs['stage'] for c in mock.call_args_list],
                                  ['eval.choice_support', 'eval.choice_support.repair', 'eval.choice_entailment'])
 
-    async def test_repeated_inconsistent_support_does_not_fall_back_to_generic(self):
+    async def test_repeated_inconsistent_support_cannot_bypass_independent_generic_verification(self):
         packet = seal(memory('I have twin boys.'))
         sources, _ = self.gate.build_catalog(packet)
         invalid = assessment('you have twin boys', next(iter(sources)), 'I have twin boys.')
@@ -648,13 +648,15 @@ class AnswerFlowTests(OfflineCase, unittest.IsolatedAsyncioTestCase):
         mock = AsyncMock(return_value=invalid)
         with patch.object(llm, 'complete_json', mock), self.assertRaises(ValueError):
             await self.gate.answer(self.qa(), packet, {})
-        self.assertEqual(mock.await_count, 2)
+        self.assertEqual(mock.await_count, 4)
+        self.assertEqual([c.kwargs['stage'] for c in mock.call_args_list][-2:],
+                         ['eval.choice_entailment', 'eval.choice_entailment.repair'])
 
-    async def test_second_malformed_assessment_fails_without_a_third_call(self):
+    async def test_malformed_support_and_generic_fallback_both_fail_boundedly(self):
         mock = AsyncMock(return_value={'options': []})
         with patch.object(llm, 'complete_json', mock), self.assertRaises(ValueError):
             await self.gate.answer(self.qa(), [], {})
-        self.assertEqual(mock.await_count, 2)
+        self.assertEqual(mock.await_count, 4)
 
     async def test_no_supported_or_generic_choice_fails_explicitly(self):
         qa = self.qa(['A. Since you own a camera, take photos.'])
@@ -679,12 +681,13 @@ class AnswerFlowTests(OfflineCase, unittest.IsolatedAsyncioTestCase):
                 sources, _ = self.gate.build_catalog(packet)
                 qa = self.qa(['A. Since ' + claim + ', make a plan.', 'B. Take a break.'])
                 support = assessment(claim, next(iter(sources)), text)
-                mock = staged_mock(support, lambda prompt: entailment_response(prompt, {'A:0'}))
+                mock = staged_mock(support, lambda prompt: entailment_response(prompt, {'A:0'}),
+                                   lambda prompt: entailment_response(prompt, {'A:0'}))
                 diagnostics = {}
                 with patch.object(llm, 'complete_json', mock):
                     self.assertEqual(await self.gate.answer(qa, packet, diagnostics), 'B')
                 self.assertEqual([c.kwargs['stage'] for c in mock.call_args_list],
-                                 ['eval.choice_support', 'eval.choice_entailment'])
+                                 ['eval.choice_support', 'eval.choice_entailment', 'eval.choice_entailment_review'])
                 self.assertIn(text, mock.call_args_list[1].args[0])
                 self.assertIn(claim, mock.call_args_list[1].args[0])
                 self.assertEqual(diagnostics['answer_eligible_options'], ['B'])
@@ -709,12 +712,13 @@ class AnswerFlowTests(OfflineCase, unittest.IsolatedAsyncioTestCase):
         qa = self.qa(['A. Since you own a camera and photograph weddings professionally, advertise wedding shoots.',
                       'B. Take a break.'])
         support = assessment('you own a camera', next(iter(sources)), 'I own a camera.')
-        mock = staged_mock(support, lambda prompt: entailment_response(prompt, {'A:option'}))
+        mock = staged_mock(support, lambda prompt: entailment_response(prompt, {'A:option'}),
+                           lambda prompt: entailment_response(prompt, {'A:option'}))
         diagnostics = {}
         with patch.object(llm, 'complete_json', mock):
             self.assertEqual(await self.gate.answer(qa, packet, diagnostics), 'A')
         self.assertEqual([c.kwargs['stage'] for c in mock.call_args_list],
-                         ['eval.choice_support', 'eval.choice_entailment'])
+                         ['eval.choice_support', 'eval.choice_entailment', 'eval.choice_entailment_review'])
         self.assertIn(qa['options'][0], mock.call_args_list[1].args[0])
         self.assertIn('I own a camera.', mock.call_args_list[1].args[0])
         self.assertEqual(diagnostics['answer_eligible_options'], ['A'])

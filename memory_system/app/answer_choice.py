@@ -12,9 +12,9 @@ import time
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
-from . import answer_context, budget, choice_premises, config, llm, metrics, persona_source, personal_evidence, profile, prompts
+from . import answer_context, budget, choice_premises, choice_witness, config, llm, metrics, persona_source, personal_evidence, profile, prompts
 
-VERSION = 'verified-source-choice-v3-funnel'
+VERSION = 'verified-source-choice-v4-witness-ladder'
 
 
 class StrictModel(BaseModel):
@@ -29,9 +29,10 @@ class Citation(StrictModel):
 
 
 class Claim(StrictModel):
-    text: str = Field(min_length=1, description='Exact option substring asserting a pre-existing personal fact. Never a new suggestion or recommendation.')
+    text: str = Field(min_length=1, description='Exact option substring asserting ONE pre-existing personal fact. Split compound premises into separate claims. Never a new suggestion or recommendation.')
     status: Literal['supported', 'unsupported', 'inferred']
     premise_type: Literal['interest', 'ownership', 'condition', 'habit', 'experience', 'occupation', 'location', 'unknown'] = 'unknown'
+    reason: Literal['no_source', 'source_too_weak', 'contradicted', 'third_party', 'none'] = 'none'
     citations: list[Citation] = Field(max_length=3)
 
 
@@ -161,7 +162,9 @@ _ATTRIBUTED = re.compile(r'\b(?!I\b|We\b)[A-Z][\w’\'-]*(?:\s+[A-Z][\w’\'-]*)
                          r'\b(?:my|our)\s+\w+\s+(?:said|wrote|shared)\s*[:,]')
 _FRAME = re.compile(r'^\s*["“]?(?:imagine|suppose|pretend|assume)\b|'
                     r'\b(?:fictional|hypothetical|imaginary)\s+(?:scenario|story|diary|example|person)\b|虛構|虚构', re.I)
-_CONDITIONAL_SELF = re.compile(r'\bif\s+(?:I|we|my|our)\b|假如我|假設我|假设我|如果我', re.I)
+# "even if my diet stayed the same" is a concession about a real event, not a
+# hypothetical frame; only a bare conditional scopes the sentence out.
+_CONDITIONAL_SELF = re.compile(r'(?<!\beven\s)\bif\s+(?:I|we|my|our)\b|假如我|假設我|假设我|如果我', re.I)
 _DENIAL = re.compile(r"\b(?:I|we)\s+(?:(?:have|had|do|did|am|are)\s+)?(?:not|never)\b|"
                      r"\b(?:I|we)\s+(?:don['’]t|didn['’]t|haven['’]t|hadn['’]t)\b|"
                      r'\bno\s+\w+(?:\s+\w+){0,2}\s+(?:ever|has|have|had)\b|我(?:沒有|没有|從未|从未)', re.I)
@@ -181,6 +184,29 @@ def _strong_trait(text):
     neutral = re.sub(r'\byou\s+(?:have\s+(?:an?\s+)?(?:interest|passion)|are\s+a\s+fan)\b',
                      'interest', text, flags=re.I)
     return bool(_STRONG_TRAIT.search(neutral))
+
+
+# Attention/monitoring premises ("keeping an eye on your cholesterol") assert
+# concern about a topic, not a diagnosis; a user question about that topic is
+# the matching evidence strength.
+_MONITORING = re.compile(r'\b(?:keep(?:ing|s)? an eye on|monitor\w*|track\w*|watch\w*|mindful of|'
+                         r'conscious of|concerned about|paying attention to|focus\w* on|manag\w*|'
+                         r'trying to (?:cut|reduce|limit|lower|improve))\b|關注|关注|留意', re.I)
+# Evidence strength ladder. Level 1: topical interest; level 2: a described
+# experience; level 3: ownership, diagnosis, frequency, occupation, location.
+_PREMISE_LEVEL = dict(interest=1, experience=2, habit=3, ownership=3, condition=3, occupation=3, location=3)
+_EVIDENCE_LEVEL = dict(topic_interest=1, self_report=3, context=0)
+
+
+def _premise_level(claim, premise_type='unknown'):
+    strong = _strong_trait(claim)
+    if _MONITORING.search(claim) and not strong:
+        return 1
+    if premise_type == 'unknown':
+        level = 1 if _INTEREST.search(claim) else 2
+    else:
+        level = _PREMISE_LEVEL.get(premise_type, 3)
+    return max(level, 3) if strong else level
 
 
 def _self_scope(source, quote, claim):
@@ -216,8 +242,11 @@ def _check_citation(citation, claim, sources, premise_type='unknown'):
     persona = bool(source and source.get('declared') == 'persona')
     # Model-supplied types constrain the gate; they cannot reclassify arbitrary
     # ownership, illness or frequency as interest to bypass provenance checks.
-    interest = premise_type in ('interest', 'unknown') and _INTEREST.search(claim)
-    interest = bool(interest and not _strong_trait(claim))
+    # A topical question may stand one level below the premise (recorded as a
+    # strength gap, later derived as `inferred`); two levels below is a rejection.
+    level = _premise_level(claim, premise_type)
+    gap = level - _EVIDENCE_LEVEL['topic_interest']
+    interest = gap <= 1
     if not source or citation.quote not in source['text']:
         errors.append('quote_not_in_source')
     elif persona:
@@ -257,7 +286,8 @@ def _check_citation(citation, claim, sources, premise_type='unknown'):
         if failure and failure != 'no_user_assertion':
             errors.append(failure)
     c.update(source_role=(source.get('declared') or source['role']) if source else None, validation_errors=errors,
-             valid=not errors, anchor=not errors and c['basis'] != 'context')
+             valid=not errors, anchor=not errors and c['basis'] != 'context',
+             premise_level=level, strength_gap=max(0, gap) if c['basis'] == 'topic_interest' else 0)
     if source and not errors:
         start = source['text'].find(citation.quote)
         c['source_span'] = dict(start=start, end=start + len(citation.quote))
@@ -328,7 +358,14 @@ def validate_assessments(payload, options, sources):
             if status == 'inferred' and (not config.CHOICE_ALLOW_INFERRED or _strong_trait(exact or claim.text)
                                         or claim.premise_type not in ('interest', 'experience')):
                 invalid.append('inference_not_allowed')
-            claims.append(dict(text=exact or claim.text, premise_type=claim.premise_type,
+            # Derived, not proposed: a premise whose only anchors sit one rung
+            # below it on the evidence ladder is recorded as inferred. Whether
+            # that tier is admissible is decided by config, never by the model.
+            anchors = [c for c in valid if c['anchor']]
+            if status == 'supported' and anchors and all(c.get('strength_gap') for c in anchors):
+                status = 'inferred'
+                warnings.append('strength_gap')
+            claims.append(dict(text=exact or claim.text, premise_type=claim.premise_type, reason=claim.reason,
                                status='unsupported' if invalid else status, proposed_status=claim.status,
                                citations=valid, dropped_citations=dropped, validation_errors=invalid))
         kind = 'generic' if removed and not claims else option.kind
@@ -472,7 +509,7 @@ def validate_entailments(payload, entries, checks):
         if (status == 'partial' and cid not in rejected and primary is not None
                 and entry['claims'][primary].get('entailment_verified') is True
                 and all(c['status'] == 'supported' or (not c['validation_errors']
-                    and any(r['anchor'] for r in c['citations'])) for c in entry['claims'])):
+                    and any(r['anchor'] and not r.get('strength_gap') for r in c['citations'])) for c in entry['claims'])):
             entry['selection_tier'] = 'supported'
             entry.setdefault('warnings', []).append('whole_option_core_verified')
     return entries
@@ -603,11 +640,14 @@ async def _answer(qa, memories, diagnostics):
     options = qa['options']
     letters = option_map(options)
     sources, constraints = build_catalog(memories)
+    witnesses = choice_witness.build(options, sources)
     diagnostics.update(answer_policy=VERSION, answer_source_catalog=list(sources.values()),
-                       answer_constraint_catalog=list(constraints.values()), answer_validation='pending')
+                       answer_constraint_catalog=list(constraints.values()), answer_validation='pending',
+                       answer_witness_prefill=witnesses)
     support_prompt = prompts.render('12_choice_support.txt', question=qa['question'],
         question_date=qa.get('question_date', ''),
         task_instructions=qa.get('system_prompt', ''), options='\n'.join(options),
+        witnesses=choice_witness.render(witnesses),
         sources=json.dumps(_cards(sources), ensure_ascii=False))
     if config.CHOICE_ALLOW_INFERRED:
         support_prompt += ('\nControlled inference is enabled: status inferred is allowed only for a strongly '

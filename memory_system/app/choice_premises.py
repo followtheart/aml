@@ -8,9 +8,20 @@ _PROTECTED = re.compile(r"\b(?:not|no|never|without|only|always|daily|every|used
                         r"currently|now|if|unless|would|could|may|might|you|your|they|their|he|she|"
                         r"we|our|i|my|friend|spouse|mother|father|had|have|has|own|owned)\b|n['’]t\b", re.I)
 _ADVICE = re.compile(r'\b(?:could|should|might|try|consider|start|perhaps|maybe)\b', re.I)
-_FACT = re.compile(r"\b(?:since|because|given|already|own|owned|have|had|has|history|diagnos\w*|"
+_FACT = re.compile(r"\b(?:since|because|given|already|own|owned|have|had|has|history of|diagnos\w*|"
                    r"not|no|never|cannot|daily|weekly|monthly|every|often|usually|always|used to|"
                    r"previously|last year|your|you['’]re|you are)\b|n['’]t\b", re.I)
+# Inside the advice complement, "your" merely addresses the reader ("arrange
+# your shelves"); it is not a fact marker unless the claim itself contains it.
+_FACT_TAIL = re.compile(r"\b(?:since|because|given|already|own|owned|have|had|has|history of|diagnos\w*|"
+                        r"not|no|never|cannot|daily|weekly|monthly|every|often|usually|always|used to|"
+                        r"previously|last year|you['’]re|you are)\b|n['’]t\b", re.I)
+# "so guests get a sense of your history": a purpose clause describes the
+# intended effect of the advice, not an established personal fact.
+_PURPOSE = re.compile(r'\bso\s+(?:that\s+)?(?:\w+\s+){1,3}?(?:can\s+|will\s+|would\s+)?'
+                      r'(?:get|gets|see|sees|have|has|feel|feels|know|knows|sense|senses)\b', re.I)
+_STRONG_CLAIM = re.compile(r"\b(?:own|owned|have|had|has|history of|diagnos\w*|daily|weekly|monthly|every|"
+                           r"often|usually|always|used to|previously|last year|you['’]re|you are)\b", re.I)
 _BACKGROUND = re.compile(r'\byour (?:day[- ]to[- ]day activities|routine|needs)\b', re.I)
 _HISTORY = re.compile(r'\b(?:last|before|after|when|once|formerly|earlier|ago|yesterday)\b', re.I)
 _ASSERTION = re.compile(r'\b(?:you|yourself|I|we|they|he|she)\b', re.I)
@@ -80,8 +91,13 @@ def is_suggestion(claim, option):
     if not advice:
         return False
     tail = (prefix + claim)[advice[-1].end():]
-    if _FACT.search(claim) or _FACT.search(tail):
-        return False
+    if _FACT.search(claim) or _FACT_TAIL.search(tail):
+        # A short "your X" purpose complement ("so guests get a sense of your
+        # history") is still the advice's intended effect, not prior history.
+        purpose = _PURPOSE.search(tail[:len(tail) - len(claim)])
+        if not (purpose and re.fullmatch(r'(?:your|their)\s+\w+', claim.strip(), re.I)
+                and not _STRONG_CLAIM.search(claim) and not _FACT_TAIL.search(tail)):
+            return False
     # A preceding premise is allowed, but an embedded "because/since" is not.
     if re.search(r'\b(?:since|because|given)\b', prefix, re.I) and ',' not in prefix:
         return False

@@ -17,6 +17,12 @@ Task-specific instructions: {task_instructions}
 Options:
 {options}
 
+Candidate witnesses (deterministic keyword matches inside the sources below;
+they are hints, NOT proof, and may be irrelevant; cite or ignore each one):
+<witnesses>
+{witnesses}
+</witnesses>
+
 Visible original sources (source roles are authoritative):
 <sources>
 {sources}
@@ -25,11 +31,24 @@ Visible original sources (source roles are authoritative):
 For each option return letter, kind (personal or generic), and claims.
 Personal means it relies on prior personal experiences, interests, habits,
 conditions, ownership, occupation or location. List ALL distinguishing personal
-premises as exact substrings of that option. For every claim return text,
-status (supported or unsupported), premise_type (interest, ownership, condition,
-habit, experience, occupation, location, or unknown), and citations. A citation contains source_id,
+premises as exact substrings of that option. Each claim asserts ONE fact: split
+a compound premise ("you practice yoga and meditate daily") into separate
+claims so a verified core is not sunk by an unverified detail. For every claim
+return text, status (supported or unsupported), premise_type (interest, ownership,
+condition, habit, experience, occupation, location, or unknown), reason, and
+citations. reason explains an unsupported status: no_source (nothing in the
+sources touches it), source_too_weak (a source is topical but does not establish
+this strength of fact), contradicted, third_party; use none when supported.
+A citation contains source_id,
 quote (exact contiguous original text), basis (self_report, topic_interest,
 context) and subject (current_user, third_party, unknown).
+
+Before marking a premise unsupported with an empty citations list, check the
+candidate witnesses for that option: if one is a user question or statement on
+that topic, cite it (basis topic_interest for a question) and let the verifier
+judge its strength rather than returning no citation at all.
+Monitoring or attention premises ("keeping an eye on your cholesterol") are
+concern about a topic, not a diagnosis; a user question on that topic supports them.
 
 Only mark supported when the cited sources establish that particular premise.
 Concrete descriptions can establish an experience without the activity name.

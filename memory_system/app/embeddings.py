@@ -39,7 +39,7 @@ async def embed(texts: List[str], stage: str = "embedding") -> np.ndarray:
         async def _call(_attempt):
             return await litellm.aembedding(
                 model=config.EMBED_MODEL, input=batch,
-                timeout=60, num_retries=0, **kwargs)
+                timeout=config.EMBED_TIMEOUT_SECONDS, num_retries=0, **kwargs)
 
         # A real provider failure must fail Add/Search. Hash vectors are only
         # used in explicit AML_FAKE mode and never contaminate the real space.

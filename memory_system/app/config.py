@@ -95,6 +95,8 @@ _LLM_OUTPUT_CAP = _LLM_SPEC["max_output_tokens"] if _LLM_SPEC else None
 EMBED_BATCH_SIZE = max(1, int(os.environ.get(
     "AML_EMBED_BATCH_SIZE",
     str((_EMBED_SPEC or {}).get("embed_batch") or 2048))))
+# Per-provider embedding request; search also bounds pacing, batches and retries.
+EMBED_TIMEOUT_SECONDS = max(1.0, float(os.environ.get("AML_EMBED_TIMEOUT_SECONDS", "120")))
 API_KEY = os.environ.get("AML_API_KEY", "")
 DB_PATH = os.environ.get("AML_DB_PATH", os.path.join(os.path.dirname(__file__), "..", "memory.db"))
 FAKE = os.environ.get("AML_FAKE", "") == "1"
@@ -248,9 +250,11 @@ PROFILE_TRANSIENT_TTL_DAYS = max(
     1, int(os.environ.get("AML_PROFILE_TRANSIENT_TTL_DAYS", "90")))
 # Search allows one bounded grounded follow-up; the answer model judges sufficiency.
 # §9.4 hard per-search request budget: wall-clock deadline plus provider
-# call/token caps. Slow models and rate-limit backoffs can exceed 45s;
-# raise the deadline instead of letting a search die mid-flight.
-SEARCH_DEADLINE_SECONDS = max(1.0, float(os.environ.get("AML_SEARCH_DEADLINE_SECONDS", "45")))
+# call/token caps. Leave room for slow embeddings and downstream ranking.
+SEARCH_DEADLINE_SECONDS = max(1.0, float(os.environ.get("AML_SEARCH_DEADLINE_SECONDS", "300")))
+# Entire query-embedding stage, including provider pacing, batches and retries;
+# still bounded by the search's remaining wall-clock time.
+SEARCH_EMBED_TIMEOUT_SECONDS = max(1.0, float(os.environ.get("AML_SEARCH_EMBED_TIMEOUT_SECONDS", "120")))
 SEARCH_MAX_CALLS = max(1, int(os.environ.get("AML_SEARCH_MAX_CALLS", "12")))
 SEARCH_MAX_TOKENS = max(1024, int(os.environ.get("AML_SEARCH_MAX_TOKENS", "64000")))
 # §3.1 the rolling session summary is extraction context only (ACE collapse);

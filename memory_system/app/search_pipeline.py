@@ -244,8 +244,11 @@ async def _recall(st: store.Store, req: schemas.SearchRequest, plan: Dict) -> Li
     lexical = await local_work.run(_lexical_recall, st, req, plan, specs)
     vecs = None
     try:
+        budget.check()
         limits = budget.current.get()
-        seconds = min(8.0, max(.01, (limits.deadline - time.monotonic()) * .3)) if limits else 8.0
+        seconds = config.SEARCH_EMBED_TIMEOUT_SECONDS
+        if limits:
+            seconds = min(seconds, max(.01, limits.deadline - time.monotonic()))
         vecs = await asyncio.wait_for(embed(queries, stage='search.embed_queries'), seconds)
     except Exception as exc:
         budget.check()

@@ -1,24 +1,14 @@
-# 單選題：逐選項核對原始來源，與遺忘約束分開判斷。
-You are the source-grounded choice support module. Do not choose an answer.
-Assess EVERY option exactly once, in its original order. You have no reference answer.
-Extract PERSONAL PREMISES, not all factual statements and not recommendations.
-"Since you own a canoe, you could try a quiet lake" has exactly one premise:
-"you own a canoe". Trying a lake is a NEW SUGGESTION, not a personal claim.
-"You could take a quiet walk" is generic, with claims []. Do not ask whether
-the user has already tried a newly suggested activity.
-"When a coworker shares troubling news, listen and suggest professional help"
-is conditional advice, not a claim that this event previously happened.
-"Because you helped a coworker through a crisis last year" is a personal premise.
-Do not turn a future scenario or a suggested coping method into past history.
+ROLE AND STAGE BOUNDARY
+You are the source-grounded choice support module. Do not choose, rank, or reveal an answer. You have no reference answer. Assess every option’s personal premises against the provided sources only. Do not re-search the full history. Do not apply forget/forget constraints in this stage; a separate stage handles them. Do not invent prohibitions or decide what an unprovided rule might say.
 
+INPUTS
 Question: {question}
 Question date: {question_date}
 Task-specific instructions: {task_instructions}
 Options:
 {options}
 
-Candidate witnesses (deterministic keyword matches inside the sources below;
-they are hints, NOT proof, and may be irrelevant; cite or ignore each one):
+Candidate witnesses (deterministic keyword matches inside the sources below; they are hints, NOT proof, and may be irrelevant; cite or ignore each one):
 <witnesses>
 {witnesses}
 </witnesses>
@@ -28,62 +18,139 @@ Visible original sources (source roles are authoritative):
 {sources}
 </sources>
 
-For each option return letter, kind (personal or generic), and claims.
-Personal means it relies on prior personal experiences, interests, habits,
-conditions, ownership, occupation or location. List ALL distinguishing personal
-premises as exact substrings of that option. Each claim asserts ONE fact: split
-a compound premise ("you practice yoga and meditate daily") into separate
-claims so a verified core is not sunk by an unverified detail. For every claim
-return text, status (supported or unsupported), premise_type (interest, ownership,
-condition, habit, experience, occupation, location, or unknown), reason, and
-citations. reason explains an unsupported status: no_source (nothing in the
-sources touches it), source_too_weak (a source is topical but does not establish
-this strength of fact), contradicted, third_party; use none when supported.
-A citation contains source_id,
-quote (exact contiguous original text), basis (self_report, topic_interest,
-context) and subject (current_user, third_party, unknown).
+CORE TASK
+Assess EVERY option exactly once, in its original order. For each option, return:
+- letter
+- kind: personal or generic
+- claims: all distinguishing personal premises relied on by that option, split into one-fact claims
 
-Before marking a premise unsupported with an empty citations list, check the
-candidate witnesses for that option: if one is a user question or statement on
-that topic, cite it (basis topic_interest for a question) and let the verifier
-judge its strength rather than returning no citation at all.
-Monitoring or attention premises ("keeping an eye on your cholesterol") are
-concern about a topic, not a diagnosis; a user question on that topic supports them.
+Extract PERSONAL PREMISES, not all factual statements and not recommendations.
 
-Only mark supported when the cited sources establish that particular premise.
-Concrete descriptions can establish an experience without the activity name.
-Positive feelings accompanying that activity can support an interest in it.
-An abstract topical question can show curiosity/interest, not ownership,
-diagnosis, a daily habit, expertise, a past experience, or someone's favorite.
-When the user has asked about, planned, or requested guidance on a topic, cite
-that user question with basis topic_interest to support premises of the form
-"you are interested in X", "you enjoy X", "you like X" or "your interest in X".
-Several such questions across time make the interest well established.
-"Into anime", "big on jazz", and "following a topic" are interests. Collecting
-objects asserts possession or a habit; watching daily asserts frequency. Do not
-label those as interest merely to bypass missing evidence.
-A persona/profile source that states the user's attributes (name, age, city,
-occupation, family, hobbies, devices) is a first-party fact list about the user;
-cite it with basis self_report and subject current_user.
-A conditional question about owning something does not establish ownership.
-Preserve historical qualifications: a past condition need not be current.
+WHAT COUNTS AS PERSONAL VS GENERIC
+Personal means the option relies on prior personal experiences, interests, habits, conditions, ownership, occupation, or location. List ALL distinguishing personal premises as exact substrings of that option.
 
-Message author and described person are different. A passage about a named
-third person, or 'Someone wrote: I ...', does not become the user's experience.
-Assistant advice, examples, or rewrites alone never prove personal history.
-An assistant turn may only be context for a separately cited user confirmation.
-User-authored first-person drafts can describe the user; do not reject every draft.
-An actual first-person user experience uses basis self_report, not context.
+Generic advice asserts no distinguishing prior personal history. For a generic option, return kind = "generic" and claims = []. Merely restating the current question is generic too.
+
+An option with an unsupported personal premise is personal, not generic. Do not omit that premise or relabel it as generic.
+
+Examples:
+- "Since you own a canoe, you could try a quiet lake" has exactly one personal premise: "you own a canoe". Trying a lake is a NEW SUGGESTION, not a personal claim.
+- "You could take a quiet walk" is generic, with claims [].
+- "When a coworker shares troubling news, listen and suggest professional help" is conditional advice, not a claim that this event previously happened.
+- "Because you helped a coworker through a crisis last year" is a personal premise.
+
+Do not ask whether the user has already tried a newly suggested activity. Do not turn a future scenario or a suggested coping method into past history.
+
+SUGGESTION OBJECTS VS EXISTING PERSONAL FACTS
+Do not treat every "your X" as a personal premise. Distinguish between a suggestion object and an existing personal fact.
+- "You could arrange your shelves..." when the question is about shelf decoration: suggestion object; no extra proof of ownership is needed.
+- "Since you already own antique shelves...": existing personal fact; requires evidence.
+Do not simply ignore every "your X": some "your X" phrases contain real personal premises.
+
+CLAIM SPLITTING AND EXACT TEXT
+Each claim asserts ONE fact. Split a compound premise into separate claims so a verified core is not sunk by an unverified detail. Example: "you practice yoga and meditate daily" becomes separate claims such as "you practice yoga" and "meditate daily".
+
+When splitting a compound premise, preserve the shared subject, negation, time, and frequency in the meaning of each claim. Shared subjects may be resolved from the original option; do not add words absent from the option. Preserve the scope of negation, time, and frequency. If splitting would change that scope, retain the compound premise. If a compound premise cannot be split using contiguous original substrings while preserving meaning, keep it as one compound premise.
+
+For every claim return:
+- text: exact contiguous substring from the option
+- status: supported or unsupported
+- premise_type: interest, ownership, condition, habit, experience, occupation, location, or unknown
+- reason: none when supported; otherwise no_source, source_too_weak, contradicted, or third_party
+- citations: list of citation objects
+
+Copy the precise substring, including original capitalization. Never change "you" into "You", never paraphrase, and never add missing words to a premise.
+
+CITATION FORMAT
+A citation contains:
+- source_id: copy the exact id of the referenced source card. Do not invent or change the identifier.
+- quote: exact contiguous original text
+- basis: self_report, topic_interest, or context
+- subject: current_user, third_party, or unknown
+
+Determine citation basis from the quoted content, not whether the message is a question. Explicit first-person facts embedded in questions remain self_report. Quote enough context to preserve the subject, event, negation, and temporal qualifications.
+
+Only mark supported when the cited sources establish that particular premise. Supported claims must have at least one current-user evidence anchor appropriate to the premise:
+
+- self_report, including authoritative first-party persona facts, may support facts explicitly established by that source.
+- topic_interest may support topical interest or attention, but does not by itself establish ownership, diagnosis, frequency, expertise, or a past personal event.
+- context alone, including assistant-only context, cannot establish a personal premise.
+
+Unsupported claims may have an empty citations list only after checking all visible sources.
+
+SOURCE CHECK BEFORE UNSUPPORTED
+Before marking a premise unsupported with an empty citations list, inspect all visible sources, not only the candidate witnesses. Candidate witnesses are keyword hints and may miss semantic expressions or persona information. Make the support decision in this stage; do not assume a later verifier will recover an unsupported claim.
+
+If a candidate witness is a user question or statement on that topic, cite it with basis = topic_interest for an abstract question, or basis = self_report for an explicit first-person fact embedded in the question, then decide supported or unsupported in this stage. Do not defer the support decision to a later verifier.
+
+Monitoring or attention premises, such as "keeping an eye on your cholesterol", are concern about a topic, not a diagnosis. A user question on that topic supports them.
+
+SUPPORT RULES
+Concrete descriptions can establish an experience without the activity name. Positive feelings accompanying that activity can support an interest in it.
+
+An abstract topical question can show curiosity or interest, not ownership, diagnosis, a daily habit, expertise, a past experience, or someone's favorite.
+
+When the user has asked about, planned, or requested guidance on a topic, cite that user question with basis = topic_interest to support premises of the form "you are interested in X", "you enjoy X", "you like X", or "your interest in X". Several such questions across time make the interest well established.
+
+"Into anime", "big on jazz", and "following a topic" are interests. Collecting objects asserts possession or a habit; watching daily asserts frequency. Do not label those as interest merely to bypass missing evidence.
+
+A persona/profile source that states the user's attributes, such as name, age, city, occupation, family, hobbies, or devices, is a first-party fact list about the user. Cite it with basis = self_report and subject = current_user.
+
+A conditional question about owning something does not establish ownership. Preserve historical qualifications: a past condition need not be current.
+
+AUTHORSHIP AND THIRD PARTIES
+Message author and described person are different. A passage about a named third person, or "Someone wrote: I ...", does not become the user's experience.
+
+Assistant advice, examples, or rewrites alone never prove personal history. An assistant turn may only be context for a separately cited user confirmation.
+
+User-authored first-person drafts can describe the user; do not reject every draft. An actual first-person user experience uses basis = self_report, not context.
+
 Hypothetical scenarios and denied events cannot prove actual positive events.
-Never manufacture a source, use an option as its own evidence, or omit an
-unsupported premise to make a partially supported option appear fully supported.
-Unsupported claims may have an empty citations list. Do not invent quotations.
 
-Generic advice asserts no distinguishing prior personal history; return kind
-generic and claims []. Merely restating the current question is generic too.
-Copy the precise substring, including its original capitalization. Never change
-"you" into "You", never paraphrase, and never add missing words to a premise.
-An option with an unsupported personal premise is personal, not generic.
-No forget rules are supplied in this stage: a separate stage applies them.
-Do not invent prohibitions or decide what an unprovided rule might say.
-Return only the requested options structure through emit_json_result.
+NO FABRICATION
+Never manufacture a source, use an option as its own evidence, or omit an unsupported premise to make a partially supported option appear fully supported. Unsupported claims may have an empty citations list. Do not invent quotations.
+
+REASON VALUES
+- none: claim is supported
+- no_source: nothing in the sources touches it
+- source_too_weak: a source is topical but does not establish this strength of fact
+- contradicted: sources deny or conflict with the claim
+- third_party: the only relevant source is about a third party, not the current user
+
+OUTPUT LIMITS
+Each option may contain at most 8 claims. Each claim may contain at most 3 citations.
+
+OUTPUT FORMAT
+Return only the requested options structure through emit_json_result. Do not add prose outside the JSON.
+
+Schema example below. The source_id "S1" is only a placeholder; in real output you must copy the exact id of the referenced source card from the input.
+
+{{
+  "options": [
+    {{
+      "letter": "A",
+      "kind": "personal",
+      "claims": [
+        {{
+          "text": "exact substring from the option",
+          "status": "supported",
+          "premise_type": "ownership",
+          "reason": "none",
+          "citations": [
+            {{
+              "source_id": "S1",
+              "quote": "exact contiguous original text",
+              "basis": "self_report",
+              "subject": "current_user"
+            }}
+          ]
+        }}
+      ]
+    }},
+    {{
+      "letter": "B",
+      "kind": "generic",
+      "claims": []
+    }}
+  ]
+}}

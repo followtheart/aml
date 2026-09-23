@@ -4,6 +4,7 @@ Model judgments are proposals: provenance, quoted spans, attribution safeguards,
 constraint scope, and the final admissible option set are checked locally.
 """
 import asyncio
+import copy
 from contextlib import nullcontext
 import hashlib
 import json
@@ -12,9 +13,9 @@ import time
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
-from . import answer_context, budget, choice_premises, choice_witness, config, llm, metrics, persona_source, personal_evidence, profile, prompts
+from . import answer_context, budget, choice_jev, choice_premises, choice_witness, config, llm, metrics, persona_source, personal_evidence, profile, prompts
 
-VERSION = 'verified-source-choice-v5-semantic-witness'
+VERSION = 'verified-source-choice-v6-jev-support'
 
 
 class StrictModel(BaseModel):
@@ -627,10 +628,15 @@ async def review_entailments(verdicts, checks, entries, sources, qa, diagnostics
     return dict(checks=[dict(v, entailed=True) if v['claim_id'] in approved else v for v in verdicts['checks']])
 
 
+def provider_call_limit():
+    return (8 + int(config.CHOICE_SEMANTIC_WITNESSES and not config.FAKE)
+            + 2 * int(choice_jev.enabled()))
+
+
 async def answer(qa, memories, diagnostics):
     # Share an existing caller budget, or provide a bounded standalone answer
     # budget. Transport retries also consume these provider-call allowances.
-    calls = 8 + int(config.CHOICE_SEMANTIC_WITNESSES and not config.FAKE)
+    calls = provider_call_limit()
     scope = nullcontext() if budget.current.get() else budget.scope(seconds=240, calls=calls, tokens=128000)
     with scope:
         async with asyncio.timeout(240):
@@ -676,6 +682,10 @@ async def _answer(qa, memories, diagnostics):
         entries = [dict(letter=letter, kind='generic', status='generic', option=text,
                         primary_claim=None, claims=[], validation_errors=[], warnings=['support_format_fallback'])
                    for letter, text in letters.items()]
+    diagnostics['choice_alignment_initial'] = copy.deepcopy(entries)
+    entries = await choice_jev.reconcile(qa, entries, _cards(sources), witnesses, diagnostics,
+        judge=_judge, schema=support_schema,
+        validate=lambda result, subset: validate_assessments(result, subset, sources))
     diagnostics['choice_alignment'] = entries
     checks = entailment_checks(entries, sources, options)
     if checks:

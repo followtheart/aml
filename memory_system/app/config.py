@@ -35,6 +35,25 @@ import os
 from pathlib import Path
 
 
+def _dotenv_value(raw):
+    """Strip whitespace-delimited comments outside quotes, preserving slashes."""
+    quote = None
+    value_start = len(raw) - len(raw.lstrip())
+    for index, char in enumerate(raw):
+        if char == quote:
+            quote = None
+        elif quote is None:
+            if index == value_start and char in ('"', "'"):
+                quote = char
+            elif char == '#' and index > 0 and raw[index - 1].isspace():
+                raw = raw[:index]
+                break
+    value = raw.strip()
+    if len(value) >= 2 and value[0] in ('"', "'") and value[-1] == value[0]:
+        return value[1:-1]
+    return value
+
+
 def _load_dotenv():
     """Tiny .env loader (no dependency). Does not override existing env."""
     for cand in (Path(__file__).resolve().parents[1] / ".env",
@@ -46,7 +65,7 @@ def _load_dotenv():
             if not line or line.startswith("#") or "=" not in line:
                 continue
             k, v = line.split("=", 1)
-            os.environ.setdefault(k.strip(), v.strip().strip('"').strip("'"))
+            os.environ.setdefault(k.strip(), _dotenv_value(v))
 
 
 _load_dotenv()
@@ -149,6 +168,15 @@ CASCADE_LLM_LIMIT = max(1, int(os.environ.get('AML_CASCADE_LLM_LIMIT', '10')))
 CHOICE_ALLOW_INFERRED = os.environ.get('AML_CHOICE_ALLOW_INFERRED', '0') == '1'
 CHOICE_ENTAILMENT_REVIEW = os.environ.get('AML_CHOICE_ENTAILMENT_REVIEW', '1') == '1'
 CHOICE_SEMANTIC_WITNESSES = os.environ.get('AML_CHOICE_SEMANTIC_WITNESSES', '1') == '1'
+# JEV uses OpenRouter's Decisions API, independently of the chat provider.
+CHOICE_JEV_SUPPORT = os.environ.get('AML_CHOICE_JEV_SUPPORT', '1') == '1'
+CHOICE_JEV_MIN_CONFIDENCE = max(0.0, min(1.0, float(
+    os.environ.get('AML_CHOICE_JEV_MIN_CONFIDENCE', '0.8'))))
+JEV_API_KEY = (os.environ.get('AML_JEV_API_KEY') or
+               os.environ.get('OPENROUTER_API_KEY', ''))
+JEV_MODEL = os.environ.get('AML_JEV_MODEL', 'typesafe/jev-1.13')
+JEV_TIMEOUT_SECONDS = max(1.0, float(os.environ.get('AML_JEV_TIMEOUT_SECONDS', '20')))
+JEV_MAX_REQUEST_BYTES = max(1024, int(os.environ.get('AML_JEV_MAX_REQUEST_BYTES', '48000')))
 GRAPH_FUSION_ENABLED = os.environ.get('AML_GRAPH_FUSION_ENABLED', '1') == '1'
 GRAPH_FUSION_MAX_CANDIDATES = max(16, int(os.environ.get('AML_GRAPH_FUSION_MAX_CANDIDATES', '256')))
 LLM_TEMPERATURE = 0.0

@@ -107,15 +107,24 @@ trace 的 `query_specs` 記錄短查詢及選項對應，`expansion` 記錄擴�
 抽取校验失败本身不再把普通原文标记成敏感；显式来源／模型隐私标签仍保留。
 推断型记忆显示来源归属提示；主体、个人前提和遗忘范围由回答模型统一判断。
 
-單選題使用 `verified-source-choice-v5-semantic-witness`：先對完整可見來源做一次 LLM 語意選句，
+單選題使用 `verified-source-choice-v6-jev-support`：先對完整可見來源做一次 LLM 語意選句，
 每個選項最多保留 3 條、每條最多 320 字元的原文引用，不以關鍵詞交集預先排除候選。
 語意相關只是候選提示；後續仍獨立驗證引用歸屬、個人前提、遺忘約束及選項資格。
 語意選句最多一次呼叫、20 秒、48,000 UTF-8 bytes 提示；個別無效引用會被拒絕，其他有效引用保留。
 提供者失敗、輸出無法驗證或預算不足時回退關鍵詞匹配，詳情記於 `answer_witness_retrieval`，
 呼叫記於 `answer_calls` 的 `eval.choice_witness`。`AML_CHOICE_SEMANTIC_WITNESSES=0` 可關閉；
 `AML_FAKE=1` 使用明確標記的離線關鍵詞回退，不代表語意品質。
-回答通常需語意選句、前提支持、語意驗證三次 LLM 呼叫；有約束、復核、格式修復或多個合格選項時增加。
-獨立單選回答預算最多 9 次提供者呼叫；共享既有預算時不擴張上限。其他選擇題仍使用 `direct_evidence_v2`。
+抽取與引用校驗之後，JEV 對所有已抽取前提（包含 unsupported）獨立判斷支持關係，
+不接收初始支持標籤或標準答案。判斷分歧或信心不足時，現有 LLM 單次復核相關選項，
+重新校驗原文引用，再進入完整選項語意驗證、約束與選擇。JEV 不直接修改選項資格。
+使用 OpenRouter `typesafe/jev-1.13` 的 `POST /api/alpha/decisions`；設定 `OPENROUTER_API_KEY`
+或 `AML_JEV_API_KEY` 即可啟用，與原有聊天提供者分開。`AML_CHOICE_JEV_SUPPORT=0` 可消融。
+無 key、離線、超時、無效回應或預算不足均保留原判斷，原因記於 `answer_jev_support`。
+回答通常需語意選句、前提支持、語意驗證三次 LLM 呼叫；啟用 JEV 時另加一次 Decisions，
+分歧復核最多另加一次 LLM；有約束、其他復核、格式修復或多個合格選項時增加。
+完整設定下獨立單選回答預算最多 11 次提供者呼叫；共享既有預算時不擴張上限。
+JEV 整階段預設 20 秒，保留原始證據並限制請求大小；詳見 [JEV_SUPPORT.md](JEV_SUPPORT.md)。
+其他選擇題仍使用 `direct_evidence_v2`。
 Cross-Encoder 批次與 embedding 另計入 Search 的提供者呼叫預算。
 `choice_alignment.py` 及其 replay 腳本保留作歷史離線診斷。
 
@@ -187,6 +196,7 @@ python scripts/local_eval.py --data data/prepared/longmemeval-s.jsonl --inspect
 
 启动时会自动读取 `memory_system/.env`（也支持当前目录下的
 `.env`），已存在的系统环境变量优先，不会被文件覆盖。
+值外且由空白分隔的 `#` 行尾註解會被移除；引號內的 `#`、未分隔的字面 `#` 及 Windows 路徑反斜線會保留。
 
 ```bash
 pip install -r requirements.txt

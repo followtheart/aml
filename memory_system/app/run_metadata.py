@@ -19,6 +19,8 @@ def versions():
             'answer_policy': answer_choice.VERSION, 'file_hashes': hashes,
             'model': config.LLM_MODEL, 'embedding_model': config.EMBED_MODEL,
             'cross_encoder_model': config.CE_MODEL,
+            'jev_model': config.JEV_MODEL,
+            'jev_configured': bool(config.JEV_API_KEY),
             'settings': {key: getattr(config, key) for key in (
                 'CORE_PROFILE_MAX_ITEMS', 'QUERY_PROFILE_DIGEST',
                 'SEARCH_SOURCE_EXCERPT_CHARS', 'SEARCH_SOURCE_MESSAGES_PER_ITEM',
@@ -27,6 +29,8 @@ def versions():
                 'RERANK_REPAIR_MAX_CALLS',
                 'CASCADE_COARSE_LIMIT', 'CASCADE_FINE_LIMIT', 'CASCADE_LLM_LIMIT',
                 'CHOICE_ALLOW_INFERRED', 'CHOICE_ENTAILMENT_REVIEW', 'CHOICE_SEMANTIC_WITNESSES',
+                'CHOICE_JEV_SUPPORT', 'CHOICE_JEV_MIN_CONFIDENCE',
+                'JEV_TIMEOUT_SECONDS', 'JEV_MAX_REQUEST_BYTES',
                 'CE_BATCH_SIZE', 'CE_TIMEOUT_SECONDS', 'CE_DEADLINE_SECONDS',
                 'CE_RETRY_BATCHES', 'CE_RETRY_BATCH_SIZE',
                 'CE_MAX_DOCUMENT_BYTES', 'CE_MAX_REQUEST_BYTES', 'CE_API_FORMAT',

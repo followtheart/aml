@@ -14,7 +14,7 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field
 from . import answer_context, budget, choice_premises, choice_witness, config, llm, metrics, persona_source, personal_evidence, profile, prompts
 
-VERSION = 'verified-source-choice-v4-witness-ladder'
+VERSION = 'verified-source-choice-v5-semantic-witness'
 
 
 class StrictModel(BaseModel):
@@ -630,7 +630,8 @@ async def review_entailments(verdicts, checks, entries, sources, qa, diagnostics
 async def answer(qa, memories, diagnostics):
     # Share an existing caller budget, or provide a bounded standalone answer
     # budget. Transport retries also consume these provider-call allowances.
-    scope = nullcontext() if budget.current.get() else budget.scope(seconds=240, calls=8, tokens=128000)
+    calls = 8 + int(config.CHOICE_SEMANTIC_WITNESSES and not config.FAKE)
+    scope = nullcontext() if budget.current.get() else budget.scope(seconds=240, calls=calls, tokens=128000)
     with scope:
         async with asyncio.timeout(240):
             return await _answer(qa, memories, diagnostics)
@@ -640,7 +641,7 @@ async def _answer(qa, memories, diagnostics):
     options = qa['options']
     letters = option_map(options)
     sources, constraints = build_catalog(memories)
-    witnesses = choice_witness.build(options, sources)
+    witnesses = await choice_witness.select(qa['question'], options, sources, diagnostics)
     diagnostics.update(answer_policy=VERSION, answer_source_catalog=list(sources.values()),
                        answer_constraint_catalog=list(constraints.values()), answer_validation='pending',
                        answer_witness_prefill=witnesses)

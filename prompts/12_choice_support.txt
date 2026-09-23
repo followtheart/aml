@@ -8,7 +8,7 @@ Task-specific instructions: {task_instructions}
 Options:
 {options}
 
-Candidate witnesses (deterministic keyword matches inside the sources below; they are hints, NOT proof, and may be irrelevant; cite or ignore each one):
+Candidate witnesses (retrieval hints selected from the sources below; they are NOT proof and may be irrelevant or contradictory; cite or ignore each one):
 <witnesses>
 {witnesses}
 </witnesses>
@@ -79,7 +79,7 @@ Only mark supported when the cited sources establish that particular premise. Su
 Unsupported claims may have an empty citations list only after checking all visible sources.
 
 SOURCE CHECK BEFORE UNSUPPORTED
-Before marking a premise unsupported with an empty citations list, inspect all visible sources, not only the candidate witnesses. Candidate witnesses are keyword hints and may miss semantic expressions or persona information. Make the support decision in this stage; do not assume a later verifier will recover an unsupported claim.
+Before marking a premise unsupported with an empty citations list, inspect all visible sources, not only the candidate witnesses. Candidate witnesses may miss relevant expressions or persona information. Read their original context: semantic relevance does not establish authorship, frequency, or a specific activity. Make the support decision in this stage; do not assume a later verifier will recover an unsupported claim.
 
 If a candidate witness is a user question or statement on that topic, cite it with basis = topic_interest for an abstract question, or basis = self_report for an explicit first-person fact embedded in the question, then decide supported or unsupported in this stage. Do not defer the support decision to a later verifier.
 

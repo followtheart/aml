@@ -107,11 +107,17 @@ trace 的 `query_specs` 記錄短查詢及選項對應，`expansion` 記錄擴�
 抽取校验失败本身不再把普通原文标记成敏感；显式来源／模型隐私标签仍保留。
 推断型记忆显示来源归属提示；主体、个人前提和遗忘范围由回答模型统一判断。
 
-选择题使用 `direct_evidence_v2`，优先采用有证据支持的个性化选项，区分兴趣与拥有／习惯，
-先执行明确的遗忘约束。直接基于证据包回答，取消线上独立 alignment 和
-autopick。無補查或格式重試時，四選一使用 3 次 LLM 呼叫（規劃、列表排序、回答）；
-Cross-Encoder 批次與 embedding 另計，也納入 Search 的提供者呼叫預算。`choice_alignment.py` 和其 replay
-脚本只作为离线诊断工具保留；`validate_choice_alignment.py --answer` 重放直接回答。
+單選題使用 `verified-source-choice-v5-semantic-witness`：先對完整可見來源做一次 LLM 語意選句，
+每個選項最多保留 3 條、每條最多 320 字元的原文引用，不以關鍵詞交集預先排除候選。
+語意相關只是候選提示；後續仍獨立驗證引用歸屬、個人前提、遺忘約束及選項資格。
+語意選句最多一次呼叫、20 秒、48,000 UTF-8 bytes 提示；個別無效引用會被拒絕，其他有效引用保留。
+提供者失敗、輸出無法驗證或預算不足時回退關鍵詞匹配，詳情記於 `answer_witness_retrieval`，
+呼叫記於 `answer_calls` 的 `eval.choice_witness`。`AML_CHOICE_SEMANTIC_WITNESSES=0` 可關閉；
+`AML_FAKE=1` 使用明確標記的離線關鍵詞回退，不代表語意品質。
+回答通常需語意選句、前提支持、語意驗證三次 LLM 呼叫；有約束、復核、格式修復或多個合格選項時增加。
+獨立單選回答預算最多 9 次提供者呼叫；共享既有預算時不擴張上限。其他選擇題仍使用 `direct_evidence_v2`。
+Cross-Encoder 批次與 embedding 另計入 Search 的提供者呼叫預算。
+`choice_alignment.py` 及其 replay 腳本保留作歷史離線診斷。
 
 已有数据库在打开时自动补建原文全文索引，旧敏感标签不会被自动清除。要验证新的
 episode 写入和抽取回退行为，需要重新运行 Add／从原始数据重新评测。

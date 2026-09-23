@@ -148,6 +148,7 @@ CASCADE_LLM_LIMIT = max(1, int(os.environ.get('AML_CASCADE_LLM_LIMIT', '10')))
 # Inference remains an opt-in controlled-validation experiment.
 CHOICE_ALLOW_INFERRED = os.environ.get('AML_CHOICE_ALLOW_INFERRED', '0') == '1'
 CHOICE_ENTAILMENT_REVIEW = os.environ.get('AML_CHOICE_ENTAILMENT_REVIEW', '1') == '1'
+CHOICE_SEMANTIC_WITNESSES = os.environ.get('AML_CHOICE_SEMANTIC_WITNESSES', '1') == '1'
 GRAPH_FUSION_ENABLED = os.environ.get('AML_GRAPH_FUSION_ENABLED', '1') == '1'
 GRAPH_FUSION_MAX_CANDIDATES = max(16, int(os.environ.get('AML_GRAPH_FUSION_MAX_CANDIDATES', '256')))
 LLM_TEMPERATURE = 0.0

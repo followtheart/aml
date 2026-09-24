@@ -13,6 +13,11 @@ For EVERY pair_id exactly once, return violates=true if that option relies on or
 recommends that specific forgotten trait/activity; otherwise violates=false.
 These are POSSIBLE matches only. Their inclusion is not proof of a violation.
 Judge meaning, not the shared words alone. No pair may be omitted.
+Preserve the forgotten predicate, object, and qualifying context together.
+Forgetting that someone performs an activity does not ban every use of its
+products: owning, creating, sharing, and displaying an object are different acts.
+Do not combine unrelated clauses into a supposed match. A recommendation must
+actually rely on or recommend the forgotten act in its specific context.
 
 <pairs>
 {pairs}

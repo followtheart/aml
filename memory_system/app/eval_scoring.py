@@ -140,7 +140,8 @@ async def evaluate(qa, memories):
         else:
             pred = (await llm.complete(answer_prompt(qa, memories), stage="eval.answer")).strip()
     except Exception as exc:
-        return "", 0.0, {**diagnostics, "error_stage": "answer", "error_type": type(exc).__name__}
+        return "", 0.0, {**diagnostics, "answer_status": "error", "error_stage": "answer",
+                         "error_type": type(exc).__name__, "error_detail": str(exc)[:2000]}
     if scoring == "choice":
         return pred, choice_score(pred, qa["gold_labels"], qa["qa_type"]), diagnostics
     try:

@@ -28,6 +28,20 @@ _ASSERTION = re.compile(r'\b(?:you|yourself|I|we|they|he|she)\b', re.I)
 _IMPERATIVE = re.compile(r'^(?:connect|take|give|listen|acknowledge|remind|arrange|mix|add|choose|keep)\b', re.I)
 
 
+def option_spans(letter, option):
+    """Stable clause IDs select original text; the full option retains its scope."""
+    offset = re.match(r'\s*\(?[A-Z][.)]\s*', option)
+    start = offset.end() if offset else 0
+    rows = [dict(id=f'{letter}:0', text=option[start:], start=start, end=len(option))]
+    for match in re.finditer(r'[^,;.!?\n]+(?:[,;.!?]+|$)', option[start:]):
+        text = match.group().strip()
+        if not text or text == rows[0]['text']:
+            continue
+        left = start + match.start() + len(match.group()) - len(match.group().lstrip())
+        rows.append(dict(id=f'{letter}:{len(rows)}', text=text, start=left, end=left + len(text)))
+    return rows
+
+
 def canonical_span(claim, option):
     """Recover a unique near-verbatim span, rejecting polarity/subject/time edits.
 
@@ -75,6 +89,16 @@ def is_suggestion(claim, option):
     # Universal background wording carries no distinguishing personal fact.
     if _BACKGROUND.fullmatch(claim.strip()) and _ADVICE.search(option[:match.end()]):
         return True
+    # Future modal advice can include "before bed" or "when needed". Keep
+    # actual past ability, possession, negation and causal personal qualifiers.
+    modal = re.match(r'^(?:you\s+)?(?:could|should|might)\s+', claim, re.I)
+    if modal:
+        tail = claim[modal.end():]
+        past = re.search(r'\b(?:last|formerly|earlier|ago|yesterday|used to)\b|'
+                         r'\bbefore\s+(?:the|your|my|his|her)\b', tail, re.I)
+        if not past and not _FACT_TAIL.search(tail) and not re.search(r'\b(?:since|because|given)\b',
+                option[:match.start()].split(',')[-1], re.I):
+            return True
     # Only discard advice complements. A declarative subject or a historical
     # qualifier stays a premise even when embedded inside a recommendation.
     if _HISTORY.search(claim):

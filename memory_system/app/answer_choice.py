@@ -4,6 +4,7 @@ Model judgments are proposals: provenance, quoted spans, attribution safeguards,
 constraint scope, and the final admissible option set are checked locally.
 """
 import asyncio
+import copy
 from contextlib import nullcontext
 import hashlib
 import json
@@ -11,10 +12,11 @@ import re
 import time
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from . import answer_context, budget, choice_premises, choice_witness, config, llm, metrics, persona_source, personal_evidence, profile, prompts
 
-VERSION = 'verified-source-choice-v5-semantic-witness'
+VERSION = 'verified-source-choice-v6-local-repair'
+ABSTAIN = 'ABSTAIN'
 
 
 class StrictModel(BaseModel):
@@ -29,7 +31,8 @@ class Citation(StrictModel):
 
 
 class Claim(StrictModel):
-    text: str = Field(min_length=1, description='Exact option substring asserting ONE pre-existing personal fact. Split compound premises into separate claims. Never a new suggestion or recommendation.')
+    text: str = Field(default='', description='Exact option substring asserting ONE pre-existing personal fact. May be omitted when span_id selects original text. Never paraphrase.')
+    span_id: str | None = Field(default=None, description='Optional original option span ID; text is reconstructed locally. It must belong to this option.')
     status: Literal['supported', 'unsupported', 'inferred']
     premise_type: Literal['interest', 'ownership', 'condition', 'habit', 'experience', 'occupation', 'location', 'unknown'] = 'unknown'
     reason: Literal['no_source', 'source_too_weak', 'contradicted', 'third_party', 'none'] = 'none'
@@ -323,9 +326,9 @@ def _option_status(kind, claims, errors, option_text):
     return 'partial' if primary is not None and verified[primary] else 'unsupported'
 
 
-def validate_assessments(payload, options, sources):
+def validate_assessments(payload, options, sources, *, expected=None):
     parsed = Assessments.model_validate(payload)
-    expected = option_map(options)
+    expected = option_map(options) if expected is None else expected
     if len(parsed.options) != len(expected) or {o.letter for o in parsed.options} != set(expected):
         raise ValueError('Assess every option exactly once')
     entries = {}
@@ -335,6 +338,13 @@ def validate_assessments(payload, options, sources):
             errors.append('missing_personal_claim')
         for claim in option.claims:
             invalid = []
+            if claim.span_id is not None:
+                spans = {s['id']: s['text'] for s in choice_premises.option_spans(option.letter, expected[option.letter])}
+                if claim.span_id not in spans or (claim.text and claim.text != spans[claim.span_id]):
+                    raise ValueError(f'{option.letter}: invalid or mismatched span_id {claim.span_id}')
+                claim = claim.model_copy(update={'text': spans[claim.span_id]})
+            if not claim.text.strip():
+                raise ValueError(f'{option.letter}: supply text or a valid span_id')
             exact, repaired = choice_premises.canonical_span(claim.text, expected[option.letter])
             if exact is None:
                 invalid.append('claim_not_in_option')
@@ -365,7 +375,9 @@ def validate_assessments(payload, options, sources):
             if status == 'supported' and anchors and all(c.get('strength_gap') for c in anchors):
                 status = 'inferred'
                 warnings.append('strength_gap')
-            claims.append(dict(text=exact or claim.text, premise_type=claim.premise_type, reason=claim.reason,
+            offset = expected[option.letter].find(exact) if exact else -1
+            claims.append(dict(text=exact or claim.text, option_span=(dict(start=offset, end=offset + len(exact))
+                               if exact else None), premise_type=claim.premise_type, reason=claim.reason,
                                status='unsupported' if invalid else status, proposed_status=claim.status,
                                citations=valid, dropped_citations=dropped, validation_errors=invalid))
         kind = 'generic' if removed and not claims else option.kind
@@ -374,7 +386,8 @@ def validate_assessments(payload, options, sources):
         status = _option_status(kind, claims, errors, expected[option.letter])
         entries[option.letter] = dict(letter=option.letter, kind=kind, status=status,
                                      option=expected[option.letter], primary_claim=_primary_index(claims, expected[option.letter]),
-                                     claims=claims, removed_claims=removed, validation_errors=errors, warnings=list(dict.fromkeys(warnings)))
+                                     claims=claims, removed_claims=removed, validation_errors=errors,
+                                     validation_status='invalid' if errors else 'valid', warnings=list(dict.fromkeys(warnings)))
     return [entries[k] for k in expected]
 
 
@@ -392,7 +405,19 @@ def _topic_terms(text):
 def _scope_overlap(constraint, option_span):
     wanted = _topic_terms(constraint)
     hits = wanted & _topic_terms(option_span)
-    return bool(wanted and len(hits) >= min(2, len(wanted)) and len(hits) / len(wanted) >= .5)
+    if not (wanted and len(hits) >= min(2, len(wanted)) and len(hits) / len(wanted) >= .5):
+        return False
+    # Creating a thing is not the same activity as sharing/displaying/reading
+    # it. Guard these explicit action predicates before semantic adjudication;
+    # unrecognised predicates still go to the scoped semantic judge.
+    actions = (
+        (r'\bI (?:take|shoot|capture) (?:photos|pictures|photographs)\b',
+         r'\b(?:(?:take|takes|taking|took|taken|shoot|shooting|shot|capture[ds]?|capturing)\b.{0,40}\b(?:photos?|pictures?|photographs?)|photograph(?:s|ed|ing|y)?)\b'),
+        (r'\bI (?:write|compose|author)\b', r'\b(?:writ(?:e|es|ing|ten)|wrote|compos(?:e|es|ed|ing)|author(?:s|ed|ing)?)\b'),
+        (r'\bI (?:cook|bake)\b', r'\b(?:cook(?:s|ed|ing)?|bak(?:e|es|ed|ing))\b'),
+    )
+    return all(not re.search(predicate, constraint, re.I) or re.search(activity, option_span, re.I)
+               for predicate, activity in actions)
 
 
 def validate_constraints(payload, options, constraints):
@@ -418,15 +443,30 @@ def validate_constraints(payload, options, constraints):
 
 
 def eligible_choices(entries, blocked):
-    """Fully verified personal options first, then core-premise-verified ones,
-    then generic advice. Structurally invalid or blocked options never qualify."""
-    eligible = [e for e in entries if e['letter'] not in blocked and not e.get('validation_errors')]
-    for tier in ('supported', 'partial', 'inferred', 'generic'):
+    """Compare all verified personal cores for relevance, then use generic advice.
+
+    An unrelated fully supported premise must not hide a relevant partial one.
+    Contradictions and unresolved structure remain hard exclusions.
+    """
+    eligible = [e for e in entries if e['letter'] not in blocked and not e.get('validation_errors')
+                and not any(c.get('reason') == 'contradicted' for c in e['claims'])]
+    personal = [e['letter'] for e in eligible if e['status'] in ('supported', 'partial')]
+    if personal:
+        return personal
+    for tier in ('inferred', 'generic'):
         letters = [e['letter'] for e in eligible if e.get('selection_tier', e['status']) == tier
                    and (tier != 'inferred' or config.CHOICE_ALLOW_INFERRED)]
         if letters:
             return letters
     return []
+
+
+def _recoverable(claim):
+    # A quote is a prerequisite, never a semantic verdict. Only an independent
+    # premise AND whole-option approval may recover a contradictory proposal.
+    return (claim['status'] == 'unsupported' and not claim['validation_errors']
+            and claim.get('reason') in ('none', 'no_source', 'source_too_weak')
+            and any(r['anchor'] and not r.get('strength_gap') for r in claim['citations']))
 
 
 def entailment_checks(entries, sources, options):
@@ -451,11 +491,13 @@ def entailment_checks(entries, sources, options):
                     and abs(s['message_index'] - a['message_index']) <= 2 for a in anchors)]
     checks = []
     for e in entries:
+        if e.get('validation_status') == 'unresolved':
+            continue
         checks.append(dict(claim_id=f"{e['letter']}:option", check_type='option',
                            option=letters[e['letter']], claimed_kind=e['kind'],
                            sources=citations(e['claims'])))
         for index, claim in enumerate(e['claims']):
-            if claim['status'] in ('supported', 'inferred'):
+            if claim['status'] in ('supported', 'inferred') or _recoverable(claim):
                 checks.append(dict(claim_id=f"{e['letter']}:{index}", check_type='premise',
                                    claim=claim['text'], premise_type=claim.get('premise_type', 'unknown'),
                                    proposed_status=claim['status'], sources=citations([claim])))
@@ -471,13 +513,19 @@ def validate_entailments(payload, entries, checks):
         raise ValueError('Verify every complete option exactly once')
     rejected = {c.claim_id for c in parsed.checks if not c.entailed}
     option_text = {c['claim_id'].split(':')[0]: c['option'] for c in checks if c['check_type'] == 'option'}
-    # The callers retain the source checks; semantic verification can only
-    # demote a claim. It cannot invent citations or promote unsupported options.
+    # Semantic verification cannot invent citations. Recovery needs an existing
+    # provenance-checked anchor and two independent semantic checks.
     for entry in entries:
+        if entry.get('validation_status') == 'unresolved':
+            continue
         for index, claim in enumerate(entry['claims']):
             cid = f"{entry['letter']}:{index}"
             if cid in expected:
                 claim['entailment_verified'] = cid not in rejected
+            if (cid in expected and cid not in rejected and _recoverable(claim)
+                    and f"{entry['letter']}:option" not in rejected):
+                claim['status'] = 'supported'
+                claim['recovery'] = 'anchor_and_premise_and_option_verified'
             if cid in rejected:
                 claim['status'] = 'unsupported'
                 claim['validation_errors'].append('not_entailed')
@@ -543,11 +591,15 @@ def _cards(catalog):
     return [dict(id=c['id'], role=_display_role(c), text=c['text'], timestamp=c.get('timestamp')) for c in catalog.values()]
 
 
-async def _judge(prompt, schema, validator, stage, diagnostics, *, attempts=2):
-    """One bounded repair from the original input; never trust malformed output."""
+async def _judge(prompt, schema, validator, stage, diagnostics, *, attempts=2, repair_request=None):
+    """One bounded repair with concrete errors and the preceding proposal."""
+    feedback = ''
     for attempt in range(attempts):
         actual = prompt + ('\nReturn ONLY the exact required schema with every required field and no extra fields. '
-                           'Copy any requested claims and quotations verbatim. Do not add commentary.' if attempt else '')
+                           'Copy requested claims and quotations verbatim. Correct the reported errors. '
+                           'For support extraction, previously accepted options are frozen; repair only invalid options. '
+                           'Do not add commentary.\n'
+                           '<repair_feedback>' + feedback + '</repair_feedback>' if attempt else '')
         call = dict(stage=stage + ('.repair' if attempt else ''),
                     prompt_sha256=hashlib.sha256(actual.encode()).hexdigest(), attempt=attempt + 1)
         diagnostics.setdefault('answer_calls', []).append(call)
@@ -563,20 +615,91 @@ async def _judge(prompt, schema, validator, stage, diagnostics, *, attempts=2):
                 malformed = malformed or isinstance(cause, metrics.ResponseParseError)
                 cause = cause.__cause__
             if malformed:
-                call.update(status='invalid', error_type=type(exc).__name__)
+                call.update(status='invalid', error_type=type(exc).__name__, error_detail=str(exc)[:2000],
+                            failure_phase='provider_parse')
+                feedback = json.dumps(dict(error=call['error_detail']))
                 if attempt == attempts - 1:
                     raise ValueError('Malformed structured judgment after bounded repair') from exc
                 continue
             call.update(status='error', error_type=type(exc).__name__)
             raise
         try:
+            call['response'] = result
             validated = validator(result)
             call.update(status='ok')
             return validated
         except (ValueError, TypeError, KeyError) as exc:
-            call.update(status='invalid', error_type=type(exc).__name__)
+            detail = (exc.errors(include_url=False, include_input=False, include_context=False)
+                      if isinstance(exc, ValidationError) else str(exc))
+            call.update(status='invalid', error_type=type(exc).__name__, error_detail=detail,
+                        failure_phase='post_json_validator')
+            feedback = json.dumps(dict(errors=detail, previous_response=result), ensure_ascii=False)
             if attempt == attempts - 1:
                 raise
+            if repair_request is not None:
+                prompt, schema, feedback = repair_request(result, detail)
+
+
+async def assess_support(prompt, schema, options, sources, diagnostics):
+    """Freeze valid options; a bad sibling can never erase their evidence."""
+    expected, accepted, failures = option_map(options), {}, {}
+
+    def scoped_schema(letters):
+        result = copy.deepcopy(schema)
+        result['properties']['options'].update(minItems=len(letters), maxItems=len(letters))
+        result['$defs']['Assessment']['properties']['letter']['enum'] = letters
+        return result
+
+    def repair_request(previous, detail):
+        pending = [k for k in expected if k not in accepted]
+        scoped = prompt.replace('Options:\n' + '\n'.join(options),
+                                'Options:\n' + '\n'.join(expected[k] for k in pending), 1)
+        # Do not put an already accepted A back into the repair example when
+        # the actual error is missing B/C/D. Constrain the schema as well.
+        previous_rows = previous.get('options', []) if isinstance(previous, dict) else []
+        feedback = dict(required_options=pending, accepted_options=list(accepted), errors=failures,
+                        previous_invalid_options=[r for r in previous_rows
+                                                  if isinstance(r, dict) and r.get('letter') in pending])
+        scoped += '\nAssess ONLY these option letters, exactly once each: ' + ', '.join(pending)
+        return scoped, scoped_schema(pending), json.dumps(feedback, ensure_ascii=False)
+
+    def validate(result):
+        rows = result.get('options') if isinstance(result, dict) else None
+        if not isinstance(rows, list) or set(result) != {'options'}:
+            raise ValueError('Expected an object containing only the options list')
+        for letter, text in expected.items():
+            if letter in accepted:
+                continue
+            matches = [r for r in rows if isinstance(r, dict) and r.get('letter') == letter]
+            try:
+                if len(matches) != 1:
+                    raise ValueError('Expected this option exactly once')
+                entry = validate_assessments({'options': matches}, [text], sources, expected={letter: text})[0]
+                if entry['validation_errors']:
+                    raise ValueError(json.dumps(dict(option_errors=entry['validation_errors'],
+                        claims=[dict(index=i, text=c['text'], errors=c['validation_errors'])
+                                for i, c in enumerate(entry['claims']) if c['validation_errors']])))
+                accepted[letter] = entry
+                failures.pop(letter, None)
+            except (ValueError, TypeError, KeyError) as exc:
+                failures[letter] = (exc.errors(include_url=False, include_input=False, include_context=False)
+                                    if isinstance(exc, ValidationError) else str(exc))
+        if len(accepted) != len(expected):
+            raise ValueError(json.dumps(dict(accepted_options=list(accepted), invalid_options=failures), ensure_ascii=False))
+        return [accepted[k] for k in expected]
+
+    try:
+        await _judge(prompt, scoped_schema(list(expected)), validate, 'eval.choice_support', diagnostics,
+                     repair_request=repair_request)
+    except (ValueError, TypeError, KeyError):
+        pass  # Failed options remain unresolved; never relabel them as generic.
+    diagnostics['answer_support_validation'] = dict(
+        status='valid' if len(accepted) == len(expected) else 'partial' if accepted else 'invalid',
+        accepted_options=list(accepted), unresolved_options=[k for k in expected if k not in accepted],
+        errors=failures)
+    return [accepted.get(k) or dict(letter=k, kind='personal', status='unsupported', option=text,
+                primary_claim=None, claims=[], validation_status='unresolved',
+                validation_errors=['support_unresolved'], warnings=[]) for k, text in expected.items()]
 
 
 def _verdicts(payload, checks):
@@ -650,32 +773,19 @@ async def _answer(qa, memories, diagnostics):
         task_instructions=qa.get('system_prompt', ''), options='\n'.join(options),
         witnesses=choice_witness.render(witnesses),
         sources=json.dumps(_cards(sources), ensure_ascii=False))
+    support_prompt += ('\nOriginal option spans (optional exact-text references; choose span_id instead of rewriting '
+        'a clause, omit text when using the ID; keep subject, negation and time from the complete option):\n'
+        + json.dumps([s for letter, text in letters.items() for s in choice_premises.option_spans(letter, text)],
+                     ensure_ascii=False))
     if config.CHOICE_ALLOW_INFERRED:
         support_prompt += ('\nControlled inference is enabled: status inferred is allowed only for a strongly '
             'implied interest or experience with a valid current-user anchor. Never infer ownership, '
             'diagnosis, frequency, expertise, a specific subtype or a denied/hypothetical event. '
             'Prefer unsupported when the implication is merely possible.')
-    def validate_support(result):
-        entries = validate_assessments(result, options, sources)
-        if any(set(e['validation_errors']) & {'generic_with_personal_claims', 'missing_personal_claim'}
-               or any(c['proposed_status'] == 'supported' and 'claim_not_in_option' in c['validation_errors']
-                      for c in e['claims']) for e in entries):
-            raise ValueError('Use exact personal premises only; generic advice has no personal claims')
-        return entries
-    try:
-        support_schema = Assessments.model_json_schema()
-        if not config.CHOICE_ALLOW_INFERRED:
-            support_schema['$defs']['Claim']['properties']['status']['enum'] = ['supported', 'unsupported']
-        entries = await _judge(support_prompt, support_schema,
-            validate_support, 'eval.choice_support', diagnostics)
-    except (ValueError, TypeError, KeyError) as exc:
-        # A third malformed extraction adds no value. Independently check the
-        # complete options as generic-only candidates, with NO personal support.
-        # Only a verified generic option can survive; constraints still run.
-        diagnostics['answer_support_fallback'] = dict(mode='generic_only', error_type=type(exc).__name__)
-        entries = [dict(letter=letter, kind='generic', status='generic', option=text,
-                        primary_claim=None, claims=[], validation_errors=[], warnings=['support_format_fallback'])
-                   for letter, text in letters.items()]
+    support_schema = Assessments.model_json_schema()
+    if not config.CHOICE_ALLOW_INFERRED:
+        support_schema['$defs']['Claim']['properties']['status']['enum'] = ['supported', 'unsupported']
+    entries = await assess_support(support_prompt, support_schema, options, sources, diagnostics)
     diagnostics['choice_alignment'] = entries
     checks = entailment_checks(entries, sources, options)
     if checks:
@@ -696,8 +806,10 @@ async def _answer(qa, memories, diagnostics):
     eligible = eligible_choices(entries, blocked)
     diagnostics['answer_eligible_options'] = eligible
     if not eligible:
-        diagnostics['answer_validation'] = 'no_supported_or_generic_option'
-        raise ValueError('No admissible answer after source and constraint checks')
+        unresolved = diagnostics['answer_support_validation']['unresolved_options']
+        diagnostics.update(answer_validation='abstained', answer_status='abstained',
+                           answer_abstention_reason='support_unresolved' if unresolved else 'no_admissible_option')
+        return ABSTAIN
     if len(eligible) == 1:
         selected = eligible[0]
         diagnostics['answer_selection'] = 'unique_eligible'
@@ -715,5 +827,5 @@ async def _answer(qa, memories, diagnostics):
             return result['answer']
         selected = await _judge(prompt, schema, validate, 'eval.choice_select', diagnostics)
         diagnostics['answer_selection'] = 'verified_tie_selection'
-    diagnostics.update(answer_validation='validated', answer_selected=selected)
+    diagnostics.update(answer_validation='validated', answer_status='answered', answer_selected=selected)
     return selected

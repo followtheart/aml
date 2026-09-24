@@ -84,10 +84,13 @@ class CitationRepairs(OfflineCase):
         checks = self.gate.entailment_checks(entries, sources, options)
         verdicts = dict(checks=[dict(claim_id=c['claim_id'], entailed=True) for c in checks])
         self.gate.validate_entailments(verdicts, entries, checks)
-        self.assertEqual(entries[0]['status'], 'partial')
+        self.assertEqual(entries[0]['status'], 'supported')
         self.assertEqual(entries[0]['selection_tier'], 'supported')
+        self.assertEqual(entries[0]['claims'][1]['recovery'], 'anchor_and_premise_and_option_verified')
         data['options'][0]['claims'][1]['citations'] = []
         entries = self.gate.validate_assessments(data, options, sources)
+        checks = self.gate.entailment_checks(entries, sources, options)
+        verdicts = dict(checks=[dict(claim_id=c['claim_id'], entailed=True) for c in checks])
         self.gate.validate_entailments(verdicts, entries, checks)
         self.assertEqual(entries[0]['selection_tier'], 'partial')
 
@@ -231,16 +234,16 @@ class AnswerFlowRepairs(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(mock.await_count, 2)
         self.assertEqual(diagnostics['answer_entailment_review']['status'], 'skipped_budget')
 
-    async def test_format_fallback_verifies_whole_options_before_selecting_generic(self):
-        mock = staged_mock({'options': []}, {'options': []}, lambda p: entailment_response(p, {'A:option'}))
+    async def test_unresolved_support_never_manufactures_generic_options(self):
+        mock = staged_mock({'options': []}, {'options': []})
         diagnostics = {}
         with patch.object(llm, 'complete_json', mock):
-            self.assertEqual(await self.gate.answer(self.qa, [], diagnostics), 'B')
-        self.assertEqual(mock.await_count, 3)
-        self.assertEqual(diagnostics['answer_support_fallback']['mode'], 'generic_only')
-        self.assertIn(self.qa['options'][0], mock.call_args_list[2].args[0])
+            self.assertEqual(await self.gate.answer(self.qa, [], diagnostics), 'ABSTAIN')
+        self.assertEqual(mock.await_count, 2)
+        self.assertEqual(diagnostics['answer_support_validation']['unresolved_options'], ['A', 'B'])
+        self.assertNotIn('answer_support_fallback', diagnostics)
 
-    async def test_provider_parse_failure_repairs_then_uses_verified_generic_fallback(self):
+    async def test_provider_parse_failure_repairs_then_abstains(self):
         from app import metrics
         async def respond(prompt, **kwargs):
             if kwargs['stage'].startswith('eval.choice_support'):
@@ -250,9 +253,11 @@ class AnswerFlowRepairs(unittest.IsolatedAsyncioTestCase):
                     raise llm.LLMError('Malformed tool output') from exc
             return entailment_response(prompt, {'A:option'})
         mock = AsyncMock(side_effect=respond)
+        diagnostics = {}
         with patch.object(llm, 'complete_json', mock):
-            self.assertEqual(await self.gate.answer(self.qa, [], {}), 'B')
-        self.assertEqual(mock.await_count, 3)
+            self.assertEqual(await self.gate.answer(self.qa, [], diagnostics), 'ABSTAIN')
+        self.assertEqual(mock.await_count, 2)
+        self.assertEqual(diagnostics['answer_calls'][0]['failure_phase'], 'provider_parse')
 
     async def test_transport_failure_is_not_treated_as_malformed_support(self):
         mock = AsyncMock(side_effect=llm.LLMError('Provider unavailable'))
@@ -267,11 +272,10 @@ class AnswerFlowRepairs(unittest.IsolatedAsyncioTestCase):
         def constraints(prompt):
             pairs = json.loads(re.search(r'<pairs>\s*(.*?)\s*</pairs>', prompt, re.S)[1])
             return dict(decisions=[dict(pair_id=p['pair_id'], violates=True) for p in pairs])
-        mock = staged_mock({'options': []}, {'options': []},
-                           lambda p: entailment_response(p, {'A:option'}), constraints)
+        mock = staged_mock({'options': []}, {'options': []}, constraints)
         diagnostics = {}
-        with patch.object(llm, 'complete_json', mock), self.assertRaises(ValueError):
-            await self.gate.answer(self.qa, packet, diagnostics)
+        with patch.object(llm, 'complete_json', mock):
+            self.assertEqual(await self.gate.answer(self.qa, packet, diagnostics), 'ABSTAIN')
         self.assertIn('B', diagnostics['answer_blocked_options'])
 
 

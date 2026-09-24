@@ -282,7 +282,7 @@ class AssessmentTests(OfflineCase):
         self.assertEqual(entries[0]['status'], 'unsupported')
         self.assertEqual(self.gate.eligible_choices(entries, set()), ['B'])
 
-    def test_fully_supported_option_outranks_partial_one(self):
+    def test_verified_personal_cores_compete_across_evidence_tiers(self):
         packet = seal(memory('I have twin boys.', mid='boys'), memory('I own a camera.', mid='camera'))
         sources, _ = self.gate.build_catalog(packet)
         sid = {source['text']: key for key, source in sources.items()}
@@ -298,7 +298,7 @@ class AssessmentTests(OfflineCase):
             dict(letter='C', kind='generic', claims=[])]}
         entries = self.gate.validate_assessments(data, options, sources)
         self.assertEqual([e['status'] for e in entries], ['partial', 'supported', 'generic'])
-        self.assertEqual(self.gate.eligible_choices(entries, set()), ['B'])
+        self.assertEqual(self.gate.eligible_choices(entries, set()), ['A', 'B'])
 
     def test_missing_duplicate_unknown_option_and_extra_fields_are_rejected(self):
         sources, _ = self.catalog('I have twin boys.')
@@ -652,11 +652,13 @@ class AnswerFlowTests(OfflineCase, unittest.IsolatedAsyncioTestCase):
         self.assertEqual([c.kwargs['stage'] for c in mock.call_args_list][-2:],
                          ['eval.choice_entailment', 'eval.choice_entailment.repair'])
 
-    async def test_malformed_support_and_generic_fallback_both_fail_boundedly(self):
+    async def test_malformed_support_abstains_without_inventing_generic_evidence(self):
         mock = AsyncMock(return_value={'options': []})
-        with patch.object(llm, 'complete_json', mock), self.assertRaises(ValueError):
-            await self.gate.answer(self.qa(), [], {})
-        self.assertEqual(mock.await_count, 4)
+        diagnostics = {}
+        with patch.object(llm, 'complete_json', mock):
+            self.assertEqual(await self.gate.answer(self.qa(), [], diagnostics), 'ABSTAIN')
+        self.assertEqual(mock.await_count, 2)
+        self.assertEqual(diagnostics['answer_abstention_reason'], 'support_unresolved')
 
     async def test_no_supported_or_generic_choice_fails_explicitly(self):
         qa = self.qa(['A. Since you own a camera, take photos.'])
@@ -664,8 +666,9 @@ class AnswerFlowTests(OfflineCase, unittest.IsolatedAsyncioTestCase):
             dict(text='you own a camera', status='unsupported', citations=[])])]}
         diagnostics = {}
         mock = staged_mock(data, entailment_response)
-        with patch.object(llm, 'complete_json', mock), self.assertRaises(ValueError):
-            await self.gate.answer(qa, [], diagnostics)
+        with patch.object(llm, 'complete_json', mock):
+            self.assertEqual(await self.gate.answer(qa, [], diagnostics), 'ABSTAIN')
+        self.assertEqual(diagnostics['answer_abstention_reason'], 'no_admissible_option')
         self.assertEqual(diagnostics['answer_eligible_options'], [])
         self.assertNotEqual(diagnostics['answer_validation'], 'validated')
         self.assertEqual([c.kwargs['stage'] for c in mock.call_args_list],
@@ -736,14 +739,14 @@ class AnswerFlowTests(OfflineCase, unittest.IsolatedAsyncioTestCase):
             dict(letter='B', kind='personal', claims=assessment('you have twin boys',
                  next(iter(sources)), 'I have twin boys.')['options'][0]['claims']),
             dict(letter='C', kind='generic', claims=[])]}
-        mock = staged_mock(payload, entailment_response)
+        mock = staged_mock(payload, payload, entailment_response)
         diagnostics = {}
         with patch.object(llm, 'complete_json', mock):
             self.assertEqual(await self.gate.answer(qa, packet, diagnostics), 'B')
         self.assertEqual([c.kwargs['stage'] for c in mock.call_args_list],
-                         ['eval.choice_support', 'eval.choice_entailment'])
-        for option in qa['options']:
-            self.assertIn(option, mock.call_args_list[1].args[0])
+                         ['eval.choice_support', 'eval.choice_support.repair', 'eval.choice_entailment'])
+        self.assertEqual(diagnostics['answer_support_validation']['unresolved_options'], ['A'])
+        self.assertNotIn('A:option', mock.call_args_list[2].args[0])
         self.assertEqual(diagnostics['answer_eligible_options'], ['B'])
 
     async def test_missing_entailment_check_repairs_once_and_cannot_be_silently_skipped(self):

@@ -4,7 +4,7 @@ from functools import lru_cache
 from pathlib import Path
 from . import answer_choice, config
 
-SEARCH_POLICY = 'graph_cascade_v11-option-coverage'
+SEARCH_POLICY = 'graph_cascade_v12-user-evidence-budget'
 
 
 @lru_cache(maxsize=1)

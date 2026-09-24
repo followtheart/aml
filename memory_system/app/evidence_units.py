@@ -84,19 +84,27 @@ def build(candidate, sources, evidence, queries, body, byte_limit):
         if key in by_key and item.get('quote') and item['quote'] in by_key[key].get('content', ''):
             required.setdefault(key, []).append(item['quote'])
     query = ' '.join(queries)
-    ordered = sorted(by_key.items(), key=lambda p: (p[0] in required, pe.source_score(p[1], query)), reverse=True)
+    ordered = sorted(by_key.items(), key=lambda p: (
+        p[0] in required, p[1].get('role') == 'user', pe.source_score(p[1], query)), reverse=True)
     visible, hidden, optional = [], [], 0
-    for key, source in ordered:
+    optional_limit = max(config.SEARCH_SOURCE_MESSAGES_PER_ITEM, len(queries))
+    for position, (key, source) in enumerate(ordered):
         budget.check()
         mandatory = key in required
-        if not mandatory and optional >= max(config.SEARCH_SOURCE_MESSAGES_PER_ITEM, len(queries)):
+        if not mandatory and optional >= optional_limit:
             hidden.append(dict(source, content=''))
             continue
-        # Leave capacity for the other required sources and query facets.
-        remaining_required = sum(k in required for k, _ in ordered if k != key and
-                                 not any((s['request_id'], s['message_index']) == k for s in visible))
-        share = max(128, available // max(1, remaining_required + 1))
-        rows = passages(source, queries, required.get(key, []), share)
+        # Reserve room for other user messages before optional assistant prose.
+        # Mandatory evidence remains atomic, regardless of its role.
+        later = ordered[position + 1:]
+        remaining_required = sum(k in required for k, _ in later)
+        remaining_users = (0 if mandatory else min(max(0, optional_limit - optional - 1),
+                              sum(k not in required and s.get('role') == 'user' for k, s in later)))
+        share = max(128, available // max(1, remaining_required + remaining_users + 1))
+        if not mandatory and source.get('role') != 'user':
+            share = min(share, 1024)
+        overhead = len(answer_context.with_evidence('', [dict(source, content='')]).encode('utf-8')) + 64
+        rows = passages(source, queries, required.get(key, []), max(0, share - overhead))
         rendered = answer_context.with_evidence('', rows)
         cost = len(rendered.encode('utf-8'))
         if not rows or cost > available:

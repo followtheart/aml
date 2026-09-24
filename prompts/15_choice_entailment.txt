@@ -43,6 +43,10 @@ personal premise from these sources alone, use false. Never add missing context 
 For an option check, wholly generic advice has NO personal premises to prove:
 return true even when sources are empty, unrelated, or the advice is less useful.
 For a premise check, unrelated or empty sources must result in false.
+A proposed_status of unsupported is an earlier hypothesis, not a verdict.
+Independently verify these premises against the cited original user anchors;
+return true only when those anchors establish the actual premise. An exact
+quotation alone is insufficient. Do not infer stronger facts from topic overlap.
 context_neighbors are original visible excerpts from the same request, within
 two messages of the cited source. They may resolve "this project", "it" or "they"
 but are NOT new personal anchors. A preceding assistant explanation may identify

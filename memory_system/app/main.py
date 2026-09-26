@@ -1,7 +1,11 @@
 """FastAPI entrypoint: /add, /search, /health (AML synchronous contract)."""
 import logging
+import os
+from pathlib import Path
 
 from fastapi import Depends, FastAPI, Header, HTTPException
+from .errors import InvalidRequest
+from .access_log import AccessLogMiddleware
 
 from . import (add_pipeline, config, experience, memory_debug, schemas,
                search_debug, search_pipeline, store)
@@ -9,6 +13,8 @@ from . import (add_pipeline, config, experience, memory_debug, schemas,
 logging.basicConfig(level=logging.INFO)
 
 app = FastAPI(title="AML Memory System", version="0.4.0")
+app.add_middleware(AccessLogMiddleware, path=os.environ.get(
+    "AML_ACCESS_LOG", str(Path(__file__).resolve().parents[1] / "logs" / "access.jsonl")))
 _store = store.Store()
 
 
@@ -26,10 +32,12 @@ def health():
 
 @app.post("/add", response_model=schemas.AddResponse,
           dependencies=[Depends(auth)])
-async def add(req: schemas.AddRequest):
+async def add(req: schemas.HTTPAddRequest):
     try:
         result = await add_pipeline.run_add(_store, req)
-    except Exception as e:  # never return 202; retryable 5xx only
+    except InvalidRequest as e:
+        raise HTTPException(status_code=422, detail={"reason": str(e)}) from e
+    except Exception as e:  # provider and internal failures remain retryable
         raise HTTPException(status_code=500,
                             detail={"reason": f"add failed: {e}"})
     # contract: echo ids byte-for-byte; ULM §2.5: return the write revision
@@ -41,7 +49,7 @@ async def add(req: schemas.AddRequest):
 
 @app.post("/search", response_model=schemas.SearchResponse,
           dependencies=[Depends(auth)])
-async def search(req: schemas.SearchRequest):
+async def search(req: schemas.HTTPSearchRequest):
     try:
         return await search_pipeline.run_search(_store, req)
     except Exception as e:

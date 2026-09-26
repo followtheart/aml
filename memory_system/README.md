@@ -97,7 +97,7 @@ CE 不可用時明確記錄降級；LLM 失敗時保留 CE 順序，兩者均不
 `AML_EVIDENCE_MIN_RELEVANCE` 僅留給歷史回放，對目前線上級聯無效。
 完整設定、限制與驗證見 [GRAPH_CASCADE_IMPLEMENTATION.md](GRAPH_CASCADE_IMPLEMENTATION.md)。
 画像按查询相关性召回；相同偏好合并展示并保留全部来源 ID。遗忘规则优先装包，
-计入总字节预算但不占普通证据 `top_k`，因此返回条数可能超过 `top_k`。
+计入总字节预算和 `top_k` 总条数上限，因此返回条数始终不超过 `top_k`。
 来源节录按相关性选取，正文优先于短润色请求，保留引文、邻近语境和消息角色。
 預覽與最終節錄使用相同短查詢，按句子局部匹配密度排序，避免長篇 persona 靠散落詞彙占位。
 同段的 `Marcus wrote:` 等人物歸屬與必要引文一起保留；最終裝包僅移除包內已可見的重複来源片段，保留引用。
@@ -259,3 +259,14 @@ python scripts/local_eval.py --data data/locomo_eval.json --convs 1 --limit 100 
    Docker 化，公网 HTTPS 部署。
 4. Fake 模式已知噪音：FakeLLM 词面匹配会误删部分候选
    （abstention 阈值在真实模型下正常），仅用于管线测试。
+
+## HTTPS 调用日志
+
+应用加载 `memory_system/.env`，已有进程环境变量优先；修改配置后需重启服务。
+HTTP 请求日志默认写入 `memory_system/logs/access.jsonl`，可用 `AML_ACCESS_LOG`
+指定路径。每条记录包含 UTC 时间、服务端生成的 request_id、方法、路由模板、
+状态码、耗时和未处理异常类型；响应头 `X-Request-ID` 用于关联请求。
+不记录 Authorization、查询参数或请求/响应正文。日志每 10 MiB 轮转，保留 5 份备份。
+模型调用阶段、耗时和 token 用量仍通过 `aml.metrics` 写入进程输出日志。
+当前后台 HTTPS 部署的访问日志为 `/root/aml-runtime/access.jsonl`，
+进程和模型日志为 `/root/aml-runtime/https.log`。

@@ -7,6 +7,7 @@ just run `python scripts/selftest_contract.py` with no env vars and no keys.
 import os
 import sys
 import tempfile
+from unittest.mock import AsyncMock, patch
 
 # Force hermetic offline settings BEFORE importing the app
 os.environ.setdefault("AML_FAKE", "1")
@@ -21,6 +22,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from fastapi.testclient import TestClient
 from app.main import app
+from app import add_pipeline, evidence_packet
 
 client = TestClient(app)
 H = {"Authorization": "Bearer " + os.environ.get("AML_API_KEY", "testkey")}
@@ -106,6 +108,48 @@ check("bad request -> 422", r.status_code == 422)
 # 9. health unauthenticated
 r = client.get("/health")
 check("health 200 no auth", r.status_code == 200)
+
+# Strict external schemas, independent of internal convenience defaults.
+r = client.post('/search', json={k: v for k, v in sbody.items() if k != 'top_k'}, headers=H)
+check('missing top_k -> 422', r.status_code == 422)
+r = client.post('/add', json={**add_body, 'request_id': 'invalid-role',
+    'messages': [{'role': 'system', 'content': 'invalid role'}]}, headers=H)
+check('invalid message role -> 422', r.status_code == 422)
+for field in ('user_id', 'session_id'):
+    r = client.post('/add', json={**add_body, field: 'different'}, headers=H)
+    check(f'conflicting request {field} -> 422', r.status_code == 422)
+source = {**add_body, 'request_id': 'source-identity',
+          'messages': [{'role': 'user', 'content': 'I like tea.', 'message_id': 'stable-message'}]}
+check('explicit source identity accepted', client.post('/add', json=source, headers=H).status_code == 200)
+r = client.post('/add', json={**source, 'request_id': 'source-conflict',
+    'messages': [{**source['messages'][0], 'content': 'I like coffee.'}]}, headers=H)
+check('conflicting source identity -> 422', r.status_code == 422)
+with patch.object(add_pipeline, 'run_add', AsyncMock(side_effect=ValueError('provider output invalid'))):
+    r = client.post('/add', json=add_body, headers=H)
+check('provider ValueError remains retryable 500', r.status_code == 500)
+spec = client.get('/openapi.json').json()['components']['schemas']
+check('OpenAPI requires top_k', 'top_k' in spec['HTTPSearchRequest']['required'])
+
+# Production packers must count constraints toward the total, preserve hashes,
+# and reject an entire evidence group when it no longer fits.
+for pack in (evidence_packet.pack, evidence_packet.pack_ranked):
+    for k in (1, 100):
+        for constraints in (1, k + 1):
+            candidates = [dict(id=f'rule-{i}', content=f'Privacy rule {i}', is_constraint=True)
+                          for i in range(constraints)]
+            candidates += [dict(id=f'fact-{i}', content=f'Fact {i}') for i in range(k)]
+            packed, digest, manifest = pack(candidates, k, 32000)
+            check(f'{pack.__name__} total cap k={k} rules={constraints}',
+                  len(packed) == k and evidence_packet.digest(packed) == digest
+                  and manifest['constraint_count'] + manifest['evidence_count'] == k)
+packed, digest, manifest = evidence_packet.pack_ranked([
+    dict(id='rule', content='Privacy rule', is_constraint=True),
+    dict(id='a', content='First link'), dict(id='b', content='Second link')],
+    2, 32000, groups=[['a', 'b']])
+check('constraint consumes slot without splitting evidence group',
+      [item['id'] for item in packed] == ['rule']
+      and all(item['reason'] == 'atomic_group_top_k' for item in manifest['omitted'])
+      and evidence_packet.digest(packed) == digest)
 
 # 10. explicit task feedback creates procedural memory
 r = client.post("/feedback", headers=H, json={

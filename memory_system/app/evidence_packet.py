@@ -92,7 +92,7 @@ def pack(items, top_k, token_budget, core_budget=None, required_coverage=None, f
         missing = requirements - covered - facets[index]
         # Avoid consuming the budget/last slot needed by another attainable facet.
         attainable = [remaining_costs[rid] for rid in missing if rid in remaining_costs]
-        completion_possible = (not attainable or (evidence_count + 1 < top_k and
+        completion_possible = (not attainable or (len(selected) + 1 < top_k and
             max(attainable) <= token_budget - used - cost))
         return (bool(item.get('is_constraint')), cost <= token_budget - used,
                 completion_possible, bool(gain), int((score or 0) / .1),
@@ -143,7 +143,7 @@ def pack(items, top_k, token_budget, core_budget=None, required_coverage=None, f
         if is_core and core_budget is not None and core_used + cost > core_budget:
             omitted.append({'id': item['id'], 'reason': 'core_budget', 'cost': cost})
             continue
-        full = not is_constraint and evidence_count >= top_k
+        full = len(selected) >= top_k
         if full or used + cost > token_budget:
             omitted.append({'id': item['id'], 'reason': 'top_k' if full else 'token_budget', 'cost': cost})
             continue

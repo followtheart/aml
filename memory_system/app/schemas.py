@@ -1,5 +1,5 @@
 """Pydantic schemas for the AML Add/Search synchronous contract."""
-from typing import List, Optional
+from typing import List, Literal, Optional
 from pydantic import BaseModel, Field
 
 
@@ -35,7 +35,7 @@ class SearchRequest(BaseModel):
     query: str = Field(min_length=1)
     options: Optional[List[str]] = None
     user_id: str = Field(min_length=1)
-    top_k: int = Field(default=100, ge=1, le=100, description='Evidence item limit; explicit constraints share the byte budget but not this count')
+    top_k: int = Field(default=100, ge=1, le=100, description='Total returned item limit, including constraints')
     include_history: Optional[bool] = None
     include_sensitive: bool = True
     # ISO-8601 question/evaluation time used to resolve relative expressions.
@@ -43,6 +43,20 @@ class SearchRequest(BaseModel):
     as_of: Optional[str] = None
     min_revision: Optional[int] = Field(default=None, ge=0)
     evidence_token_budget: int = Field(default=32000, ge=256, le=32000)
+
+
+class HTTPMessage(Message):
+    """External AML contract; internal ingestion may carry other source roles."""
+    role: Literal['user', 'assistant']
+
+
+class HTTPAddRequest(AddRequest):
+    messages: List[HTTPMessage]
+
+
+class HTTPSearchRequest(SearchRequest):
+    """Require the external limit while retaining defaults for internal callers."""
+    top_k: int = Field(ge=1, le=100, description='Total returned item limit, including constraints')
 
 
 class SearchItem(BaseModel):

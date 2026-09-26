@@ -15,6 +15,7 @@ import numpy as np
 
 from . import config, integrity, llm, memory_debug, persona_source, profile, prompts, scenes, schemas, segment, store
 from .embeddings import embed
+from .errors import InvalidRequest
 
 log = logging.getLogger("aml.add")
 
@@ -498,7 +499,7 @@ async def run_add(st: store.Store, req: schemas.AddRequest) -> Dict:
                 owner = st.request_owner(req.request_id)
                 if owner and (owner["user_id"] != req.user_id
                               or owner["session_id"] != req.session_id):
-                    raise ValueError("request_id already belongs to another user or session")
+                    raise InvalidRequest("request_id already belongs to another user or session")
                 if owner:
                     st.assert_epoch(req.user_id, epoch)
                     return dict(write_revision=st.user_state(req.user_id)['revision'], scope_epoch=epoch)

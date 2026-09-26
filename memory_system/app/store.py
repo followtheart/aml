@@ -26,6 +26,7 @@ import numpy as np
 
 from . import budget, config, graph, integrity, vector_index
 from .provenance import ProvenanceStore, source_identity
+from .errors import InvalidRequest
 
 _LOCK = threading.RLock()
 
@@ -384,7 +385,7 @@ class Store(ProvenanceStore):
                                     (req.user_id, identity)).fetchone()
             if old and (old['content'] != message.content or old['role'] != message.role
                         or old['speaker_id'] != (message.speaker_id or message.role)):
-                raise ValueError('Source message identity cannot be reused for different content or speaker')
+                raise InvalidRequest('Source message identity cannot be reused for different content or speaker')
         for i, message in enumerate(req.messages):
             identity, event = source_identity(req, message, i)
             self._write("INSERT INTO source_messages (request_id,message_index,user_id,session_id,role,content,timestamp,"

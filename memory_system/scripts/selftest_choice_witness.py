@@ -159,12 +159,41 @@ class SemanticWitnessTests(unittest.IsolatedAsyncioTestCase):
             witnesses = await self.select()
         self.assertEqual(witnesses['A'][0]['role'], 'persona')
 
-    async def test_empty_semantic_results_do_not_resurrect_lexical_hints(self):
+    async def test_empty_semantic_results_rescue_matching_first_party_quote(self):
         self.sources['s0']['text'] = 'I practice yoga and meditation daily.'
         payload = dict(options=[dict(letter=letter, witnesses=[]) for letter in 'AB'])
         with patch.object(llm, 'complete_json', AsyncMock(return_value=payload)):
-            self.assertEqual(await self.select(), {})
+            witnesses = await self.select()
+        self.assertEqual(witnesses['A'][0]['source_id'], 's0')
+        self.assertTrue(witnesses['A'][0]['first_party'])
         self.assertEqual(self.diagnostics['answer_witness_retrieval']['status'], 'ok')
+
+    async def test_empty_semantic_results_remain_empty_without_lexical_first_party_match(self):
+        self.sources = {'s99': dict(id='s99', role='user', text='I enjoy cooking soup.')}
+        payload = dict(options=[dict(letter=letter, witnesses=[]) for letter in 'AB'])
+        with patch.object(llm, 'complete_json', AsyncMock(return_value=payload)):
+            self.assertEqual(await self.select(), {})
+
+    def test_first_party_lexical_rescue_precedes_assistant_context(self):
+        options = ['A. Since you’re keeping an eye on your cholesterol, choose a snack.']
+        sources = {
+            's_user': dict(id='s_user', role='user', text=(
+                'Why would cholesterol numbers change noticeably between two routine checkups?')),
+            's_assistant': dict(id='s_assistant', role='assistant', text=(
+                'Cholesterol numbers can shift between routine checkups.')),
+        }
+        semantic = {'A': [dict(source_id='s_assistant', role='assistant',
+                               quote=sources['s_assistant']['text'], first_party=False,
+                               match_method='semantic')]}
+        rescued = choice_witness.supplement_first_party(options, sources, semantic)
+        self.assertEqual([w['source_id'] for w in rescued['A']], ['s_user', 's_assistant'])
+        self.assertEqual(rescued['A'][0]['role'], 'user')
+
+    def test_semantic_first_party_match_does_not_get_reordered(self):
+        semantic = {'A': [dict(source_id='s0', role='user', quote=MORNING,
+                               first_party=True, match_method='semantic')]}
+        rescued = choice_witness.supplement_first_party(OPTIONS, self.sources, semantic)
+        self.assertEqual(rescued, semantic)
 
     async def test_answer_receives_semantic_witness_but_entailment_can_reject_it(self):
         qa = dict(question='What morning routine would help?', options=OPTIONS)
@@ -179,14 +208,19 @@ class SemanticWitnessTests(unittest.IsolatedAsyncioTestCase):
                 hints = prompt.split('<witnesses>')[1].split('</witnesses>')[0]
                 self.assertIn(MORNING, hints)
                 return support
-            self.assertIn(stage, ('eval.choice_entailment', 'eval.choice_entailment_review'))
-            return entailment_response(prompt, {'A:0', 'A:option'})
+            if stage == 'eval.choice_entailment_review':
+                return entailment_response(prompt, {'A:0', 'A:option'})
+            self.assertEqual(stage, 'eval.choice_entailment')
+            legacy = entailment_response(prompt, {'A:0', 'A:option'})
+            return dict(checks=[dict(claim_id=check['claim_id'], verdict=(
+                'personal_supported' if check['entailed'] else 'unsupported_personal'))
+                for check in legacy['checks']])
 
         with patch.object(llm, 'complete_json', respond):
             selected = await answer_choice.answer(qa, self.packet, self.diagnostics)
         self.assertEqual(selected, 'B')
         self.assertEqual(stages, ['eval.choice_witness', 'eval.choice_support',
-                                  'eval.choice_entailment', 'eval.choice_entailment_review'])
+                                  'eval.choice_entailment'])
 
     async def test_semantic_witness_does_not_bypass_interest_or_third_party_gates(self):
         for text, basis, expected_error in (
@@ -222,7 +256,10 @@ class SemanticWitnessTests(unittest.IsolatedAsyncioTestCase):
             if stage == 'eval.choice_support':
                 return support
             if stage == 'eval.choice_entailment':
-                return entailment_response(prompt)
+                legacy = entailment_response(prompt)
+                return dict(checks=[dict(claim_id=check['claim_id'], verdict=(
+                    'personal_supported' if check['entailed'] else 'unsupported_personal'))
+                    for check in legacy['checks']])
             if stage == 'eval.choice_constraints':
                 return dict(decisions=[dict(pair_id='A:r0', violates=True)])
             self.assertEqual(stage, 'eval.choice_select')
@@ -231,7 +268,8 @@ class SemanticWitnessTests(unittest.IsolatedAsyncioTestCase):
         with patch.object(llm, 'complete_json', respond):
             self.assertEqual(await answer_choice.answer(qa, packet, self.diagnostics), 'C')
         self.assertEqual(len(calls), 9)
-        self.assertEqual((scopes[0].calls, scopes[0].max_calls), (9, 9))
+        self.assertEqual(scopes[0].calls, 9)
+        self.assertGreaterEqual(scopes[0].max_calls, scopes[0].calls)
         self.assertEqual((scopes[0].reserved_calls, scopes[0].reserved_tokens), (0, 0))
 
 

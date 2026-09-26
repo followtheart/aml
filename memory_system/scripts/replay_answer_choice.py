@@ -38,7 +38,7 @@ async def main(args):
                     except Exception as exc:
                         request['error_type'] = type(exc).__name__
                         raise
-                calls = 8 + int(config.CHOICE_SEMANTIC_WITNESSES and not config.FAKE)
+                calls = 10 + max(0, len(qa['options']) - 1) + int(config.CHOICE_SEMANTIC_WITNESSES and not config.FAKE)
                 with budget.scope(seconds=240, calls=calls, tokens=128000) as usage:
                     with patch.object(llm, 'complete_json', recorded):
                         prediction, score, diagnostics = await eval_scoring.evaluate(qa, fixture['packet'])

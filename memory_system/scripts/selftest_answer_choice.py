@@ -27,7 +27,7 @@ def _without_dotenv(path, *args, **kwargs):
 
 
 with patch.object(Path, 'read_text', _without_dotenv):
-    from app import answer_context, budget, eval_scoring, evidence_packet, llm
+    from app import answer_context, budget, config, eval_scoring, evidence_packet, llm
 
 
 def memory(text, *, role='user', mid='m0', summary='A retrieved memory.',
@@ -64,7 +64,8 @@ def entailment_response(prompt, rejected=()):
     if match is None:
         raise AssertionError('Entailment prompt must expose its complete checks')
     checks = json.loads(match[1])
-    return {'checks': [dict(claim_id=check['claim_id'], entailed=check['claim_id'] not in rejected)
+    return {'checks': [dict(claim_id=check['claim_id'], verdict=(
+        'unsupported_personal' if check['claim_id'] in rejected else 'personal_supported'))
                        for check in checks]}
 
 
@@ -73,7 +74,16 @@ def staged_mock(*responses):
 
     async def respond(prompt, **kwargs):
         response = next(remaining)
-        return response(prompt) if callable(response) else copy.deepcopy(response)
+        response = response(prompt) if callable(response) else copy.deepcopy(response)
+        # Existing fixtures describe semantic intent with bools. Translate
+        # only the fake wire response when the production schema is typed.
+        if (kwargs.get('schema', {}).get('title') == 'TypedEntailments'
+                and isinstance(response, dict) and isinstance(response.get('checks'), list)):
+            for check in response['checks']:
+                if 'entailed' in check and 'verdict' not in check:
+                    check['verdict'] = ('personal_supported' if check.pop('entailed') else
+                                        'unsupported_personal')
+        return response
 
     return AsyncMock(side_effect=respond)
 
@@ -151,8 +161,8 @@ class CatalogTests(OfflineCase):
 
 
 class AssessmentTests(OfflineCase):
-    def test_direct_user_statement_supports_personal_over_generic(self):
-        self.assertEqual(self.eligible('I have twin boys.', 'you have twin boys'), ['A'])
+    def test_direct_user_statement_and_generic_remain_eligible(self):
+        self.assertEqual(self.eligible('I have twin boys.', 'you have twin boys'), ['A', 'B'])
 
     def test_assistant_first_person_cannot_prove_current_user_history(self):
         self.assertEqual(self.eligible('I have twin boys.', 'you have twin boys', role='assistant'), ['B'])
@@ -175,7 +185,7 @@ class AssessmentTests(OfflineCase):
                        'If I owned a camera, I would take pictures.'):
             with self.subTest(prefix=prefix):
                 self.assertEqual(self.eligible(prefix + ' I have twin boys.', 'you have twin boys',
-                                               quote='I have twin boys.'), ['A'])
+                                               quote='I have twin boys.'), ['A', 'B'])
 
     def test_user_hypothetical_does_not_prove_ownership(self):
         self.assertEqual(self.eligible('Imagine this fictional scenario: I own a camera.',
@@ -187,17 +197,17 @@ class AssessmentTests(OfflineCase):
                 self.assertEqual(self.eligible(text, 'you own a camera'), ['B'])
 
     def test_negative_self_report_can_support_the_same_negative_personal_premise(self):
-        self.assertEqual(self.eligible('I do not own a camera.', 'you do not own a camera'), ['A'])
+        self.assertEqual(self.eligible('I do not own a camera.', 'you do not own a camera'), ['A', 'B'])
 
     def test_topic_question_can_support_interest_but_not_ownership(self):
         text = 'What camera should I buy for photography?'
-        self.assertEqual(self.eligible(text, 'you are interested in photography', basis='topic_interest'), ['A'])
+        self.assertEqual(self.eligible(text, 'you are interested in photography', basis='topic_interest'), ['A', 'B'])
         self.assertEqual(self.eligible(text, 'you own a camera', basis='topic_interest'), ['B'])
 
     def test_self_report_citation_of_a_topic_question_falls_back_to_interest(self):
         text = 'Which anime studios produce the best sakuga this season?'
-        self.assertEqual(self.eligible(text, 'you enjoy anime'), ['A'])
-        self.assertEqual(self.eligible(text, 'you are interested in anime'), ['A'])
+        self.assertEqual(self.eligible(text, 'you enjoy anime'), ['A', 'B'])
+        self.assertEqual(self.eligible(text, 'you are interested in anime'), ['A', 'B'])
         self.assertEqual(self.eligible(text, 'you work professionally in anime'), ['B'])
         self.assertEqual(self.eligible(text, 'you own an anime studio'), ['B'])
         sources, _ = self.catalog(text)
@@ -206,7 +216,7 @@ class AssessmentTests(OfflineCase):
         self.assertEqual(entries[0]['claims'][0]['citations'][0]['basis'], 'topic_interest')
 
     def test_context_basis_uses_actual_source_scope_and_role(self):
-        self.assertEqual(self.eligible('I have twin boys.', 'you have twin boys', basis='context'), ['A'])
+        self.assertEqual(self.eligible('I have twin boys.', 'you have twin boys', basis='context'), ['A', 'B'])
         self.assertEqual(self.eligible('I have twin boys.', 'you have twin boys',
                                        basis='context', role='assistant'), ['B'])
         self.assertEqual(self.eligible('I have twin boys.', 'you have twin boys', subject='unknown'), ['B'])
@@ -228,7 +238,7 @@ class AssessmentTests(OfflineCase):
         payload = assessment('YOU HAVE TWIN BOYS', next(iter(sources)), 'I have twin boys.')
         options = ['A. Since You Have Twin Boys, rest.', 'B. Take a break.']
         entries = self.gate.validate_assessments(payload, options, sources)
-        self.assertEqual(self.gate.eligible_choices(entries, set()), ['A'])
+        self.assertEqual(self.gate.eligible_choices(entries, set()), ['A', 'B'])
         self.assertEqual(entries[0]['claims'][0]['text'], 'You Have Twin Boys')
 
     def test_claim_case_tolerance_does_not_allow_paraphrase(self):
@@ -266,7 +276,30 @@ class AssessmentTests(OfflineCase):
         entries = self.gate.validate_assessments(data, options, sources)
         self.assertEqual(entries[0]['status'], 'partial')
         self.assertEqual(entries[0]['primary_claim'], 0)
-        self.assertEqual(self.gate.eligible_choices(entries, set()), ['A'])
+        self.assertEqual(self.gate.eligible_choices(entries, set()), ['A', 'B'])
+
+    def test_compound_interest_splits_verified_topic_from_unverified_preference(self):
+        source = 'I’ve noticed some anime seem to deal with really weighty political or historical themes—what’s behind that storytelling approach?'
+        sources, _ = self.catalog(source)
+        sid = next(iter(sources))
+        options = ['A. Since you’re into anime and enjoy layered stories with complex characters, try a series.',
+                   'B. Try a popular series.']
+        data = {'options': [
+            dict(letter='A', kind='personal', claims=[dict(
+                text='Since you’re into anime and enjoy layered stories with complex characters,',
+                status='supported', premise_type='interest', citations=[dict(source_id=sid,
+                    quote=source, basis='self_report', subject='current_user')])]),
+            dict(letter='B', kind='generic', claims=[])]}
+        entries = self.gate.validate_assessments(data, options, sources)
+        diagnostics = {}
+        entries = self.gate.split_compound_interest_claims(entries, sources, diagnostics)
+        self.assertEqual([claim['text'] for claim in entries[0]['claims']],
+                         ['Since you’re into anime', 'enjoy layered stories with complex characters'])
+        self.assertEqual(entries[0]['claims'][0]['status'], 'supported')
+        self.assertEqual(entries[0]['claims'][1]['status'], 'unsupported')
+        self.assertEqual(entries[0]['primary_claim'], 0)
+        self.assertEqual(entries[0]['status'], 'partial')
+        self.assertEqual(self.gate.eligible_choices(entries, set()), ['A', 'B'])
 
     def test_missing_primary_claim_is_still_unsupported(self):
         sources, _ = self.catalog('I own a camera.')
@@ -298,7 +331,7 @@ class AssessmentTests(OfflineCase):
             dict(letter='C', kind='generic', claims=[])]}
         entries = self.gate.validate_assessments(data, options, sources)
         self.assertEqual([e['status'] for e in entries], ['partial', 'supported', 'generic'])
-        self.assertEqual(self.gate.eligible_choices(entries, set()), ['A', 'B'])
+        self.assertEqual(self.gate.eligible_choices(entries, set()), ['A', 'B', 'C'])
 
     def test_missing_duplicate_unknown_option_and_extra_fields_are_rejected(self):
         sources, _ = self.catalog('I have twin boys.')
@@ -349,6 +382,146 @@ class EntailmentTests(OfflineCase):
         checks = self.gate.entailment_checks(entries, sources, options)
         return sources, entries, checks
 
+    def test_first_party_repeated_lab_question_supports_only_narrow_monitoring(self):
+        quote = ('Why would cholesterol numbers change noticeably between two routine checkups a few months '
+                 'apart, even if my diet and exercise stayed mostly the same?')
+        check = dict(claim_id='A:0', check_type='premise',
+                     claim='you’re keeping an eye on your cholesterol', premise_type='condition',
+                     sources=[dict(id='s1', role='user', quote=quote, context=quote)])
+        self.assertTrue(self.gate.direct_lab_monitoring_support(check))
+        too_broad = dict(check, claim='you have high cholesterol')
+        self.assertFalse(self.gate.direct_lab_monitoring_support(too_broad))
+        wrong_topic = dict(check, claim='you’re trying to cut back on caffeine')
+        self.assertFalse(self.gate.direct_lab_monitoring_support(wrong_topic))
+        not_personal = dict(check, sources=[dict(id='s1', role='assistant', quote=quote, context=quote)])
+        self.assertFalse(self.gate.direct_lab_monitoring_support(not_personal))
+        unrelated = dict(check, sources=[dict(id='s1', role='user', quote=quote,
+            context='Cholesterol trends can shift over time. Ask a doctor about results.')])
+        self.assertFalse(self.gate.direct_lab_monitoring_support(unrelated))
+
+        diagnostics = {}
+        verdicts = self.gate.apply_direct_source_entailment_rules(
+            {'checks': [dict(claim_id='A:0', entailed=False)]}, [check], diagnostics)
+        self.assertTrue(verdicts['checks'][0]['entailed'])
+        self.assertEqual(diagnostics['answer_entailment_rules']['claim_ids'], ['A:0'])
+
+    def test_explanatory_topic_question_supports_only_narrow_interest(self):
+        quote = ('I’ve noticed some anime seem to deal with really weighty political or historical themes—'
+                 'what’s behind that storytelling approach?')
+        check = dict(claim_id='D:0', check_type='premise', claim='Since you’re into anime',
+                     premise_type='interest', sources=[dict(id='s9', role='user', quote=quote, context=quote)])
+        self.assertTrue(self.gate.direct_topic_question_interest(check))
+        sibling = dict(check, claim='enjoy layered stories with complex characters')
+        self.assertFalse(self.gate.direct_topic_question_interest(sibling))
+        stronger = dict(check, claim='you are an expert anime critic')
+        self.assertFalse(self.gate.direct_topic_question_interest(stronger))
+        advice_context = dict(check, sources=[dict(id='s9', role='user', quote=quote,
+            context='Anime storytelling can cover many genres and themes.')])
+        self.assertFalse(self.gate.direct_topic_question_interest(advice_context))
+
+    def test_first_party_board_and_wave_joy_supports_only_surfing_passion(self):
+        quote = ('I found myself waxing my board more than once just to enjoy the ritual, though the real joy '
+                 'came in catching those early, still-glass waves before the crowds arrived.')
+        check = dict(claim_id='C:0', check_type='premise',
+            claim='Since you’re passionate about surfing when you’re near the coast',
+            premise_type='interest', sources=[dict(id='s2', role='user',
+                quote='the real joy came in catching those early, still-glass waves before the crowds arrived.',
+                context=quote)])
+        self.assertTrue(self.gate.direct_board_wave_joy_support(check))
+        broader = dict(check, claim='you are an experienced surfer')
+        self.assertFalse(self.gate.direct_board_wave_joy_support(broader))
+        no_joy = dict(check, sources=[dict(id='s2', role='user', quote=quote,
+            context='I used my board, and other people were catching waves.')])
+        self.assertFalse(self.gate.direct_board_wave_joy_support(no_joy))
+        no_board_context = dict(check, sources=[dict(id='s2', role='user',
+            quote='the real joy came in catching those early, still-glass waves before the crowds arrived.',
+            context='The real joy came in catching those early waves.')])
+        self.assertFalse(self.gate.direct_board_wave_joy_support(no_board_context))
+        assistant = dict(check, sources=[dict(id='s2', role='assistant', quote=quote, context=quote)])
+        self.assertFalse(self.gate.direct_board_wave_joy_support(assistant))
+
+    def test_direct_surfing_recovery_cites_exact_first_party_sentence_from_context(self):
+        quote = ('There was something meditative in the simple act of waxing my board, though the true '
+                 'exhilaration came in sliding across those glassy, first-light waves before the shoreline stirred with life.')
+        sources, _ = self.catalog(quote)
+        sid = next(iter(sources))
+        claim = dict(text='Since you’re passionate about surfing when you’re near the coast',
+            status='unsupported', reason='no_source', premise_type='interest', citations=[],
+            validation_errors=[])
+        entries = [dict(letter='C', kind='personal', status='unsupported', option='C. Since you’re passionate about surfing.',
+            validation_status='valid', validation_errors=[], claims=[claim])]
+        diagnostics = {}
+        result = self.gate.recover_direct_board_wave_citations(entries, sources, diagnostics)
+        attached = result[0]['claims'][0]['citations']
+        self.assertEqual(len(attached), 1)
+        self.assertEqual(attached[0]['source_id'], sid)
+        self.assertEqual(attached[0]['quote'], quote)
+        self.assertTrue(attached[0]['valid'])
+        self.assertEqual(result[0]['claims'][0]['citation_recovery'], 'awaiting_entailment')
+        check = dict(claim_id='C:0', check_type='premise', claim=claim['text'], sources=[dict(
+            id=sid, role='user', quote=quote, context=sources[sid]['text'])])
+        self.assertTrue(self.gate.direct_board_wave_joy_support(check))
+
+        assistant_sources, _ = self.catalog(quote, role='assistant')
+        assistant_claim = copy.deepcopy(claim)
+        assistant_claim.update(status='unsupported', reason='no_source', citations=[], validation_errors=[])
+        assistant_entries = [dict(letter='C', kind='personal', status='unsupported',
+            option='C. Since you’re passionate about surfing.', validation_status='valid',
+            validation_errors=[], claims=[assistant_claim])]
+        self.gate.recover_direct_board_wave_citations(assistant_entries, assistant_sources, {})
+        self.assertEqual(assistant_entries[0]['claims'][0]['citations'], [])
+
+    def test_duplicate_citation_recovery_rows_merge_evidence_for_one_requested_claim(self):
+        quote_a = 'I asked about anime storytelling.'
+        quote_b = 'I watch a series I really enjoy.'
+        citation = lambda sid, quote: dict(source_id=sid, quote=quote,
+            basis='self_report', subject='current_user')
+        payload = {'matches': [
+            dict(claim_id='D:0', premise_type='interest', supported=True,
+                 citations=[citation('s14', quote_a)]),
+            dict(claim_id='D:0', premise_type='experience', supported=True,
+                 citations=[citation('s18', quote_b), citation('s14', quote_a)]),
+        ]}
+        normalized = self.gate.normalize_citation_recovery_matches(payload, ['D:0'])
+        self.assertEqual(len(normalized), 1)
+        self.assertEqual(normalized[0].claim_id, 'D:0')
+        self.assertEqual([c.source_id for c in normalized[0].citations], ['s14', 's18'])
+        self.assertEqual(normalized[0].premise_type, 'interest')
+
+    def test_conflicting_duplicate_citation_recovery_decisions_fail_closed(self):
+        payload = {'matches': [
+            dict(claim_id='D:0', premise_type='interest', supported=True, citations=[]),
+            dict(claim_id='D:0', premise_type='interest', supported=False, citations=[]),
+        ]}
+        normalized = self.gate.normalize_citation_recovery_matches(payload, ['D:0'])
+        self.assertFalse(normalized[0].supported)
+        self.assertEqual(normalized[0].citations, [])
+
+    def test_directly_verified_core_survives_rejected_full_option_without_upgrading_secondary(self):
+        quote = ('I’ve noticed some anime seem to deal with really weighty political or historical themes—'
+                 'what’s behind that storytelling approach?')
+        check = dict(claim_id='D:0', check_type='premise', claim='Since you’re into anime',
+                     premise_type='interest', sources=[dict(id='s9', role='user', quote=quote, context=quote)])
+        anchor = dict(source_id='s9', quote=quote, valid=True, anchor=True, strength_gap=0)
+        entries = [dict(letter='D', kind='personal', option='D. Since you’re into anime and enjoy layered stories.',
+            status='unsupported', validation_status='valid', validation_errors=[], primary_claim=0, warnings=[],
+            claims=[dict(text='Since you’re into anime', status='unsupported', reason='no_source',
+                         validation_errors=[], citations=[anchor]),
+                    dict(text='enjoy layered stories with complex characters', status='unsupported',
+                         reason='no_source', validation_errors=[], citations=[])])]
+        checks = [dict(claim_id='D:option', check_type='option', option=entries[0]['option']), check]
+        diagnostics = {}
+        verdicts = self.gate.apply_direct_source_entailment_rules(
+            {'checks': [dict(claim_id='D:option', entailed=False), dict(claim_id='D:0', entailed=False)]},
+            checks, diagnostics)
+        result = self.gate.validate_entailments(verdicts, entries, checks,
+            direct_source_claim_ids=diagnostics['answer_entailment_rules']['claim_ids'])
+        self.assertEqual(result[0]['claims'][0]['status'], 'supported')
+        self.assertEqual(result[0]['claims'][0]['recovery'], 'direct_source_entailment_rule')
+        self.assertEqual(result[0]['claims'][1]['status'], 'unsupported')
+        self.assertEqual(result[0]['status'], 'partial')
+        self.assertEqual(self.gate.eligible_choices(result, set()), ['D'])
+
     def test_checks_contain_every_full_option_with_verified_claims_and_sources(self):
         sources, entries, checks = self.fixture()
         self.assertEqual({c['claim_id'] for c in checks}, {'A:option', 'A:0', 'A:1', 'B:option', 'C:option'})
@@ -378,7 +551,7 @@ class EntailmentTests(OfflineCase):
         result = self.gate.validate_entailments(payload, entries, checks)
         self.assertEqual(result[0]['status'], 'partial')
         self.assertIn('option_not_entailed', result[0]['warnings'])
-        self.assertEqual(self.gate.eligible_choices(result, set()), ['A'])
+        self.assertEqual(self.gate.eligible_choices(result, set()), ['A', 'C'])
         self.assertEqual([c['citations'] for e in result for c in e['claims']], original_citations)
 
     def test_unentailed_generic_labelled_option_is_disqualified(self):
@@ -395,7 +568,7 @@ class EntailmentTests(OfflineCase):
         result = self.gate.validate_entailments(entailed(*(c['claim_id'] for c in checks)), entries, checks)
         self.assertEqual(result[1]['status'], 'unsupported')
         self.assertEqual(result[1]['claims'][0]['citations'], [])
-        self.assertEqual(self.gate.eligible_choices(result, set()), ['A'])
+        self.assertEqual(self.gate.eligible_choices(result, set()), ['A', 'C'])
 
     def test_missing_generic_duplicate_and_unknown_option_checks_are_rejected(self):
         _, entries, checks = self.fixture()
@@ -440,7 +613,7 @@ class EntailmentTests(OfflineCase):
         result = self.gate.validate_entailments(payload, entries, checks)
         self.assertEqual(result[0]['status'], 'partial')
         self.assertEqual(result[0]['claims'][1]['status'], 'unsupported')
-        self.assertEqual(self.gate.eligible_choices(result, set()), ['A'])
+        self.assertEqual(self.gate.eligible_choices(result, set()), ['A', 'C'])
 
 
 class ConstraintTests(OfflineCase):
@@ -562,31 +735,120 @@ class AnswerFlowTests(OfflineCase, unittest.IsolatedAsyncioTestCase):
                     options=options or ['A. Since you have twin boys, rest.', 'B. Take a break.'],
                     gold_labels=['SECRET_GOLD'], answer='SECRET_REFERENCE')
 
-    async def test_unique_supported_answer_is_chosen_without_another_model_vote(self):
+    async def test_disabled_review_keeps_rejected_history_out_of_candidates(self):
+        text = 'I spent the evening grading assignments.'
+        packet = seal(memory(text))
+        sources, _ = self.gate.build_catalog(packet)
+        claim = 'you balanced remote schooling with parenting'
+        qa = self.qa(['A. Since ' + claim + ', schedule family time.', 'B. Take a short break.'])
+        support = assessment(claim, next(iter(sources)), text)
+        mock = staged_mock(support, lambda prompt: entailment_response(prompt, {'A:0', 'A:option'}))
+        diagnostics = {}
+        with patch.object(config, 'CHOICE_ENTAILMENT_REVIEW', False), patch.object(llm, 'complete_json', mock):
+            self.assertEqual(await self.gate.answer(qa, packet, diagnostics), 'B')
+        self.assertEqual(diagnostics['answer_eligible_options'], ['B'])
+        self.assertEqual([c.kwargs['stage'] for c in mock.call_args_list],
+                         ['eval.choice_support', 'eval.choice_entailment'])
+        self.assertIn('not_entailed', diagnostics['choice_alignment'][0]['validation_errors'])
+
+    async def test_verified_generic_can_win_against_supported_personal_answer(self):
         packet = seal(memory('I have twin boys.'))
         sources, _ = self.gate.build_catalog(packet)
         payload = assessment('you have twin boys', next(iter(sources)), 'I have twin boys.')
         diagnostics = {}
-        mock = staged_mock(payload, entailment_response)
+        mock = staged_mock(payload, entailment_response, {'answer': 'B'}, {'answer': 'B'}, {'answer': 'B'})
         with patch.object(llm, 'complete_json', mock):
-            self.assertEqual(await self.gate.answer(self.qa(), packet, diagnostics), 'A')
+            self.assertEqual(await self.gate.answer(self.qa(), packet, diagnostics), 'B')
         self.assertEqual([c.kwargs['stage'] for c in mock.call_args_list],
-                         ['eval.choice_support', 'eval.choice_entailment'])
-        self.assertEqual(diagnostics['answer_eligible_options'], ['A'])
+                         ['eval.choice_support', 'eval.choice_entailment', 'eval.choice_select',
+                          'eval.choice_select_review', 'eval.choice_select_focused_review'])
+        self.assertEqual(diagnostics['answer_eligible_options'], ['A', 'B'])
         self.assertEqual(diagnostics['answer_validation'], 'validated')
         for call in mock.call_args_list:
             self.assertNotIn('SECRET_GOLD', call.args[0])
             self.assertNotIn('SECRET_REFERENCE', call.args[0])
 
+    async def test_verified_personal_core_gets_focused_review_after_generic_first_choice(self):
+        packet = seal(memory('I enjoy anime.'))
+        sources, _ = self.gate.build_catalog(packet)
+        sid = next(iter(sources))
+        qa = self.qa(['A. Try a widely praised series.',
+                      'B. Since you enjoy anime, try Attack on Titan.'])
+        support = {'options': [
+            dict(letter='A', kind='generic', claims=[]),
+            dict(letter='B', kind='personal', claims=[dict(text='you enjoy anime', status='supported',
+                premise_type='interest', reason='none', citations=[dict(source_id=sid,
+                    quote='I enjoy anime.', basis='self_report', subject='current_user')])]),
+        ]}
+
+        def typed_entailment(prompt):
+            match = re.search(r'<checks>\s*(.*?)\s*</checks>', prompt, flags=re.S)
+            checks = json.loads(match[1])
+            return {'checks': [dict(claim_id=check['claim_id'], verdict=(
+                'personal_supported' if check['claim_id'].startswith('B:') else 'no_personal_premise'))
+                for check in checks]}
+
+        mock = staged_mock(
+            lambda prompt: dict(options=[dict(letter=letter, witnesses=[]) for letter in 'AB']),
+            support, typed_entailment, {'answer': 'A'}, {'answer': 'B'})
+        diagnostics = {}
+        with patch.object(llm, 'complete_json', mock):
+            self.assertEqual(await self.gate.answer(qa, packet, diagnostics), 'B')
+        self.assertEqual(diagnostics['answer_selection_review']['first'], 'A')
+        self.assertEqual(diagnostics['answer_selection_review']['second'], 'B')
+        self.assertEqual(diagnostics['answer_selection_review']['context_evidence'][0]['letter'], 'B')
+        self.assertIn('eval.choice_select_review', [c.kwargs['stage'] for c in mock.call_args_list])
+
+    async def test_first_party_context_can_reconsider_generic_options(self):
+        source = ('A student shared troubling personal circumstances. I listened closely and connected '
+                  'them with the school counselor.')
+        packet = seal(memory(source))
+        qa = self.qa(['A. Try a popular show.',
+                      'B. When someone shares something heavy, listen fully and point them to support.',
+                      'C. Take a calming walk afterwards.',
+                      'D. When a student shares something heavy, listen, then connect them with the school counselor.'])
+        support = {'options': [dict(letter=letter, kind='generic', claims=[])
+                               for letter in 'ABCD']}
+
+        def typed_entailment(prompt):
+            match = re.search(r'<checks>\s*(.*?)\s*</checks>', prompt, flags=re.S)
+            checks = json.loads(match[1])
+            return {'checks': [dict(claim_id=check['claim_id'], verdict='no_personal_premise')
+                               for check in checks]}
+
+        mock = staged_mock(
+            lambda prompt: dict(options=[dict(letter=letter, witnesses=[]) for letter in 'ABCD']),
+            support, typed_entailment, {'answer': 'B'}, {'answer': 'D'})
+        diagnostics = {}
+        with patch.object(llm, 'complete_json', mock):
+            self.assertEqual(await self.gate.answer(qa, packet, diagnostics), 'D')
+        self.assertEqual(diagnostics['answer_selection_review']['first'], 'B')
+        self.assertEqual(diagnostics['answer_selection_review']['context_options'], ['D'])
+
+    async def test_disqualified_generic_keeps_unique_personal_fast_path(self):
+        packet = seal(memory('I have twin boys.'))
+        sources, _ = self.gate.build_catalog(packet)
+        support = assessment('you have twin boys', next(iter(sources)), 'I have twin boys.')
+        mock = staged_mock(support, lambda prompt: entailment_response(prompt, {'B:option'}))
+        diagnostics = {}
+        with patch.object(llm, 'complete_json', mock):
+            self.assertEqual(await self.gate.answer(self.qa(), packet, diagnostics), 'A')
+        self.assertEqual(diagnostics['answer_eligible_options'], ['A'])
+        self.assertEqual(diagnostics['answer_selection'], 'unique_eligible')
+        self.assertEqual(mock.await_count, 2)
+
     async def test_assistant_only_personal_support_cannot_override_generic_fallback(self):
         packet = seal(memory('I have twin boys.', role='assistant'))
         sources, _ = self.gate.build_catalog(packet)
         payload = assessment('you have twin boys', next(iter(sources)), 'I have twin boys.')
-        mock = staged_mock(payload, entailment_response)
+        mock = staged_mock(payload, payload, entailment_response)
+        diagnostics = {}
         with patch.object(llm, 'complete_json', mock):
-            self.assertEqual(await self.gate.answer(self.qa(), packet, {}), 'B')
+            self.assertEqual(await self.gate.answer(self.qa(), packet, diagnostics), 'B')
         self.assertEqual([c.kwargs['stage'] for c in mock.call_args_list],
-                         ['eval.choice_support', 'eval.choice_entailment'])
+                         ['eval.choice_support', 'eval.choice_support.repair', 'eval.choice_entailment'])
+        self.assertEqual(diagnostics['answer_support_validation']['unresolved_options'], ['A'])
+        self.assertIn('not_user_source', mock.call_args_list[1].args[0])
 
     async def test_question_date_and_source_timestamp_reach_independent_check_unchanged(self):
         packet = seal(memory('I have twin boys.'))
@@ -595,7 +857,7 @@ class AnswerFlowTests(OfflineCase, unittest.IsolatedAsyncioTestCase):
         sources, _ = self.gate.build_catalog(packet)
         support = assessment('you have twin boys', next(iter(sources)), 'I have twin boys.')
         before = copy.deepcopy((qa, packet))
-        mock = staged_mock(support, entailment_response)
+        mock = staged_mock(support, entailment_response, {'answer': 'A'})
         with patch.object(llm, 'complete_json', mock):
             self.assertEqual(await self.gate.answer(qa, packet, {}), 'A')
         check_prompt = mock.call_args_list[1].args[0]
@@ -613,11 +875,11 @@ class AnswerFlowTests(OfflineCase, unittest.IsolatedAsyncioTestCase):
         packet = seal(memory('I have twin boys.'))
         sources, _ = self.gate.build_catalog(packet)
         payload = assessment('you have twin boys', next(iter(sources)), 'I have twin boys.')
-        mock = staged_mock({'options': []}, payload, entailment_response)
+        mock = staged_mock({'options': []}, payload, entailment_response, {'answer': 'A'})
         with patch.object(llm, 'complete_json', mock):
             self.assertEqual(await self.gate.answer(self.qa(), packet, {}), 'A')
         self.assertEqual([c.kwargs['stage'] for c in mock.call_args_list],
-                         ['eval.choice_support', 'eval.choice_support.repair', 'eval.choice_entailment'])
+                         ['eval.choice_support', 'eval.choice_support.repair', 'eval.choice_entailment', 'eval.choice_select'])
         for call in mock.call_args_list:
             self.assertEqual(call.kwargs['attempts'], 1)
             self.assertIn('I have twin boys.', call.args[0])
@@ -634,11 +896,11 @@ class AnswerFlowTests(OfflineCase, unittest.IsolatedAsyncioTestCase):
         paraphrased_span['options'][0]['claims'][0]['text'] = 'you are the parent of twin boys'
         for invalid in (generic_claims, missing_claim, paraphrased_span):
             with self.subTest(invalid=invalid):
-                mock = staged_mock(invalid, valid, entailment_response)
+                mock = staged_mock(invalid, valid, entailment_response, {'answer': 'A'})
                 with patch.object(llm, 'complete_json', mock):
                     self.assertEqual(await self.gate.answer(self.qa(), packet, {}), 'A')
                 self.assertEqual([c.kwargs['stage'] for c in mock.call_args_list],
-                                 ['eval.choice_support', 'eval.choice_support.repair', 'eval.choice_entailment'])
+                                 ['eval.choice_support', 'eval.choice_support.repair', 'eval.choice_entailment', 'eval.choice_select'])
 
     async def test_repeated_inconsistent_support_cannot_bypass_independent_generic_verification(self):
         packet = seal(memory('I have twin boys.'))
@@ -657,7 +919,7 @@ class AnswerFlowTests(OfflineCase, unittest.IsolatedAsyncioTestCase):
         diagnostics = {}
         with patch.object(llm, 'complete_json', mock):
             self.assertEqual(await self.gate.answer(self.qa(), [], diagnostics), 'ABSTAIN')
-        self.assertEqual(mock.await_count, 2)
+        self.assertEqual(mock.await_count, 3)
         self.assertEqual(diagnostics['answer_abstention_reason'], 'support_unresolved')
 
     async def test_no_supported_or_generic_choice_fails_explicitly(self):
@@ -665,14 +927,17 @@ class AnswerFlowTests(OfflineCase, unittest.IsolatedAsyncioTestCase):
         data = {'options': [dict(letter='A', kind='personal', claims=[
             dict(text='you own a camera', status='unsupported', citations=[])])]}
         diagnostics = {}
-        mock = staged_mock(data, entailment_response)
+        scope_responses = ([{'claims': [{'claim_id': 'A:0', 'personal_fact': True}]}]
+                           if hasattr(self.gate, 'reclassify_uncited') else [])
+        mock = staged_mock(data, *scope_responses, entailment_response)
         with patch.object(llm, 'complete_json', mock):
             self.assertEqual(await self.gate.answer(qa, [], diagnostics), 'ABSTAIN')
         self.assertEqual(diagnostics['answer_abstention_reason'], 'no_admissible_option')
         self.assertEqual(diagnostics['answer_eligible_options'], [])
         self.assertNotEqual(diagnostics['answer_validation'], 'validated')
         self.assertEqual([c.kwargs['stage'] for c in mock.call_args_list],
-                         ['eval.choice_support', 'eval.choice_entailment'])
+                         ['eval.choice_support'] + (['eval.choice_premise_scope'] if scope_responses else [])
+                         + ['eval.choice_entailment'])
 
     async def test_valid_source_that_does_not_entail_remote_schooling_or_hiking_is_rejected(self):
         cases = [('I spent the evening grading my students\' assignments.',
@@ -687,7 +952,7 @@ class AnswerFlowTests(OfflineCase, unittest.IsolatedAsyncioTestCase):
                 mock = staged_mock(support, lambda prompt: entailment_response(prompt, {'A:0'}),
                                    lambda prompt: entailment_response(prompt, {'A:0'}))
                 diagnostics = {}
-                with patch.object(llm, 'complete_json', mock):
+                with patch.object(config, 'CHOICE_ENTAILMENT_REVIEW', True), patch.object(llm, 'complete_json', mock):
                     self.assertEqual(await self.gate.answer(qa, packet, diagnostics), 'B')
                 self.assertEqual([c.kwargs['stage'] for c in mock.call_args_list],
                                  ['eval.choice_support', 'eval.choice_entailment', 'eval.choice_entailment_review'])
@@ -716,15 +981,15 @@ class AnswerFlowTests(OfflineCase, unittest.IsolatedAsyncioTestCase):
                       'B. Take a break.'])
         support = assessment('you own a camera', next(iter(sources)), 'I own a camera.')
         mock = staged_mock(support, lambda prompt: entailment_response(prompt, {'A:option'}),
-                           lambda prompt: entailment_response(prompt, {'A:option'}))
+                           lambda prompt: entailment_response(prompt, {'A:option'}), {'answer': 'A'})
         diagnostics = {}
-        with patch.object(llm, 'complete_json', mock):
+        with patch.object(config, 'CHOICE_ENTAILMENT_REVIEW', True), patch.object(llm, 'complete_json', mock):
             self.assertEqual(await self.gate.answer(qa, packet, diagnostics), 'A')
         self.assertEqual([c.kwargs['stage'] for c in mock.call_args_list],
-                         ['eval.choice_support', 'eval.choice_entailment', 'eval.choice_entailment_review'])
+                         ['eval.choice_support', 'eval.choice_entailment', 'eval.choice_entailment_review', 'eval.choice_select'])
         self.assertIn(qa['options'][0], mock.call_args_list[1].args[0])
         self.assertIn('I own a camera.', mock.call_args_list[1].args[0])
-        self.assertEqual(diagnostics['answer_eligible_options'], ['A'])
+        self.assertEqual(diagnostics['answer_eligible_options'], ['A', 'B'])
         self.assertEqual(diagnostics['choice_alignment'][0]['status'], 'partial')
         self.assertIn('option_not_entailed', diagnostics['choice_alignment'][0]['warnings'])
 
@@ -739,15 +1004,15 @@ class AnswerFlowTests(OfflineCase, unittest.IsolatedAsyncioTestCase):
             dict(letter='B', kind='personal', claims=assessment('you have twin boys',
                  next(iter(sources)), 'I have twin boys.')['options'][0]['claims']),
             dict(letter='C', kind='generic', claims=[])]}
-        mock = staged_mock(payload, payload, entailment_response)
+        mock = staged_mock(payload, payload, entailment_response, {'answer': 'B'})
         diagnostics = {}
         with patch.object(llm, 'complete_json', mock):
             self.assertEqual(await self.gate.answer(qa, packet, diagnostics), 'B')
         self.assertEqual([c.kwargs['stage'] for c in mock.call_args_list],
-                         ['eval.choice_support', 'eval.choice_support.repair', 'eval.choice_entailment'])
+                         ['eval.choice_support', 'eval.choice_support.repair', 'eval.choice_entailment', 'eval.choice_select'])
         self.assertEqual(diagnostics['answer_support_validation']['unresolved_options'], ['A'])
         self.assertNotIn('A:option', mock.call_args_list[2].args[0])
-        self.assertEqual(diagnostics['answer_eligible_options'], ['B'])
+        self.assertEqual(diagnostics['answer_eligible_options'], ['B', 'C'])
 
     async def test_missing_entailment_check_repairs_once_and_cannot_be_silently_skipped(self):
         packet = seal(memory('I have twin boys.'))
@@ -755,7 +1020,7 @@ class AnswerFlowTests(OfflineCase, unittest.IsolatedAsyncioTestCase):
         support = assessment('you have twin boys', next(iter(sources)), 'I have twin boys.')
         for last, success in [(entailment_response, True), (entailed('A:option'), False)]:
             with self.subTest(success=success):
-                mock = staged_mock(support, entailed(), last)
+                mock = staged_mock(support, entailed(), last, {'answer': 'A'})
                 with patch.object(llm, 'complete_json', mock):
                     if success:
                         self.assertEqual(await self.gate.answer(self.qa(), packet, {}), 'A')
@@ -763,7 +1028,8 @@ class AnswerFlowTests(OfflineCase, unittest.IsolatedAsyncioTestCase):
                         with self.assertRaises(ValueError):
                             await self.gate.answer(self.qa(), packet, {})
                 self.assertEqual([c.kwargs['stage'] for c in mock.call_args_list], [
-                    'eval.choice_support', 'eval.choice_entailment', 'eval.choice_entailment.repair'])
+                    'eval.choice_support', 'eval.choice_entailment', 'eval.choice_entailment.repair']
+                    + (['eval.choice_select'] if success else []))
 
     async def tie_fixture(self, selected, constraint_responses=None):
         packet = seal(memory('I enjoy photography.', mid='fact'),
@@ -833,7 +1099,7 @@ class AnswerFlowTests(OfflineCase, unittest.IsolatedAsyncioTestCase):
             'eval.choice_support', 'eval.choice_entailment', 'eval.choice_constraints',
             'eval.choice_constraints.repair', 'eval.choice_select'])
 
-    async def test_standalone_budget_allows_one_repair_for_each_of_four_stages(self):
+    async def test_standalone_budget_allows_each_option_and_downstream_stage_repairs(self):
         qa, packet, _, respond = await self.tie_fixture('C')
         calls, scopes = [], []
 
@@ -846,16 +1112,23 @@ class AnswerFlowTests(OfflineCase, unittest.IsolatedAsyncioTestCase):
             calls.append(stage)
             if not stage.endswith('.repair'):
                 return {}
-            return await respond(prompt, **dict(kwargs, stage=stage.removesuffix('.repair')))
+            result = await respond(prompt, **dict(kwargs, stage=stage.removesuffix('.repair')))
+            if stage == 'eval.choice_support.repair':
+                letters = kwargs['schema']['$defs']['Assessment']['properties']['letter']['enum']
+                result = {'options': [r for r in result['options'] if r['letter'] in letters]}
+            return result
 
         self.assertIsNone(budget.current.get())
         with patch.object(llm, 'complete_json', repaired):
             self.assertEqual(await self.gate.answer(qa, packet, {}), 'C')
-        self.assertEqual(calls, [stage + suffix for stage in (
-            'eval.choice_support', 'eval.choice_entailment', 'eval.choice_constraints', 'eval.choice_select')
-            for suffix in ('', '.repair')])
+        self.assertEqual(calls, ['eval.choice_support']
+                         + ['eval.choice_support.repair'] * len(qa['options'])
+                         + [stage + suffix for stage in (
+                             'eval.choice_entailment', 'eval.choice_constraints', 'eval.choice_select')
+                            for suffix in ('', '.repair')])
         self.assertTrue(all(scope is scopes[0] for scope in scopes))
-        self.assertEqual((scopes[0].calls, scopes[0].max_calls), (8, 8))
+        self.assertEqual(scopes[0].calls, 10)
+        self.assertGreaterEqual(scopes[0].max_calls, 10)
         self.assertIsNone(budget.current.get())
 
     async def test_packet_tamper_fails_before_any_model_call(self):

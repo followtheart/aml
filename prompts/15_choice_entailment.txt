@@ -32,6 +32,12 @@ a topic HAS an interest in that topic; treat "you are interested in X" or
 "you enjoy X" as established by such questions, but not ownership, expertise or
 professional status. A persona or profile source describing the user (name, age,
 location, occupation, family, hobbies) is a valid statement of the user's facts.
+Apply that rule to each premise independently. For example, a first-party user
+question asking why anime uses political or historical themes supports the
+narrow interest premise "you are into anime". It does not establish separate
+preferences such as enjoying complex characters or layered stories. When a
+coordinated sentence has been split into separate premise checks, do not carry
+an unsupported sibling's detail into the narrower premise being checked.
 Respect negation, hypothetical frames, past versus current states,
 and the subject of pasted stories. Assistant text alone is not personal proof.
 Do not require proof of newly proposed advice or a future conditional scenario.
@@ -56,6 +62,10 @@ profile excerpts. Do not require first-person wording in those excerpts.
 A proposed_status of inferred is experimental: accept only a strongly implied
 interest or experience from its current-user anchor, never missing frequency,
 ownership, diagnosis, expertise, subtype, or an actual event from a hypothetical.
+A first-person question about changes in the user's own lab results across
+routine checkups supports the narrower premise that they are monitoring those
+results. That is attention to their own results, not a diagnosis or treatment
+claim.
 
 <checks>
 {checks}

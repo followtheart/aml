@@ -85,6 +85,8 @@ If a candidate witness is a user question or statement on that topic, cite it wi
 
 Monitoring or attention premises, such as "keeping an eye on your cholesterol", are concern about a topic, not a diagnosis. A user question on that topic supports them.
 
+Example: If a visible user source asks why their own lab numbers changed between routine checkups, it supports the narrower premise that they are keeping track of those results. Cite the exact user question with basis = self_report and subject = current_user. It does NOT support a diagnosis or treatment claim. Do not answer no_source when a first-person user question directly matches a monitoring premise.
+
 SUPPORT RULES
 Concrete descriptions can establish an experience without the activity name. Positive feelings accompanying that activity can support an interest in it.
 

@@ -9,6 +9,11 @@ from app import answer_context, config, schemas, search_pipeline, store
 
 
 class PacketTests(unittest.IsolatedAsyncioTestCase):
+    def setUp(self):
+        # Never append synthetic searches to a concurrently running experiment.
+        self.enterContext(patch.object(config, 'SEARCH_DEBUG_LOG', ''))
+        self.enterContext(patch.object(config, 'MEMORY_DEBUG_LOG', ''))
+
     async def test_answer_sees_final_packet_and_only_used_memory_strengthens(self):
         st = store.Store(':memory:')
         try:

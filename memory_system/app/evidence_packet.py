@@ -41,6 +41,9 @@ def pack_ranked(items, top_k, token_budget, required_coverage=(), groups=()):
             raise ValueError('Evidence groups must be disjoint known candidate IDs')
         for mid in group:
             membership[mid] = set(group)
+    # Group membership must survive source deduplication: dropping a duplicate
+    # episode wrapper would otherwise discard its peers' unique evidence.
+    items = [dict(item, _atomic_group_member=item['id'] in membership) for item in items]
     positions = {item['id']: index for index, item in enumerate(items)}
     accepted, visited, omitted = [], set(), []
     for item in items:
@@ -129,7 +132,8 @@ def pack(items, top_k, token_budget, core_budget=None, required_coverage=None, f
         if bucket and bucket_counts.get(bucket, 0) >= min(top_k, fallback_limit) and not is_constraint:
             omitted.append(dict(id=item['id'], reason='fallback_limit', cost=cost))
             continue
-        if (item.get('memory_type') == 'episode' and not is_constraint and sources
+        if (item.get('memory_type') == 'episode' and not is_constraint
+                and not item.get('_atomic_group_member') and sources
                 and any(s.get('content_omitted') == 'duplicate' for s in sources)
                 and all(s.get('content_omitted') in ('duplicate', 'source_limit', 'duplicate_source', 'unit_budget') for s in sources)):
             # A quoted-context wrapper with no new source span adds no evidence.

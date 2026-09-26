@@ -321,6 +321,7 @@ async def _complete_tool_json(prompt: str, schema: dict,
             model=config.LLM_MODEL,
             messages=messages,
             tools=[tool],
+            parallel_tool_calls=False,
             tool_choice={"type": "function",
                          "function": {"name": tool_name}},
             temperature=config.LLM_TEMPERATURE,
@@ -332,8 +333,10 @@ async def _complete_tool_json(prompt: str, schema: dict,
         try:
             message = resp["choices"][0]["message"]
             calls = message.get("tool_calls") or []
-            if not calls:
-                raise ValueError("model returned no structured tool call")
+            if len(calls) != 1:
+                raise ValueError(f"expected one complete structured tool call, received {len(calls)}")
+            if calls[0]["function"].get("name") != tool_name:
+                raise ValueError("model returned an unexpected structured tool name")
             arguments = calls[0]["function"]["arguments"]
             result = arguments if isinstance(arguments, dict) \
                 else extract_json(arguments)

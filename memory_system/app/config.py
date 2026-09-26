@@ -143,11 +143,12 @@ CE_RETRY_BATCH_SIZE = max(1, min(8, int(os.environ.get('AML_CE_RETRY_BATCH_SIZE'
 CE_MAX_DOCUMENT_BYTES = max(512, int(os.environ.get('AML_CE_MAX_DOCUMENT_BYTES', '4000')))
 CE_MAX_REQUEST_BYTES = max(1024, int(os.environ.get('AML_CE_MAX_REQUEST_BYTES', '90000')))
 CASCADE_COARSE_LIMIT = max(1, int(os.environ.get('AML_CASCADE_COARSE_LIMIT', '50')))
-CASCADE_FINE_LIMIT = max(1, int(os.environ.get('AML_CASCADE_FINE_LIMIT', '12')))
-CASCADE_LLM_LIMIT = max(1, int(os.environ.get('AML_CASCADE_LLM_LIMIT', '10')))
+CASCADE_FINE_LIMIT = max(1, int(os.environ.get('AML_CASCADE_FINE_LIMIT', '16')))
+CASCADE_LLM_LIMIT = max(1, int(os.environ.get('AML_CASCADE_LLM_LIMIT', '16')))
 # Inference remains an opt-in controlled-validation experiment.
 CHOICE_ALLOW_INFERRED = os.environ.get('AML_CHOICE_ALLOW_INFERRED', '0') == '1'
-CHOICE_ENTAILMENT_REVIEW = os.environ.get('AML_CHOICE_ENTAILMENT_REVIEW', '1') == '1'
+# A failed entailment remains rejected by default; contextual re-review is opt-in.
+CHOICE_ENTAILMENT_REVIEW = os.environ.get('AML_CHOICE_ENTAILMENT_REVIEW', '0') == '1'
 CHOICE_SEMANTIC_WITNESSES = os.environ.get('AML_CHOICE_SEMANTIC_WITNESSES', '1') == '1'
 GRAPH_FUSION_ENABLED = os.environ.get('AML_GRAPH_FUSION_ENABLED', '1') == '1'
 GRAPH_FUSION_MAX_CANDIDATES = max(16, int(os.environ.get('AML_GRAPH_FUSION_MAX_CANDIDATES', '256')))
@@ -169,7 +170,9 @@ PROVIDER_CONCURRENCY = max(1, int(os.environ.get("AML_PROVIDER_CONCURRENCY", "4"
 # DashScope rejects non-streaming requests while thinking is enabled.
 # DeepSeek also defaults to thinking; disable it for forced tool selection.
 LLM_DISABLE_THINKING = os.environ.get("AML_LLM_DISABLE_THINKING", "1") == "1"
-LLM_MAX_TOKENS = 1200   # caps runaway repetition from small models
+# Keep unstructured text completions bounded; callers can lower this further
+# when a provider has a small per-request credit allowance.
+LLM_MAX_TOKENS = max(1, int(os.environ.get("AML_LLM_MAX_TOKENS", "1200")))
 LLM_JSON_MAX_TOKENS = int(os.environ.get("AML_LLM_JSON_MAX_TOKENS", "2048"))
 # Providers reject max_tokens above their ceiling with HTTP 400 instead of
 # clamping; clamp locally so a generous default does not break every call.

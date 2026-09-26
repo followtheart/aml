@@ -230,7 +230,7 @@ class RerankBudgetTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_listwise_provider_options_do_not_change_add_defaults(self):
         response = {'choices': [{'message': {'tool_calls': [
-            {'function': {'arguments': '{"ranking":[0],"irrelevant":[],"groups":[]}'}}]}}]}
+            {'function': {'name': 'emit_json_result', 'arguments': '{"ranking":[0],"irrelevant":[],"groups":[]}'}}]}}]}
         call = AsyncMock(return_value=response)
         attempts = []
         async def measured(**kwargs):

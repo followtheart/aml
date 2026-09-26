@@ -38,6 +38,32 @@ class ProviderCompatibilityTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(await llm.complete('Return OK.', attempts=1), 'OK')
         self.assertEqual(call.await_args.kwargs['extra_body'], {'thinking': {'type': 'disabled'}})
 
+    async def test_structured_result_requests_one_call_for_all_options(self):
+        result = {'options': [{'letter': 'A'}, {'letter': 'B'}]}
+        response = {'choices': [{'message': {'tool_calls': [
+            {'function': {'name': 'emit_json_result', 'arguments': result}}]}}]}
+        call = AsyncMock(return_value=response)
+        with patch.object(config, 'LLM_MODEL', 'gpt-4o-mini'), patch('litellm.acompletion', call):
+            actual = await llm.complete_json('Assess all options.', schema={'type': 'object'}, attempts=1)
+        self.assertEqual(actual, result)
+        self.assertIs(call.await_args.kwargs['parallel_tool_calls'], False)
+
+    async def test_multiple_tool_calls_are_not_silently_truncated(self):
+        calls = [{'function': {'name': 'emit_json_result',
+                               'arguments': {'options': [{'letter': letter}]}}}
+                 for letter in ('A', 'B', 'C', 'D')]
+        with patch('litellm.acompletion', AsyncMock(return_value={
+                'choices': [{'message': {'tool_calls': calls}}]})):
+            with self.assertRaises(llm.LLMError):
+                await llm.complete_json('Assess all options.', schema={'type': 'object'}, attempts=1)
+
+    async def test_wrong_function_name_is_not_accepted_as_result(self):
+        response = {'choices': [{'message': {'tool_calls': [
+            {'function': {'name': 'other_function', 'arguments': {'ok': True}}}]}}]}
+        with patch('litellm.acompletion', AsyncMock(return_value=response)):
+            with self.assertRaises(llm.LLMError):
+                await llm.complete_json('Return ok.', schema={'type': 'object'}, attempts=1)
+
     def test_switch_off_does_not_override_provider_thinking(self):
         with patch.object(config, 'LLM_DISABLE_THINKING', False):
             self.assertNotIn('extra_body', llm._provider_kwargs())

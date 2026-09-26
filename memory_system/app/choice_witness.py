@@ -148,9 +148,31 @@ and falls back without changing the source catalog or any support decisions.
         trace['error_type'] = type(exc).__name__
         return fallback('semantic_error')
     status = 'partial' if trace['rejected_witnesses'] else 'ok'
+    witnesses = supplement_first_party(options, sources, witnesses)
     call['status'] = status
     trace.update(status=status, selected_count=sum(map(len, witnesses.values())))
     return witnesses
+
+
+def supplement_first_party(options, sources, witnesses):
+    """Rescue a missed user/persona quote when semantic retrieval chose only context.
+
+    The quote remains a hint and must pass the existing citation and entailment
+    gates. This addresses source-selection misses without relaxing validation.
+    """
+    lexical = build(options, sources)
+    result = {letter: list(items) for letter, items in witnesses.items()}
+    for letter, items in lexical.items():
+        current = result.get(letter, [])
+        if any(item.get('first_party') for item in current):
+            continue
+        rescue = next((item for item in items if item.get('first_party')), None)
+        if rescue is None:
+            continue
+        combined = [rescue]
+        combined.extend(item for item in current if item['source_id'] != rescue['source_id'])
+        result[letter] = combined[:MAX_PER_OPTION]
+    return result
 
 
 def _sentences(text):

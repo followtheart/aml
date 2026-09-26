@@ -153,11 +153,12 @@ class GraphFusionStorageTests(unittest.TestCase):
                  dict(id='c', content='Quoted location', memory_type='episode', sources=[dict(source)])]
         packed, packet_hash, manifest = evidence_packet.pack_ranked(
             items, top_k=3, token_budget=4096, groups=[['a', 'c']])
-        self.assertEqual([item['id'] for item in packed], ['a', 'c'])
+        self.assertEqual([item['id'] for item in packed], ['a', 'b', 'c'])
         self.assertEqual(manifest['evidence_groups'], [['a', 'c']])
         self.assertEqual(packed[1]['sources'][0]['content'], source['content'])
+        self.assertEqual(packed[2]['sources'][0]['content_omitted'], 'duplicate')
         self.assertEqual(evidence_packet.digest(packed), packet_hash)
-        self.assertTrue(any(item['id'] == 'b' for item in manifest['omitted']))
+        self.assertEqual(manifest['omitted'], [])
 
     def test_post_ranking_scope_filter_drops_whole_group_without_failing_search(self):
         rows = [dict(id=mid, content='Evidence ' + mid, type='fact',

@@ -13,6 +13,10 @@ A premise check is true only for a pre-existing fact established in all details.
 An option check is true only if ALL existing personal premises are established;
 new recommendations and future conditional scenarios need no historical proof.
 If the full context still does not support the claim, return false.
+Distinguish monitoring one's own results from a medical diagnosis. When a
+first-person user source asks about changes in their own lab results across
+routine checkups, that can establish the narrower fact that they are tracking
+those results; it does not establish a diagnosis or treatment.
 <sources>
 {sources}
 </sources>

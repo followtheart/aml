@@ -41,7 +41,7 @@ class SupportRepairTests(OfflineCase, unittest.IsolatedAsyncioTestCase):
         qa, packet, first = self.fixture()
         first['options'][1]['kind'] = 'invented'
         second = {'options': [dict(letter='B', kind='generic', claims=[])]}
-        mock = staged_mock(first, second, entailment_response)
+        mock = staged_mock(first, second, entailment_response, {'answer': 'A'})
         diagnostics = {}
         with patch.object(llm, 'complete_json', mock):
             self.assertEqual(await self.gate.answer(qa, packet, diagnostics), 'A')
@@ -58,14 +58,91 @@ class SupportRepairTests(OfflineCase, unittest.IsolatedAsyncioTestCase):
     async def test_unlabelled_options_keep_original_letter_on_local_repair(self):
         qa, packet, first = self.fixture()
         qa['options'] = [s[3:] for s in qa['options']]
-        mock = staged_mock(first, entailment_response)
+        mock = staged_mock(first, entailment_response, {'answer': 'A'})
         with patch.object(llm, 'complete_json', mock):
             self.assertEqual(await self.gate.answer(qa, packet, {}), 'A')
-        self.assertEqual(mock.await_count, 2)
+        self.assertEqual(mock.await_count, 3)
+
+    async def test_invalid_claim_quote_is_repaired_even_when_option_shape_is_valid(self):
+        qa, packet, valid = self.fixture()
+        invalid = copy.deepcopy(valid)
+        invalid['options'][0]['claims'][0]['citations'][0]['quote'] = 'I own a microscope.'
+        repair = {'options': [valid['options'][0]]}
+        mock = staged_mock(invalid, repair, entailment_response, {'answer': 'A'})
+        diagnostics = {}
+        with patch.object(llm, 'complete_json', mock):
+            self.assertEqual(await self.gate.answer(qa, packet, diagnostics), 'A')
+        self.assertEqual(diagnostics['answer_support_validation']['unresolved_options'], [])
+        self.assertIn('quote_not_in_source', mock.call_args_list[1].args[0])
+        self.assertIn('no_valid_user_support', mock.call_args_list[1].args[0])
+        self.assertEqual(diagnostics['choice_alignment'][0]['claims'][0]['citations'][0]['quote'],
+                         'I own a telescope.')
+
+    async def test_failed_claim_quote_repair_remains_unresolved(self):
+        qa, packet, invalid = self.fixture()
+        invalid['options'][0]['claims'][0]['citations'][0]['quote'] = 'I own a microscope.'
+        mock = staged_mock(invalid, {'options': [invalid['options'][0]]})
+        sources, _ = self.gate.build_catalog(packet)
+        diagnostics = {}
+        with patch.object(llm, 'complete_json', mock):
+            entries = await self.gate.assess_support('Options:\n' + '\n'.join(qa['options']),
+                self.gate.Assessments.model_json_schema(), qa['options'], sources, diagnostics)
+        self.assertEqual(diagnostics['answer_support_validation']['unresolved_options'], ['A'])
+        self.assertEqual(entries[0]['validation_status'], 'unresolved')
+        self.assertEqual(entries[1]['kind'], 'generic')
+
+    async def test_single_option_responses_get_all_missing_siblings_repaired(self):
+        qa, packet, first = self.fixture()
+        qa['options'].extend(['C. Look up at night.', 'D. Ask a friend.'])
+        first['options'] = first['options'][:1]
+        responses = [{'options': [dict(letter=k, kind='generic', claims=[])]} for k in 'BCD']
+        mock = staged_mock(first, *responses)
+        sources, _ = self.gate.build_catalog(packet)
+        diagnostics = {}
+        with patch.object(llm, 'complete_json', mock):
+            entries = await self.gate.assess_support('Options:\n' + '\n'.join(qa['options']),
+                self.gate.Assessments.model_json_schema(), qa['options'], sources, diagnostics)
+        self.assertEqual([e['letter'] for e in entries], list('ABCD'))
+        self.assertEqual(diagnostics['answer_support_validation']['unresolved_options'], [])
+        self.assertEqual(mock.await_count, 4)
+        for letter, call in zip('BCD', mock.call_args_list[1:]):
+            self.assertEqual(call.kwargs['schema']['$defs']['Assessment']['properties']['letter']['enum'], [letter])
+            self.assertEqual(call.kwargs['schema']['properties']['options']['maxItems'], 1)
+
+    async def test_one_failed_option_does_not_stop_later_option_repairs(self):
+        qa, packet, first = self.fixture()
+        qa['options'].extend(['C. Look up at night.', 'D. Ask a friend.'])
+        first['options'] = first['options'][:1]
+        responses = [{'options': [dict(letter=k, kind='generic', claims=[])]} for k in 'CD']
+        mock = staged_mock(first, {}, *responses)
+        sources, _ = self.gate.build_catalog(packet)
+        diagnostics = {}
+        with patch.object(llm, 'complete_json', mock):
+            entries = await self.gate.assess_support('Options:\n' + '\n'.join(qa['options']),
+                self.gate.Assessments.model_json_schema(), qa['options'], sources, diagnostics)
+        self.assertEqual(diagnostics['answer_support_validation']['unresolved_options'], ['B'])
+        self.assertEqual(entries[0]['claims'][0]['text'], 'you own a telescope')
+        self.assertEqual(entries[1]['validation_status'], 'unresolved')
+        self.assertEqual([e['kind'] for e in entries[2:]], ['generic', 'generic'])
+
+    async def test_provider_failure_for_one_option_does_not_abort_later_repairs(self):
+        qa, packet, first = self.fixture()
+        qa['options'].extend(['C. Look up at night.', 'D. Ask a friend.'])
+        first['options'] = first['options'][:1]
+        later = [{'options': [dict(letter=k, kind='generic', claims=[])]} for k in 'CD']
+        mock = staged_mock(first, llm.LLMError('temporary provider failure'), *later)
+        sources, _ = self.gate.build_catalog(packet)
+        diagnostics = {}
+        with patch.object(llm, 'complete_json', mock):
+            entries = await self.gate.assess_support('Options:\n' + '\n'.join(qa['options']),
+                self.gate.Assessments.model_json_schema(), qa['options'], sources, diagnostics)
+        self.assertEqual(diagnostics['answer_support_validation']['unresolved_options'], ['B'])
+        self.assertEqual([entry['kind'] for entry in entries[2:]], ['generic', 'generic'])
+        self.assertEqual(mock.await_count, 4)
 
     async def test_abstention_is_distinct_from_provider_failure_and_scores_zero(self):
         qa, packet, _ = self.fixture()
-        mock = staged_mock({}, {})
+        mock = staged_mock({}, {}, {})
         with patch.object(llm, 'complete_json', mock):
             pred, score, diagnostics = await eval_scoring.evaluate(qa, packet)
         self.assertEqual((pred, score, diagnostics['answer_status']), ('ABSTAIN', 0, 'abstained'))
@@ -77,7 +154,7 @@ class SupportRepairTests(OfflineCase, unittest.IsolatedAsyncioTestCase):
 
 
 class SemanticRecoveryTests(OfflineCase):
-    def test_recovery_needs_anchor_strength_premise_and_whole_option(self):
+    def test_recovery_needs_anchor_strength_and_independent_premise(self):
         sources, _ = self.catalog('Which telescopes are useful for stargazing?')
         options = ['A. Given your interest in stargazing, visit an observatory.', 'B. Rest.']
         original = assessment('your interest in stargazing', 's0', sources['s0']['text'], basis='topic_interest')
@@ -87,7 +164,8 @@ class SemanticRecoveryTests(OfflineCase):
             checks = self.gate.entailment_checks(entries, sources, options)
             verdicts = dict(checks=[dict(claim_id=c['claim_id'], entailed=c['claim_id'] not in rejected) for c in checks])
             self.gate.validate_entailments(verdicts, entries, checks)
-            self.assertEqual(entries[0]['status'], 'unsupported' if rejected else 'supported')
+            expected = 'unsupported' if 'A:0' in rejected else 'partial' if rejected else 'supported'
+            self.assertEqual(entries[0]['status'], expected)
         for reason, refs in [('contradicted', original['options'][0]['claims'][0]['citations']), ('no_source', [])]:
             data = copy.deepcopy(original)
             data['options'][0]['claims'][0].update(reason=reason, citations=refs)

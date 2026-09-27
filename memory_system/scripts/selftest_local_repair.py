@@ -4,10 +4,79 @@ import unittest
 from unittest.mock import patch
 
 from selftest_answer_choice import OfflineCase, memory, seal, assessment, staged_mock, entailment_response
-from app import answer_context, choice_premises, evidence_units, eval_scoring, llm
+from app import answer_context, choice_premises, evidence_units, eval_scoring, llm, metrics
 
 
 class SupportRepairTests(OfflineCase, unittest.IsolatedAsyncioTestCase):
+    async def test_global_failures_repair_all_options_with_scoped_span_ids(self):
+        for failure in ['parse','wrapped_parse','missing','wrong_type','extra_key']:
+            with self.subTest(failure=failure):
+                qa,packet,valid=self.fixture();sources,_=self.gate.build_catalog(packet);calls=[]
+                async def provider(prompt,**kwargs):
+                    calls.append(kwargs)
+                    if kwargs['stage']=='eval.choice_support':
+                        if failure=='parse':raise ValueError('Malformed structured response')
+                        if failure=='wrapped_parse':raise llm.LLMError('Structured response failed') from metrics.ResponseParseError({})
+                        if failure=='missing':return {}
+                        if failure=='wrong_type':return {'options':None}
+                        return dict(options=copy.deepcopy(valid['options']),extra=True)
+                    schema=kwargs['schema'];letter=schema['$defs']['Assessment']['properties']['letter']['enum'][0]
+                    claim_schema=schema['$defs']['Claim'];self.assertNotIn('text',claim_schema['properties']);self.assertIn('span_id',claim_schema['required'])
+                    ids=claim_schema['properties']['span_id']['enum'];self.assertTrue(all(i.startswith(letter+':') for i in ids))
+                    row=copy.deepcopy(valid['options'][0 if letter=='A' else 1])
+                    if row['claims']:
+                        row['claims'][0].pop('text');row['claims'][0]['span_id']=ids[0]
+                    return dict(options=[row])
+                d={}
+                with patch.object(llm,'complete_json',provider):result=await self.gate.assess_support('Options:\n'+'\n'.join(qa['options']),self.gate.Assessments.model_json_schema(),qa['options'],sources,d)
+                self.assertEqual(len(calls),3);self.assertEqual(d['answer_support_validation']['accepted_options'],['A','B']);self.assertEqual(result[0]['status'],'supported');self.assertEqual(result[1]['status'],'generic')
+    async def test_global_failure_does_not_accept_unknown_span_or_retry_forever(self):
+        qa,packet,valid=self.fixture();sources,_=self.gate.build_catalog(packet);calls=[]
+        async def provider(prompt,**kwargs):
+            calls.append(kwargs)
+            if kwargs['stage']=='eval.choice_support':return {}
+            letter=kwargs['schema']['$defs']['Assessment']['properties']['letter']['enum'][0];row=copy.deepcopy(valid['options'][0 if letter=='A' else 1])
+            if row['claims']:row['claims'][0].pop('text');row['claims'][0]['span_id']='A:999'
+            return dict(options=[row])
+        d={}
+        with patch.object(llm,'complete_json',provider):result=await self.gate.assess_support('Options:\n'+'\n'.join(qa['options']),self.gate.Assessments.model_json_schema(),qa['options'],sources,d)
+        self.assertEqual(len(calls),3);self.assertEqual(d['answer_support_validation']['unresolved_options'],['A']);self.assertEqual(result[1]['status'],'generic')
+
+    async def test_repair_witnesses_only_cover_pending_option_and_preserve_multiline_quote(self):
+        from app import choice_witness
+        qa, packet, valid = self.fixture()
+        sources, _ = self.gate.build_catalog(packet)
+        witnesses = {
+            'A': [dict(source_id='s0', role='user', quote='I own a telescope.\nIt is mine.')],
+            'B': [dict(source_id='other', role='user', quote='Unrelated candidate hint.')],
+        }
+        before = copy.deepcopy(witnesses)
+        prompt = ('Options:\n' + '\n'.join(qa['options']) + '\n<witnesses>\n'
+                  + choice_witness.render(witnesses) + '\n</witnesses>\nCORE TASK\nAssess both.')
+        mock = staged_mock({'options': [valid['options'][1]]}, {'options': [valid['options'][0]]})
+        with patch.object(llm, 'complete_json', mock):
+            result = await self.gate.assess_support(prompt, self.gate.Assessments.model_json_schema(),
+                qa['options'], sources, dict(answer_witness_prefill=witnesses))
+        initial, repair = [call.args[0] for call in mock.call_args_list]
+        self.assertIn('B: [other user]', initial)
+        block = repair.split('<witnesses>\n', 1)[1].split('\n</witnesses>', 1)[0]
+        self.assertEqual(block, choice_witness.render({'A': witnesses['A']}))
+        self.assertEqual(witnesses, before)
+        self.assertEqual(result[1]['kind'], 'generic')
+
+    async def test_pending_option_without_witness_does_not_inherit_sibling_hint(self):
+        from app import choice_witness
+        qa, packet, valid = self.fixture()
+        sources, _ = self.gate.build_catalog(packet)
+        witnesses = {'B': [dict(source_id='s0', role='user', quote='I own a telescope.')]}
+        prompt = ('Options:\n' + '\n'.join(qa['options']) + '\n<witnesses>\n'
+                  + choice_witness.render(witnesses) + '\n</witnesses>\nCORE TASK\nAssess both.')
+        mock = staged_mock({'options': [valid['options'][1]]}, {'options': [valid['options'][0]]})
+        with patch.object(llm, 'complete_json', mock):
+            await self.gate.assess_support(prompt, self.gate.Assessments.model_json_schema(),
+                qa['options'], sources, dict(answer_witness_prefill=witnesses))
+        self.assertIn('<witnesses>\n(none found)\n</witnesses>', mock.call_args_list[1].args[0])
+
     def fixture(self):
         packet = seal(memory('I own a telescope.'))
         qa = dict(question='How can I observe the sky?', scoring='choice', qa_type='single_choice',
@@ -15,6 +84,39 @@ class SupportRepairTests(OfflineCase, unittest.IsolatedAsyncioTestCase):
                   gold_labels=['DO_NOT_SEND_GOLD'])
         support = assessment('you own a telescope', 's0', 'I own a telescope.')
         return qa, packet, support
+
+    async def test_missing_option_repair_requires_original_spans(self):
+        qa,packet,valid=self.fixture()
+        first={'options':[valid['options'][1]]}
+        mock=staged_mock(first,{'options':[valid['options'][0]]})
+        sources,_=self.gate.build_catalog(packet)
+        diagnostics={}
+        with patch.object(llm,'complete_json',mock):
+            result=await self.gate.assess_support('Options:\n'+'\n'.join(qa['options']),self.gate.Assessments.model_json_schema(),qa['options'],sources,diagnostics)
+        self.assertEqual(mock.await_count,2)
+        schema=mock.call_args_list[1].kwargs['schema']['$defs']['Claim']
+        self.assertIn('span_id',schema['required'])
+        self.assertNotIn('text',schema['properties'])
+        self.assertTrue(all(x.startswith('A:') for x in schema['properties']['span_id']['enum']))
+        self.assertEqual(result[1]['kind'],'generic')
+
+    async def test_repair_source_cards_exclude_assistant_rewrites(self):
+        import json
+        qa, packet, valid = self.fixture()
+        sources, _ = self.gate.build_catalog(packet)
+        sources['rewrite'] = dict(id='rewrite', role='assistant', text='Rewrite-only marker.')
+        before = copy.deepcopy(sources)
+        prompt = 'Options:\n' + '\n'.join(qa['options']) + '\n' + json.dumps(
+            self.gate._cards(sources), ensure_ascii=False)
+        mock = staged_mock({'options': [valid['options'][1]]},
+                           {'options': [valid['options'][0]]})
+        with patch.object(llm, 'complete_json', mock):
+            await self.gate.assess_support(prompt, self.gate.Assessments.model_json_schema(),
+                                          qa['options'], sources, {})
+        self.assertIn('Rewrite-only marker.', mock.call_args_list[0].args[0])
+        self.assertNotIn('Rewrite-only marker.', mock.call_args_list[1].args[0])
+        self.assertIn('I own a telescope.', mock.call_args_list[1].args[0])
+        self.assertEqual(sources, before)
 
     async def test_bad_sibling_never_erases_valid_personal_evidence(self):
         qa, packet, first = self.fixture()

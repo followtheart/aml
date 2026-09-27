@@ -211,10 +211,7 @@ class SemanticWitnessTests(unittest.IsolatedAsyncioTestCase):
             if stage == 'eval.choice_entailment_review':
                 return entailment_response(prompt, {'A:0', 'A:option'})
             self.assertEqual(stage, 'eval.choice_entailment')
-            legacy = entailment_response(prompt, {'A:0', 'A:option'})
-            return dict(checks=[dict(claim_id=check['claim_id'], verdict=(
-                'personal_supported' if check['entailed'] else 'unsupported_personal'))
-                for check in legacy['checks']])
+            return entailment_response(prompt, {'A:0', 'A:option'})
 
         with patch.object(llm, 'complete_json', respond):
             selected = await answer_choice.answer(qa, self.packet, self.diagnostics)
@@ -256,10 +253,7 @@ class SemanticWitnessTests(unittest.IsolatedAsyncioTestCase):
             if stage == 'eval.choice_support':
                 return support
             if stage == 'eval.choice_entailment':
-                legacy = entailment_response(prompt)
-                return dict(checks=[dict(claim_id=check['claim_id'], verdict=(
-                    'personal_supported' if check['entailed'] else 'unsupported_personal'))
-                    for check in legacy['checks']])
+                return entailment_response(prompt)
             if stage == 'eval.choice_constraints':
                 return dict(decisions=[dict(pair_id='A:r0', violates=True)])
             self.assertEqual(stage, 'eval.choice_select')

@@ -1,7 +1,7 @@
 """Bounded evidence queries; option text is a hypothesis, never a user fact."""
 import re
 
-from . import personal_evidence
+from . import personal_evidence, rerank_query
 
 MAX_QUERY_CHARS = 240
 
@@ -25,8 +25,9 @@ def compact_option(text):
 def build(query, options, plan, limit=6):
     """Reserve one query per option before expansions; validate positional output.
 
-    Empty planner entries explicitly identify generic advice. Missing/invalid
-    entries instead fall back to the option's own text, so parser failure cannot
+    Empty planner entries identify generic advice unless the literal option
+    has an explicit premise. Missing/invalid entries fall back to the option's
+    own text, so parser failure cannot
     silently erase an option. Choice expansions must use supplied vocabulary;
     an unrelated profile cannot introduce ownership or habits into a query.
     """
@@ -62,6 +63,13 @@ def build(query, options, plan, limit=6):
         value = proposed[index] if valid_array else None
         allowed = personal_evidence.terms(option + ' ' + query)
         words = personal_evidence.terms(value) if isinstance(value, str) else set()
+        # Vocabulary overlap with the whole option can validate advice-only
+        # rewrites. Keep a safe literal premise when that rewrite loses its
+        # distinguishing terms; it remains a retrieval hypothesis, not a fact.
+        literal = rerank_query._premise(option)
+        premise_words = personal_evidence.terms(literal)
+        if premise_words and len(words & premise_words) < len(premise_words) / 2:
+            value, words = literal, premise_words
         if (isinstance(value, str) and len(value) <= MAX_QUERY_CHARS
                 and (not value.strip() or (words and len(words & allowed) >= len(words) / 2))):
             add(value, 'option_premise', index, f'option:{index}', True)

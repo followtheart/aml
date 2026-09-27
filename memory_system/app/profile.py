@@ -190,6 +190,11 @@ async def consolidate(st: store.Store, req, persisted: List[Tuple[Optional[str],
             if neighbors and neighbors[0]['content'].strip().casefold() == content.casefold():
                 # A-Mem-style evolution: reinforce the existing trait instead
                 # of storing a near-duplicate alongside it.
+                if neighbors[0]['id'] in support:
+                    # The extracted preference already states this exact claim.
+                    # It is not a new derived view of itself. Keep its existing
+                    # lineage and process the remaining consolidation items.
+                    continue
                 st.add_support_keys(neighbors[0]["id"], keys)
                 st.register_dependencies('amu', neighbors[0]['id'], support)
                 log.info("profile reinforced target=%s support=%d",

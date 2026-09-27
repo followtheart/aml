@@ -1,5 +1,6 @@
 """Citation recovery must not promote claims before independent verification."""
 import copy
+import json
 import importlib.util
 import os
 from pathlib import Path
@@ -29,6 +30,48 @@ class RecoveryTests(unittest.IsolatedAsyncioTestCase):
             result=await gate.recover_missing_citations(entries,sources,dict(question='How should I spend my weekend?'),diagnostics if diagnostics is not None else {})
         self.assertLessEqual(mock.await_count,1)
         return result,mock
+
+    async def test_recovery_cards_keep_user_and_persona_without_mutation(self):
+        entries,sources,options,reply=self.fixture()
+        sources['assistant']=dict(id='assistant',role='assistant',text='I cycled by the canal last weekend.')
+        sources['persona']=dict(id='persona',role='user',declared='persona',text='User enjoys cycling.')
+        import copy
+        before=copy.deepcopy(sources)
+        updated,mock=await self.invoke(entries,sources,reply)
+        prompt=mock.call_args.args[0]
+        cards=json.loads(prompt.split('Original source cards:\n',1)[1].split('\n<repair_feedback>',1)[0])
+        self.assertEqual({c['id'] for c in cards},{'s0','persona'})
+        self.assertEqual(sources,before)
+        self.assertEqual(updated[0]['claims'][0]['status'],'unsupported')
+
+    async def test_unspecified_reason_recovers_but_requires_independent_verification(self):
+        entries,sources,options,reply=self.fixture()
+        entries[0]['claims'][0]['reason']='none'
+        before=copy.deepcopy(entries)
+        updated,mock=await self.invoke(entries,sources,reply)
+        self.assertEqual(mock.await_count,1)
+        self.assertEqual(entries,before)
+        self.assertEqual(updated[0]['claims'][0]['status'],'unsupported')
+        self.assertEqual(updated[0]['claims'][0]['citations'][0]['quote'],sources['s0']['text'])
+        checks=gate.entailment_checks(updated,sources,options)
+        self.assertIn('A:0',{c['claim_id'] for c in checks})
+        verdict={'checks':[dict(claim_id=c['claim_id'],entailed=c['claim_id']!='A:0') for c in checks]}
+        rejected=gate.validate_entailments(verdict,updated,checks)
+        self.assertEqual(rejected[0]['status'],'unsupported')
+
+    async def test_unspecified_reason_does_not_bypass_existing_recovery_gates(self):
+        for mutation in ['unresolved','claim_error','entry_error','dropped','has_citation']:
+            with self.subTest(mutation=mutation):
+                entries,sources,_,reply=self.fixture()
+                claim=entries[0]['claims'][0];claim['reason']='none'
+                if mutation=='unresolved':entries[0]['validation_status']='unresolved'
+                if mutation=='claim_error':claim['validation_errors']=['invalid']
+                if mutation=='entry_error':entries[0]['validation_errors']=['invalid']
+                if mutation=='dropped':claim['dropped_citations']=[{}]
+                if mutation=='has_citation':claim['citations']=[{}]
+                updated,mock=await self.invoke(entries,sources,reply)
+                self.assertEqual(mock.await_count,0)
+                self.assertEqual(updated,entries)
 
     async def test_premise_verdict_and_option_tier_are_independent(self):
         entries,sources,options,reply=self.fixture();before=copy.deepcopy(entries)

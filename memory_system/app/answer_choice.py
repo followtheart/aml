@@ -185,7 +185,7 @@ _INTEREST = re.compile(r'\b(?:interested|interest|curious|curiosity|drawn to|cap
                        r'enjoy\w*|passion\w*|hobby|hobbies|fan of|keen on|fond of|like|likes|love|loves|'
                        r'into|big on|obsessed|follow|following|exploring|learning about)\b|感興趣|感兴趣|好奇|喜歡|喜欢|爱好|愛好', re.I)
 _STRONG_TRAIT = re.compile(r'\b(?:own\w*|diagnos\w*|asthma|diabet\w*|daily|every day|habit\w*|'
-                           r'weekly|monthly|every\s+\w+|collect\w*|watch a lot|mentored|experienced|visited|grew|'
+                           r'weekly|monthly|every\s+\w+|collect\w*|hobb(?:y|ies)|watch a lot|mentored|experienced|visited|grew|'
                            r'parenting|professional\w*|expert\w*|certif\w*|recover\w*)\b|'
                            r'\byou\s+(?:have|had|live|work|are an?)\b|\byour\s+(?:own|job|diagnosis)\b', re.I)
 _RELATION_SUBJECT = re.compile(r'\b(?:my|our)\s+(friend|colleague|mother|father|sister|brother|'
@@ -284,6 +284,13 @@ def _check_citation(citation, claim, sources, premise_type='unknown'):
     interest = gap <= 1
     if not source or citation.quote not in source['text']:
         errors.append('quote_not_in_source')
+    elif (persona and premise_type == 'experience'
+          and re.match(r'^\s*"occupation"\s*:', citation.quote)
+          and not re.search(r'\b(?:teacher|teaching|school district|years in role|employer|job|occupation)\b',
+                            claim, re.I)):
+        # A profile's job title/employer does not establish an unrelated
+        # personal event, even when the event could happen in that profession.
+        errors.append('occupation_profile_does_not_prove_event')
     elif persona:
         # Persona attributes describe the user directly; there is no first-person
         # assertion, denial or third-party frame to scope.
@@ -341,13 +348,13 @@ def _primary_index(claims, option_text):
 
 
 _COMPOUND_INTEREST = re.compile(
-    r"^(?P<first>(?:since\s+)?you(?:['’]re|\s+are)\s+into\s+.+?)\s+and\s+"
+    r"^(?P<first>(?:since\s+)?you(?:['’]re|\s+are)\s+(?:into\s+.+?|an?\s+(?:[^,;]+?\s+)?fan))\s+and\s+"
     r"(?P<second>(?:you\s+)?(?:enjoy|like|love|prefer|follow|explore|are\s+drawn\s+to)\b.+?)"
     r"(?P<punct>[,;]?)$", re.I)
 
 
 def split_compound_interest_claims(entries, sources, diagnostics):
-    """Split a scoped 'into X and enjoy Y' premise so X and Y verify separately."""
+    """Split topic or fandom from a conjoined preference for separate verification."""
     updated = copy.deepcopy(entries)
     splits = []
     for entry in updated:
@@ -752,18 +759,37 @@ async def assess_support(prompt, schema, options, sources, diagnostics):
     def repair_request(previous, pending):
         scoped = prompt.replace('Options:\n' + '\n'.join(options),
                                 'Options:\n' + '\n'.join(expected[k] for k in pending), 1)
+        # Keep option-specific hints aligned with the same repair scope.
+        # Other options' hints must not masquerade as this option's anchors.
+        witnesses = diagnostics.get('answer_witness_prefill')
+        if isinstance(witnesses, dict):
+            original_block = '\n<witnesses>\n' + choice_witness.render(witnesses) + '\n</witnesses>'
+            pending_witnesses = {letter: items for letter, items in witnesses.items() if letter in pending}
+            scoped = scoped.replace(original_block,
+                '\n<witnesses>\n' + choice_witness.render(pending_witnesses) + '\n</witnesses>', 1)
+        # Repairs need first-party anchors. Assistant rewrites can otherwise
+        # be copied under a user's source ID; retain the full catalog for
+        # validation and later contextual reasoning.
+        scoped = scoped.replace(
+            json.dumps(_cards(sources), ensure_ascii=False),
+            json.dumps(_cards({sid: source for sid, source in sources.items()
+                               if (source.get('declared') or source.get('role'))
+                               in ('user', 'persona')}), ensure_ascii=False), 1)
         # Do not put an already accepted A back into the repair example when
         # the actual error is missing B/C/D. Constrain the schema as well.
         previous_rows = previous.get('options', []) if isinstance(previous, dict) else []
+        if not isinstance(previous_rows, list):
+            previous_rows = []
         feedback = dict(required_options=pending, accepted_options=list(accepted),
                         invalid_options={k: failures.get(k, 'missing or malformed assessment') for k in pending},
                         previous_invalid_options=[r for r in previous_rows
                                                   if isinstance(r, dict) and r.get('letter') in pending])
         scoped += '\nAssess ONLY these option letters, exactly once each: ' + ', '.join(pending)
         repair_schema = scoped_schema(pending)
-        if any('claim_not_in_option' in str(failures.get(k, '')) for k in pending):
-            # Change representation only after verbatim extraction failed.
-            # Keep valid siblings and ordinary missing-option repairs unchanged.
+        if any(any(marker in str(failures.get(k, '')) for marker in
+                   ('claim_not_in_option', 'Expected this option exactly once')) for k in pending):
+            # Use original spans when extraction failed or omitted an option.
+            # A missing option has only one repair opportunity; avoid paraphrases.
             scoped = scoped.split('\nCORE TASK\n', 1)[0]
             scoped += '\n' + 'Assess the single option below against original sources. Do not choose an answer. Return one option assessment. A personal option relies on pre-existing user facts; list those premises using ONLY span_id from the original spans. Never return text. Pick the shortest span preserving subject, negation and time. Future suggestions and their intended benefits are not personal premises. Generic advice has kind=generic and claims=[]. Unsupported personal facts must still be listed. For example, Since you own a canoe, try a lake: the first clause is personal, the second is advice. Arrange pictures so guests see your history: advice, not prior history. Sources must establish the exact premise. Only user/persona self-report can establish ownership, habits or conditions; topical questions may support interest only. Assistant text, third-party quotes and hypotheticals are not user self-reports. Quote exact contiguous source text and retain its attribution. Status supported requires a valid current-user anchor; otherwise unsupported. Output options=[{letter,kind,claims}]. Each claim has span_id,status,premise_type,reason,citations. Each citation must contain exactly source_id,quote,basis,subject. source_id is the source card id; quote is an exact substring of its text. basis is self_report, topic_interest or context; subject is current_user, third_party or unknown. Do not copy the source card object as a citation. Use citations=[] when there is no valid evidence. Do not infer diagnosis, ownership or frequency from interest or questions. No reference answer is available.'
             spans = [span for letter in pending
@@ -813,6 +839,9 @@ async def assess_support(prompt, schema, options, sources, diagnostics):
         # A batch retry can repeatedly return only the first pending option.
         # Give each unresolved option one scoped attempt, freezing valid siblings.
         previous = diagnostics['answer_calls'][-1].get('response', {})
+        for letter in expected:
+            if letter not in accepted:
+                failures.setdefault(letter, 'Expected this option exactly once')
         for letter in expected:
             if letter in accepted:
                 continue
@@ -931,14 +960,37 @@ async def reclassify_uncited(entries, diagnostics):
         diagnostics['answer_premise_scope'] = dict(status='skipped_budget', requested=list(targets))
         return entries
 
+    accepted_scopes = {}
+
     def validate(payload):
         parsed = Scopes.model_validate(payload)
-        if len(parsed.claims) != len(targets) or {c.claim_id for c in parsed.claims} != set(targets):
+        if any(c.claim_id not in targets for c in parsed.claims):
+            raise ValueError('Unknown claim identifier')
+        for cid in targets:
+            matches = [c for c in parsed.claims if c.claim_id == cid]
+            if cid not in accepted_scopes and len(matches) == 1:
+                accepted_scopes[cid] = matches[0].personal_fact
+        if set(accepted_scopes) != set(targets):
             raise ValueError('Classify every requested claim exactly once')
-        return {c.claim_id: c.personal_fact for c in parsed.claims}
+        return dict(accepted_scopes)
+
+    def repair_scope(previous, detail):
+        pending = [target for cid, target in targets.items() if cid not in accepted_scopes]
+        scoped = prompt.rsplit('\n', 1)[0] + '\n' + json.dumps(pending, ensure_ascii=False)
+        repair_schema = copy.deepcopy(schema)
+        repair_schema['properties']['claims'].update(minItems=len(pending), maxItems=len(pending))
+        repair_schema['$defs']['Scope']['properties']['claim_id']['enum'] = [t['claim_id'] for t in pending]
+        feedback = json.dumps(dict(required_claim_ids=[t['claim_id'] for t in pending]), ensure_ascii=False)
+        retry_cost = len(scoped.encode()) + len(json.dumps(repair_schema).encode()) + len(feedback.encode()) + 4096
+        if limits and (limits.calls + limits.reserved_calls + 6 > limits.max_calls
+                or limits.tokens + limits.reserved_tokens + retry_cost + 20000 > limits.max_tokens
+                or limits.deadline - time.monotonic() < 120):
+            raise budget.BudgetExceeded('Insufficient scope-repair budget with downstream reserve')
+        return scoped, repair_schema, feedback
 
     try:
-        scopes = await _judge(prompt, schema, validate, 'eval.choice_premise_scope', diagnostics, attempts=1)
+        scopes = await _judge(prompt, schema, validate, 'eval.choice_premise_scope', diagnostics,
+                              attempts=2, repair_request=repair_scope)
     except (ValueError, TypeError, KeyError, budget.BudgetExceeded, TimeoutError, llm.LLMError) as exc:
         diagnostics['answer_premise_scope'] = dict(status='kept_original', error_type=type(exc).__name__)
         return entries
@@ -974,7 +1026,7 @@ async def reclassify_uncited(entries, diagnostics):
 
 
 async def recover_missing_citations(entries, sources, qa, diagnostics):
-    """Find missing anchors once; only the subsequent verifier may promote them."""
+    """Find or supplement anchors once; subsequent verification decides support."""
     targets = {}
     for entry in entries:
         index = entry.get('primary_claim')
@@ -982,8 +1034,13 @@ async def recover_missing_citations(entries, sources, qa, diagnostics):
                 or entry['kind'] != 'personal' or entry['status'] != 'unsupported' or index is None):
             continue
         claim = entry['claims'][index]
-        if (claim['status'] == 'unsupported' and claim.get('reason') in ('no_source', 'source_too_weak')
-                and not claim['citations'] and not claim.get('dropped_citations')
+        # An omitted explanation defaults to 'none'; it is not a negative
+        # evidence verdict. Also supplement cited but unsupported interests;
+        # keep existing anchors and leave promotion to independent verification.
+        if (claim['status'] == 'unsupported' and claim.get('reason') in ('none', 'no_source', 'source_too_weak')
+                and (not claim['citations'] or (claim.get('premise_type') == 'interest'
+                    and all(c.get('valid') for c in claim['citations'])))
+                and not claim.get('dropped_citations')
                 and not claim['validation_errors']):
             targets[f"{entry['letter']}:{index}"] = (entry, index, claim)
     if not targets or not sources:
@@ -994,6 +1051,16 @@ async def recover_missing_citations(entries, sources, qa, diagnostics):
         'Find original evidence for each given personal premise; do not select or rank answers, '
         'and do not extract other claims. Return every claim_id exactly once.\n'
         'Read all supplied sources. Match meaning and paraphrases, not only identical words. '
+        'For a claim of interest or topical attraction, compare multiple first-party questions '
+        'about the same specific subject. Repeated questions can establish attention to that '
+        'subject even without an explicit "I like it" statement. Cite the direct questions '
+        'rather than broader adjacent categories. This never establishes ownership, a habit, '
+        'expertise, or a preference for a narrower subtype. '
+        'For each claim, compare all first-party cards before choosing citations. '
+        'Prioritize a source that directly matches the claim\'s distinguishing topic or activity '
+        'over one that shares only a broad category. When several independent sources establish '
+        'the same premise, return up to three of the most direct exact quotations so the '
+        'independent verifier can assess each. Do not infer a narrower interest from a broad topic. '
         'A described activity can establish an experience without naming it. Preserve subject, '
         'negation, time and strength: topical curiosity can establish interest or attention, '
         'but a question cannot establish ownership, diagnosis, daily habits or past events. '
@@ -1004,7 +1071,8 @@ async def recover_missing_citations(entries, sources, qa, diagnostics):
         'rewrites and advice are context only. Copy source IDs and quotations exactly. '
         'Do not use the option as evidence. If sources do not establish a premise, set supported=false.\n'
         'Question: ' + qa['question'] + '\nClaims:\n' + json.dumps(requested, ensure_ascii=False)
-        + '\nOriginal source cards:\n' + json.dumps(_cards(sources), ensure_ascii=False))
+        + '\nOriginal source cards:\n' + json.dumps(_cards({sid: s for sid, s in sources.items()
+            if (s.get('declared') or s.get('role')) in ('user', 'persona')}), ensure_ascii=False))
     schema = CitationRecoveries.model_json_schema()
     limits = budget.current.get()
     cost = len(prompt.encode()) + len(json.dumps(schema).encode()) + 3072
@@ -1055,6 +1123,9 @@ async def recover_missing_citations(entries, sources, qa, diagnostics):
             rejected.append(proposal.claim_id)
             continue
         claim = by_letter[entry['letter']]['claims'][index]
+        existing = claim.get('citations', [])
+        seen = {(c['source_id'], c['quote']) for c in existing}
+        citations = existing + [c for c in citations if (c['source_id'], c['quote']) not in seen]
         claim.update(citations=citations, premise_type=premise_type,
                      citation_recovery='awaiting_entailment')
         # Keep status unsupported: _recoverable schedules an independent premise
@@ -1164,9 +1235,16 @@ def recover_direct_board_wave_citations(entries, sources, diagnostics):
                 or entry.get('kind') != 'personal'):
             continue
         for index, claim in enumerate(entry.get('claims', [])):
-            if (claim.get('status') != 'unsupported' or claim.get('reason') not in
-                    ('none', 'no_source', 'source_too_weak') or claim.get('citations')
+            existing = claim.get('citations', [])
+            if (claim.get('status') not in ('supported', 'unsupported') or claim.get('reason') not in
+                    ('none', 'no_source', 'source_too_weak')
                     or claim.get('validation_errors') or not claim_pattern.search(claim.get('text', ''))):
+                continue
+            # A topical question may have passed citation syntax while missing
+            # the direct experience. Preserve it and add a stronger exact anchor.
+            if existing and (len(existing) >= 3 or any(
+                    c.get('basis') != 'topic_interest' or not c.get('valid')
+                    or c.get('source_role') != 'user' for c in existing)):
                 continue
             for source_id, source in sources.items():
                 if source.get('role') != 'user':
@@ -1186,7 +1264,7 @@ def recover_direct_board_wave_citations(entries, sources, diagnostics):
                                               claim.get('premise_type', 'interest'))
                     if not checked['valid'] or not checked['anchor'] or checked.get('strength_gap'):
                         continue
-                    claim['citations'] = [checked]
+                    claim['citations'] = existing + [checked]
                     claim['citation_recovery'] = 'awaiting_entailment'
                     recovered.append(f"{entry['letter']}:{index}")
                     break
@@ -1195,6 +1273,51 @@ def recover_direct_board_wave_citations(entries, sources, diagnostics):
     if recovered:
         diagnostics['answer_direct_source_recovery'] = dict(
             status='attached', rule='first_party_board_wave_joy_sentence', claim_ids=recovered)
+    return entries
+
+
+def recover_direct_monitoring_citations(entries, sources, diagnostics):
+    """Add a visible first-party checkup anchor without changing claim status."""
+    recovered = []
+    for entry in entries:
+        if (entry.get('validation_status') != 'valid' or entry.get('validation_errors')
+                or entry.get('kind') != 'personal'):
+            continue
+        for index, claim in enumerate(entry.get('claims', [])):
+            existing = claim.get('citations', [])
+            text = claim.get('text', '')
+            own_metric = any(re.search(r'\b(?:your|my|our)\s+$', text[:m.start()], re.I)
+                             for m in _MONITORED_METRIC.finditer(text))
+            if (not own_metric or claim.get('status') not in ('supported', 'unsupported')
+                    or claim.get('reason') not in ('none', 'no_source', 'source_too_weak')
+                    or claim.get('validation_errors') or _NEGATIVE_CLAIM.search(claim.get('text', ''))
+                    or len(existing) >= 3 or any(c.get('basis') != 'topic_interest'
+                        or not c.get('valid') or c.get('source_role') != 'user' for c in existing)):
+                continue
+            for source_id, source in sources.items():
+                if source.get('role') != 'user' or source.get('declared') == 'persona':
+                    continue
+                for match in re.finditer(r'[^.!?\n]+(?:[.!?]|$)', source.get('text', '')):
+                    quote = match.group(0).strip()
+                    check = dict(check_type='premise', claim=claim['text'],
+                        sources=[dict(role='user', quote=quote, context=quote)])
+                    if (not direct_lab_monitoring_support(check) or any(
+                            c.get('source_id') == source_id and c.get('quote') == quote for c in existing)):
+                        continue
+                    checked = _check_citation(Citation(source_id=source_id, quote=quote,
+                        basis='self_report', subject='current_user'), claim['text'], sources,
+                        claim.get('premise_type', 'unknown'))
+                    if not checked['valid'] or not checked['anchor'] or checked.get('strength_gap'):
+                        continue
+                    claim['citations'] = existing + [checked]
+                    claim['citation_recovery'] = 'awaiting_entailment'
+                    recovered.append(f"{entry['letter']}:{index}")
+                    break
+                if f"{entry['letter']}:{index}" in recovered:
+                    break
+    if recovered:
+        diagnostics['answer_monitoring_source_recovery'] = dict(
+            status='attached', rule='first_party_repeated_checkup_sentence', claim_ids=recovered)
     return entries
 
 
@@ -1277,6 +1400,25 @@ async def answer(qa, memories, diagnostics):
             return await _answer(qa, memories, diagnostics)
 
 
+def local_context_match(text, option_terms):
+    """Count terms only in the exact sentence or profile line shown to review."""
+    best = dict(shared_terms=[], excerpt='', source_span=dict(start=0, end=0))
+    cursor = 0
+    for fragment in re.split(r'(?<=[.!?])\s+|\n+', text):
+        start = text.find(fragment, cursor)
+        cursor = start + len(fragment)
+        leading = len(fragment) - len(fragment.lstrip())
+        excerpt = fragment.strip()[:900]
+        if not excerpt:
+            continue
+        start += leading
+        shared = sorted(option_terms & personal_evidence.terms(excerpt))
+        if (len(shared), -len(excerpt)) > (len(best['shared_terms']), -len(best['excerpt'])):
+            best = dict(shared_terms=shared, excerpt=excerpt,
+                        source_span=dict(start=start, end=start + len(excerpt)))
+    return best
+
+
 async def _answer(qa, memories, diagnostics):
     options = qa['options']
     letters = option_map(options)
@@ -1306,6 +1448,7 @@ async def _answer(qa, memories, diagnostics):
     entries = split_compound_interest_claims(entries, sources, diagnostics)
     entries = await reclassify_uncited(entries, diagnostics)
     entries = recover_direct_board_wave_citations(entries, sources, diagnostics)
+    entries = recover_direct_monitoring_citations(entries, sources, diagnostics)
     entries = await recover_missing_citations(entries, sources, qa, diagnostics)
     diagnostics['choice_alignment'] = entries
     checks = entailment_checks(entries, sources, options)
@@ -1313,6 +1456,10 @@ async def _answer(qa, memories, diagnostics):
         entailment_prompt = prompts.render('15_choice_entailment.txt', question=qa['question'],
             question_date=qa.get('question_date', ''), checks=json.dumps(checks, ensure_ascii=False))
         entailment_prompt += '\nOutput verdict instead of entailed. Choose personal_supported when all asserted prior personal facts are supported; no_personal_premise when the text asserts no prior personal fact (only advice, effects or a hypothetical); unsupported_personal when any asserted prior personal detail lacks support. For an option, no_personal_premise is a passing check, even with no sources. For an extracted premise, no_personal_premise means it was advice rather than a personal fact. Classify the actual text, not claimed_kind. Return every claim_id once.'
+        entailment_prompt += ('\nFor an interest premise only, "drawn to X" expresses topical interest, not a claim '
+            'of ownership or expertise. Two or more distinct first-party questions directly about '
+            'the same specific X can establish that interest. Require subject equivalence and do '
+            'not promote one broad adjacent question into a narrow preference, habit or event.\n')
         verdicts = await _judge(entailment_prompt, TypedEntailments.model_json_schema(),
             lambda result: _typed_verdicts(result, checks), 'eval.choice_entailment', diagnostics)
         verdicts = await review_entailments(verdicts, checks, entries, sources, qa, diagnostics)
@@ -1364,29 +1511,31 @@ async def _answer(qa, memories, diagnostics):
                              and e['status'] in ('supported', 'partial')
                              and any(c.get('entailment_verified') is True
                                      for c in e.get('claims', []))]
-        option_terms = {letter: personal_evidence.terms(letters[letter]) for letter in eligible}
-        context_overlap = {letter: max((len(option_terms[letter] & personal_evidence.terms(source['text']))
-                                        for source in sources.values()
-                                        if source.get('role') == 'user' or source.get('declared') == 'persona'),
-                                       default=0)
-                           for letter in generic_eligible}
+        def context_terms(text):
+            # Generic usage verbs and adverbs are not topic-specific evidence.
+            return personal_evidence.terms(text) - {'use', 'uses', 'used', 'using', 'well', 'works', 'working'}
+        option_terms = {letter: context_terms(letters[letter]) for letter in eligible}
+        context_matches = {}
+        for letter in generic_eligible:
+            matches = []
+            for source in sources.values():
+                if source.get('role') != 'user' and source.get('declared') != 'persona':
+                    continue
+                match = local_context_match(source['text'], option_terms[letter])
+                if len(match['shared_terms']) >= 2:
+                    matches.append((len(match['shared_terms']), source, match))
+            context_matches[letter] = matches
+        context_overlap = {letter: max((m[0] for m in matches), default=0)
+                           for letter, matches in context_matches.items()}
         context_candidates = [letter for letter in generic_eligible
                               if context_overlap[letter] >= 2
                               and context_overlap[letter] > context_overlap.get(selected, 0)]
         context_evidence = []
         for letter in context_candidates:
-            matches = []
-            for source in sources.values():
-                if source.get('role') != 'user' and source.get('declared') != 'persona':
-                    continue
-                overlap = option_terms[letter] & personal_evidence.terms(source['text'])
-                if len(overlap) >= 2:
-                    matches.append((len(overlap), source, sorted(overlap)))
-            if matches:
-                _, source, shared_terms = max(matches, key=lambda row: (row[0], -len(row[1]['text'])))
-                context_evidence.append(dict(letter=letter, source_id=source['id'],
-                    role=source.get('declared') or source.get('role'), shared_terms=shared_terms,
-                    excerpt=source['text'][:900]))
+            _, source, match = max(context_matches[letter],
+                                   key=lambda row: (row[0], -len(row[2]['excerpt'])))
+            context_evidence.append(dict(letter=letter, source_id=source['id'],
+                role=source.get('declared') or source.get('role'), **match))
         context_evidence_keys = {(row['letter'], row['source_id']) for row in context_evidence}
         for entry in verified_personal:
             for claim in entry.get('claims', []):

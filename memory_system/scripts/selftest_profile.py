@@ -71,6 +71,29 @@ class ConsolidationTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(prefs), 1)
         self.assertTrue(any('r2' in key for key in prefs[0]['support_sessions']))
 
+    async def test_existing_preference_does_not_drop_later_item(self):
+        first = await self._persisted_pair('The user enjoys gardening', 'preference')
+        second = await self._persisted_pair('The user enjoys painting', 'fact')
+        second[1]['_sources'] = [1]
+        request = req([('user', first[1]['content']), ('user', second[1]['content'])])
+        self.st.save_messages(request)
+        before = self.st.dependencies_for(first[0])
+        answer = {'items': [
+            {'content': first[1]['content'], 'basis': 'stated', 'support_ids': [first[0]]},
+            {'content': second[1]['content'], 'basis': 'stated', 'support_ids': [second[0]]},
+        ]}
+        with patch.object(config, 'PROFILE_CONSOLIDATION_ENABLED', True), patch.object(
+                profile.llm, 'complete_json', AsyncMock(return_value=answer)):
+            await profile.consolidate(self.st, request, [first, second])
+        preferences = self.st.get_by_type('u', ['preference'])
+        self.assertEqual({p['content'] for p in preferences},
+                         {first[1]['content'], second[1]['content']})
+        self.assertEqual(self.st.dependencies_for(first[0]), before)
+        painted = next(p for p in preferences if p['content'] == second[1]['content'])
+        self.assertEqual([d['source_id'] for d in self.st.dependencies_for(painted['id'])],
+                         [second[0]])
+
+
     async def test_consolidation_rejects_noise(self):
         p1 = await self._persisted_pair('The weather was nice')
         bad = {'items': [{'content': 'Bread is baked in ovens',  # not about the user

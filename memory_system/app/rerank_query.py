@@ -13,6 +13,7 @@ _PREFIX = re.compile(r'^(?:since|given|because|as|if|when)\b|^(?:既然|因為|�
 _ADVICE = re.compile(r'[,;—.，；。]\s*(?=(?:'
                      r'(?:you|we)\s+(?:could|might|should|can)\b|'
                      r'(?:i|we)(?:[\x27’]d|\s+would)?\s+(?:recommend|suggest)\b|'
+                     r'(?:a|one)\s+(?:(?:good|useful|helpful|practical|effective)\s+)?(?:approach|way|strategy)\s+(?:is|would\s+be)\s+to\b|'
                      r'(?:consider|try)\b|你(?:可以|可|應該|应该)|建議|建议))', re.I)
 
 

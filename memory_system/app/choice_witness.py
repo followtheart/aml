@@ -4,6 +4,7 @@ Witnesses are retrieval hints, never proof. Only exact quotations from the
 immutable answer catalog can reach the existing citation and entailment gates.
 """
 import asyncio
+import copy
 from contextlib import nullcontext
 import hashlib
 import json
@@ -11,7 +12,7 @@ import math
 import re
 import time
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from . import budget, config, evidence_selection, llm, personal_evidence as pe, prompts, retrieval_queries
 
 MAX_PER_OPTION = 3
@@ -50,11 +51,34 @@ def _options(options):
 
 
 def validate(payload, options, sources, trace=None):
-    parsed = SemanticWitnesses.model_validate(payload)
+    rejected = []
+    try:
+        parsed = SemanticWitnesses.model_validate(payload)
+    except ValidationError as exc:
+        errors = exc.errors(include_input=False)
+        # An overlong hint must not erase valid sibling hints. Keep all other
+        # schema failures strict, and never truncate or rewrite a quotation.
+        if not errors or any(
+            error['type'] != 'string_too_long'
+            or len(error['loc']) != 5
+            or error['loc'][0] != 'options'
+            or error['loc'][2] != 'witnesses'
+            or error['loc'][4] != 'quote'
+            for error in errors
+        ):
+            raise
+        cleaned = copy.deepcopy(payload)
+        bad = {(error['loc'][1], error['loc'][3]) for error in errors}
+        for oi, wi in sorted(bad, reverse=True):
+            option = cleaned['options'][oi]
+            witness = option['witnesses'].pop(wi)
+            rejected.append(dict(letter=option['letter'], source_id=witness['source_id'],
+                                 reason='quote_too_long'))
+        parsed = SemanticWitnesses.model_validate(cleaned)
     expected = _options(options)
     if len(parsed.options) != len(expected) or {o.letter for o in parsed.options} != set(expected):
         raise ValueError('Select witnesses for every option exactly once')
-    result, rejected = {}, []
+    result = {}
     for option in parsed.options:
         chosen, seen = [], set()
         for witness in option.witnesses:
@@ -140,6 +164,9 @@ and falls back without changing the source catalog or any support decisions.
                     active.release_tokens(reservation)
             finally:
                 active.release_calls(held)
+        # Preserve the provider output before validation so fallback cases can
+        # be replayed against the same immutable source catalog.
+        call['response'] = payload
         witnesses = validate(payload, options, sources, trace)
     except asyncio.CancelledError:
         raise

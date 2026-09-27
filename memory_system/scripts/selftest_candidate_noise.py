@@ -17,6 +17,19 @@ def source(text, index=0, role='user', timestamp=None):
 
 
 class QueryTests(unittest.TestCase):
+    def test_planner_advice_cannot_replace_explicit_personal_topic(self):
+        specs = rq.build('What should I read?', [
+            'A. Given your interest in birdwatching, a useful approach is to compare field guides.'],
+            {'option_queries': ['compare field guides']})
+        self.assertEqual(specs[1]['text'], 'Given your interest in birdwatching')
+        self.assertEqual(specs[1]['coverage_ids'], ['option:0'])
+
+    def test_literal_recovery_preserves_other_person_and_conditional(self):
+        specs = rq.build('Weekend plans?', [
+            'A. If your sister enjoys sailing, one practical way is to visit a harbor.'],
+            {'option_queries': ['visit a harbor']})
+        self.assertEqual(specs[1]['text'], 'If your sister enjoys sailing')
+
     def test_short_premises_replace_advice_and_generic_slot_can_be_empty(self):
         options = ['A. Since you bake bread, try a recipe.', 'B. Try a relaxing recipe.']
         specs = rq.build('Kitchen ideas?', options, {'option_queries': ['bake bread', '']})

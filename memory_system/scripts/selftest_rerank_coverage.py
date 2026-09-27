@@ -189,6 +189,19 @@ class WitnessTests(unittest.TestCase):
 
 
 class QueryTests(unittest.TestCase):
+    def test_explicit_approach_advice_keeps_interest_and_qualifications(self):
+        value = self.build(options=[
+            'A. Given your interest in birdwatching, a good approach is to visit a wetland.',
+            'B. Since you enjoy hiking, but no longer climb steep trails, one useful strategy would be to choose a flat route.'])
+        self.assertIn('interest in birdwatching', value)
+        self.assertIn('but no longer climb steep trails', value)
+        self.assertNotIn('wetland', value)
+        self.assertNotIn('flat route', value)
+
+    def test_approach_without_personal_prefix_stays_generic(self):
+        self.assertEqual(self.build(options=[
+            'A. A good approach is to compare several maps before traveling.']), 'q')
+
     def build(self, query='q', options=None, plan=None):
         module = importlib.import_module('app.rerank_query')
         return module.build(SimpleNamespace(query=query, options=options or []), plan or {})

@@ -3,6 +3,7 @@
 Run with ``python memory_system/scripts/selftest_recall_bounds.py``.
 All provider behavior is deterministic; no credentials or network are used.
 """
+import copy
 import os
 from pathlib import Path
 import sys
@@ -114,6 +115,46 @@ class LexicalHydration(unittest.TestCase):
         self.assertNotIn('_source_cache_primed', plan)
 
 
+    def test_diversity_uses_user_sources_and_preserves_filtered_inputs(self):
+        ids = [self.memory(f'OrchidLedger detail {i}') for i in range(4)]
+        self.st.save_messages(schemas.AddRequest(request_id='r1', user_id='u', session_id='s', messages=[
+            schemas.Message(role='user', content='OrchidLedger first observation.'),
+            schemas.Message(role='assistant', content='OrchidLedger response one.'),
+            schemas.Message(role='assistant', content='OrchidLedger response two.'),
+            schemas.Message(role='user', content='OrchidLedger second observation.'),
+            schemas.Message(role='assistant', content='OrchidLedger separate response.')]))
+        # Different assistant replies must not split the same user observation.
+        for mid, indices in zip(ids, ([0, 1], [0, 2], [3], [4])):
+            self.st.link_sources(mid, 'r1', indices)
+        rows = {m['id']: dict(m, _score=1) for m in self.st.get_amus_by_ids(ids)}
+        for row in rows.values():
+            row.pop('embedding', None)
+        routes = [[rows[ids[0]], rows[ids[2]]], [rows[ids[1]], rows[ids[3]]]]
+        specs = [{'text': 'OrchidLedger one'}, {'text': 'OrchidLedger two'}]
+        results = []
+        for enabled in (False, True):
+            plan = {'_include_history': False, '_include_sensitive': False}
+            with patch.multiple(config, SOURCE_RECALL_DIVERSITY=enabled, RECALL_SOURCE_LIMIT=2), \
+                    patch.object(self.st, 'source_search', side_effect=copy.deepcopy(routes)) as recall, \
+                    patch.object(self.st, 'fts_search', side_effect=copy.deepcopy(routes)), \
+                    patch.object(self.st, 'sources_for_amu', side_effect=AssertionError('single read')), \
+                    patch.object(self.st, 'sources_for_amus', wraps=self.st.sources_for_amus) as batched:
+                results.append(search._lexical_recall(self.st, self.req, plan, specs))
+                self.assertEqual(batched.call_count, 1)
+                for call in recall.call_args_list:
+                    self.assertFalse(call.kwargs['include_sensitive'])
+                    self.assertFalse(call.kwargs['include_history'])
+            self.assertEqual(plan['_source_cache_primed'], 4)
+        self.assertEqual(results[0][0], results[1][0])
+        self.assertEqual([m['id'] for m in results[0][1]], ids[:2])
+        self.assertEqual([m['id'] for m in results[1][1]], [ids[0], ids[2]])
+        # Assistant-only original sets are retained as independent groups.
+        keys = {ids[0]: {('r1', 0)}, ids[1]: {('r1', 0)},
+                ids[2]: {('r1', 3)}, ids[3]: {('r1', 4)}}
+        expected = search._merge_source_query_results(routes, 2, keys)
+        self.assertEqual(results[1][1], expected)
+
+
 class RuleLaneBounds(unittest.TestCase):
     def setUp(self):
         self.st = store.Store(':memory:')
@@ -178,6 +219,40 @@ class RuleLaneBounds(unittest.TestCase):
         with patch.multiple(config, RECALL_RULE_LIMIT=0):
             kept = search._bounded_rules(self.st, self.req, {}, self.rows(plain))
         self.assertEqual(len(kept), 20)
+
+
+class SourceMergeDiversity(unittest.TestCase):
+
+    def test_repeated_observation_cannot_fill_budget_before_distinct_one(self):
+        routes = [[{'id': 'a', '_score': 9}, {'id': 'b', '_score': 8}, {'id': 'c', '_score': 7}]]
+        keys = {'a': {('r', 0)}, 'b': {('r', 0)}, 'c': {('r', 1)}}
+        self.assertEqual([x['id'] for x in search._merge_source_query_results(routes, 2, keys)], ['a', 'c'])
+
+    def test_within_group_original_priority_and_query_ranks_preserved(self):
+        routes = [[{'id': 'a'}, {'id': 'b'}], [{'id': 'b'}, {'id': 'a'}]]
+        keys = {'a': {('r', 0)}, 'b': {('r', 0)}}
+        self.assertEqual(search._merge_source_query_results(routes, 2, keys), search._merge_query_results(routes, 2))
+
+    def test_overlapping_but_different_observation_sets_are_not_collapsed(self):
+        routes = [[{'id': 'a'}, {'id': 'b'}, {'id': 'c'}]]
+        keys = {'a': {('r', 0)}, 'b': {('r', 0), ('r', 1)}, 'c': {('r', 0)}}
+        self.assertEqual([x['id'] for x in search._merge_source_query_results(routes, 2, keys)], ['a', 'b'])
+
+    def test_unlinked_candidates_are_independent(self):
+        routes = [[{'id': 'a'}, {'id': 'b'}]]
+        self.assertEqual([x['id'] for x in search._merge_source_query_results(routes, 2, {})], ['a', 'b'])
+
+    def test_input_and_scores_unchanged_and_ids_never_duplicated(self):
+        routes = [[{'id': 'a', '_score': 0.2}, {'id': 'b', '_score': 0.1}], [{'id': 'a', '_score': 0.8}, {'id': 'c', '_score': 0.3}]]
+        original = copy.deepcopy(routes)
+        result = search._merge_source_query_results(routes, 20, {'a': {('r', 0)}, 'b': {('r', 0)}})
+        self.assertEqual(routes, original)
+        self.assertEqual(len(result), len({r['id'] for r in result}))
+        self.assertEqual({r['id']: r for r in result}, {r['id']: r for r in search._merge_query_results(routes, 20)})
+
+    def test_empty_and_zero_budget(self):
+        self.assertEqual(search._merge_source_query_results([], 40, {}), [])
+        self.assertEqual(search._merge_source_query_results([[{'id': 'a'}]], 0, {}), [])
 
 
 if __name__ == '__main__':

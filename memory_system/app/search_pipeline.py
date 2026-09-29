@@ -183,6 +183,34 @@ def _merge_query_results(routes: List[List[Dict]], limit: int) -> List[Dict]:
             for iid in sorted(best, key=lambda iid: positions[iid])[:limit]]
 
 
+def _merge_source_query_results(routes, limit, source_keys):
+    """Allocate slots across complete original-message sets before repeats.
+
+    Inputs have already passed source-search eligibility filters. Grouping
+    changes allocation only; it neither validates facts nor adds new hits.
+    Overlapping but different sets remain separate, as do unlinked memories.
+    """
+    ordered = _merge_query_results(routes, sum(map(len, routes)))
+    groups = {}
+    for item in ordered:
+        keys = tuple(sorted(source_keys.get(item['id'], ())))
+        group = ('sources', keys) if keys else ('unlinked', item['id'])
+        groups.setdefault(group, []).append(item)
+    result, depth = [], 0
+    while len(result) < limit:
+        added = False
+        for items in groups.values():
+            if depth < len(items):
+                result.append(items[depth])
+                added = True
+                if len(result) == limit:
+                    break
+        if not added:
+            break
+        depth += 1
+    return result
+
+
 def _route_weight(name, intent):
     # Graph/scene are expansions of direct hits, not independent corroboration.
     if name == 'graph':
@@ -210,10 +238,20 @@ def _lexical_recall(st, req, plan, specs):
             include_history=history, include_sensitive=sensitive, include_cold=True))
         sources.append(st.source_search(req.user_id, spec['text'], config.RECALL_SOURCE_LIMIT,
             include_history=history, include_sensitive=sensitive, include_cold=True))
-    merged = [_merge_query_results(fts, config.RECALL_FTS_LIMIT),
-              _merge_query_results(sources, config.RECALL_SOURCE_LIMIT)]
     # Two reads for every lexical hit instead of two reads per hit.
     _prime_source_cache(st, req, plan, [c for group in fts + sources for c in group])
+    if config.SOURCE_RECALL_DIVERSITY:
+        source_keys = {}
+        for candidate in _merge_query_results(sources, sum(map(len, sources))):
+            budget.check()
+            _, raw = _candidate_sources(st, req, plan, candidate)
+            observations = [s for s in raw if s.get('role') == 'user'] or raw
+            source_keys[candidate['id']] = {
+                (s['request_id'], s['message_index']) for s in observations}
+        source_merged = _merge_source_query_results(sources, config.RECALL_SOURCE_LIMIT, source_keys)
+    else:
+        source_merged = _merge_query_results(sources, config.RECALL_SOURCE_LIMIT)
+    merged = [_merge_query_results(fts, config.RECALL_FTS_LIMIT), source_merged]
     # Count independent original observations per query, never AMUs from one source.
     coverage = []
     for index, spec in enumerate(specs):

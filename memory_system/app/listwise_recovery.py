@@ -89,6 +89,14 @@ def targets_for(req):
 
 
 def request_for(req, candidates):
+    if config.LISTWISE_SPAN_REFS:
+        from . import recovery_spans
+        built = recovery_spans.build(req, candidates)
+        prompt, schema, system = built['prompt'], built['schema'], built['system']
+        reservation = (len(prompt.encode()) + len(json.dumps(schema).encode())
+                       + len(system.encode()) + 1024 + OUTPUT_TOKENS)
+        return dict(prompt=prompt, schema=schema, system=system,
+                    max_tokens=OUTPUT_TOKENS, reservation=reservation)
     # Local IDs are sufficient for citations. Keep the full provenance in the
     # trace, without paying repeatedly for opaque observation/request hashes.
     cards = [dict(candidate_id=c['candidate_id'], sources=[
@@ -174,6 +182,8 @@ async def recover(req, submitted, selected, irrelevant, *, deadline=None):
     trace = dict(status='not_needed', reviewed_ids=[], restored_ids=[], unreviewed_ids=[],
                  represented=[], judgments=[], errors=[], candidate_limit=MAX_CANDIDATES,
                  prompt_limit_bytes=min(MAX_PROMPT_BYTES, config.RERANK_MAX_PROMPT_BYTES))
+    if config.LISTWISE_SPAN_REFS:
+        trace['citation_format'] = 'source_span_refs_v1'
     if not irrelevant:
         return selected, trace
     pending, omitted = [], []
@@ -242,7 +252,12 @@ async def recover(req, submitted, selected, irrelevant, *, deadline=None):
                     active.release_tokens(reservation)
             finally:
                 active.release_calls(held)
-        restored_ids, judgments = validate(payload, cards, targets_for(req))
+        if config.LISTWISE_SPAN_REFS:
+            from . import recovery_spans
+            restored_ids, judgments = recovery_spans.decode_partial(
+                payload, recovery_spans.build(req, cards))
+        else:
+            restored_ids, judgments = validate(payload, cards, targets_for(req))
         trace['judgments'] = judgments
         trace['reviewed_ids'] = [j['candidate_id'] for j in judgments if j['valid']]
         trace['unreviewed_ids'].extend(j['candidate_id'] for j in judgments if not j['valid'])

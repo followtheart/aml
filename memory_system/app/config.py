@@ -147,6 +147,11 @@ CASCADE_FINE_LIMIT = max(1, int(os.environ.get('AML_CASCADE_FINE_LIMIT', '16')))
 CASCADE_LLM_LIMIT = max(1, int(os.environ.get('AML_CASCADE_LLM_LIMIT', '16')))
 # Inference remains an opt-in controlled-validation experiment.
 CHOICE_ALLOW_INFERRED = os.environ.get('AML_CHOICE_ALLOW_INFERRED', '0') == '1'
+CHOICE_BOUNDED_SUPPORT_SPANS = os.environ.get('AML_CHOICE_BOUNDED_SUPPORT_SPANS', '0') == '1'
+CHOICE_TYPOGRAPHIC_QUOTES = os.environ.get('AML_CHOICE_TYPOGRAPHIC_QUOTES', '0') == '1'
+CHOICE_REPAIR_CONTEXT = os.environ.get('AML_CHOICE_REPAIR_CONTEXT', '0') == '1'
+CHOICE_REPAIR_SPAN_REFS = os.environ.get('AML_CHOICE_REPAIR_SPAN_REFS', '0') == '1'
+CHOICE_ADAPTIVE_INTEREST_RETRY = os.environ.get('AML_CHOICE_ADAPTIVE_INTEREST_RETRY', '0') == '1'
 # A failed entailment remains rejected by default; contextual re-review is opt-in.
 CHOICE_ENTAILMENT_REVIEW = os.environ.get('AML_CHOICE_ENTAILMENT_REVIEW', '0') == '1'
 CHOICE_SEMANTIC_WITNESSES = os.environ.get('AML_CHOICE_SEMANTIC_WITNESSES', '1') == '1'
@@ -194,6 +199,8 @@ RECALL_PER_ROUTE = 100
 # Retrieval budgets are independent of the final answer's top_k.
 RECALL_VECTOR_LIMIT = max(1, int(os.environ.get("AML_RECALL_VECTOR_LIMIT", "40")))
 RECALL_SOURCE_LIMIT = max(1, int(os.environ.get("AML_RECALL_SOURCE_LIMIT", "40")))
+# Experimental source-route allocation by original user-message sets.
+SOURCE_RECALL_DIVERSITY = os.environ.get("AML_SOURCE_RECALL_DIVERSITY", "0") == "1"
 RECALL_FTS_LIMIT = max(1, int(os.environ.get("AML_RECALL_FTS_LIMIT", "20")))
 RECALL_PROFILE_LIMIT = max(1, int(os.environ.get("AML_RECALL_PROFILE_LIMIT", "8")))
 # Rules recalled per search besides forget constraints; 0 keeps every rule.
@@ -209,6 +216,8 @@ RERANK_MAX_PROMPT_BYTES = max(1024, int(os.environ.get("AML_RERANK_MAX_PROMPT_BY
 RERANK_CONCURRENCY = max(1, int(os.environ.get("AML_RERANK_CONCURRENCY", "2")))
 RERANK_DEADLINE_SECONDS = max(1.0, float(os.environ.get("AML_RERANK_DEADLINE_SECONDS", "45")))
 RERANK_REPAIR_MAX_CALLS = max(0, int(os.environ.get("AML_RERANK_REPAIR_MAX_CALLS", "1")))
+# Experimental exact source-part references for deletion review; opt in per run.
+LISTWISE_SPAN_REFS = os.environ.get("AML_LISTWISE_SPAN_REFS", "0") == "1"
 RERANK_CALIBRATION_ANCHORS = max(0, min(2, int(os.environ.get('AML_RERANK_CALIBRATION_ANCHORS', '2'))))
 SEARCH_FOLLOWUP_QUERIES = max(0, min(3, int(os.environ.get('AML_SEARCH_FOLLOWUP_QUERIES', '2'))))
 SEARCH_FOLLOWUP_SECONDS = max(1.0, float(os.environ.get('AML_SEARCH_FOLLOWUP_SECONDS', '8')))
@@ -231,6 +240,8 @@ SEGMENT_MIN_MESSAGES = max(1, int(os.environ.get("AML_SEGMENT_MIN_MESSAGES", "2"
 SEGMENT_SIM_DROP = float(os.environ.get("AML_SEGMENT_SIM_DROP", "0.35"))
 # §2.1 keep the raw chunk of every segment as an `episode` memory (Memory-Doc)
 STORE_EPISODES = os.environ.get("AML_STORE_EPISODES", "1") == "1"
+# Experimental current-segment references; ordinary extraction stays the default.
+EXTRACT_SPAN_REFS = os.environ.get("AML_EXTRACT_SPAN_REFS", "0") == "1"
 # §3.4 novelty gate: near-identical facts skip the governance LLM call
 NOVELTY_DUP_THRESHOLD = float(os.environ.get("AML_NOVELTY_DUP_THRESHOLD", "0.97"))
 SURPRISE_MOMENTUM = 0.7

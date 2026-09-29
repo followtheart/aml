@@ -761,7 +761,7 @@ class AnswerFlowTests(OfflineCase, unittest.IsolatedAsyncioTestCase):
             self.assertEqual(await self.gate.answer(self.qa(), packet, diagnostics), 'B')
         self.assertEqual([c.kwargs['stage'] for c in mock.call_args_list],
                          ['eval.choice_support', 'eval.choice_entailment', 'eval.choice_select',
-                          'eval.choice_select_review', 'eval.choice_select_focused_review'])
+                          'eval.choice_select_review'])
         self.assertEqual(diagnostics['answer_eligible_options'], ['A', 'B'])
         self.assertEqual(diagnostics['answer_validation'], 'validated')
         for call in mock.call_args_list:
@@ -790,7 +790,9 @@ class AnswerFlowTests(OfflineCase, unittest.IsolatedAsyncioTestCase):
 
         mock = staged_mock(
             lambda prompt: dict(options=[dict(letter=letter, witnesses=[]) for letter in 'AB']),
-            support, typed_entailment, {'answer': 'A'}, {'answer': 'B'})
+            support, {'matches': [dict(claim_id='B:0', premise_type='interest',
+                                     supported=False, citations=[])]},
+            typed_entailment, {'answer': 'A'}, {'answer': 'B'})
         diagnostics = {}
         with patch.object(llm, 'complete_json', mock):
             self.assertEqual(await self.gate.answer(qa, packet, diagnostics), 'B')

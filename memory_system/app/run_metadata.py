@@ -4,7 +4,7 @@ from functools import lru_cache
 from pathlib import Path
 from . import answer_choice, config
 
-SEARCH_POLICY = 'graph_cascade_v12-user-evidence-budget'
+SEARCH_POLICY = 'graph_cascade_v13-optional-recovery-span-refs'
 
 
 @lru_cache(maxsize=1)
@@ -20,13 +20,13 @@ def versions():
             'model': config.LLM_MODEL, 'embedding_model': config.EMBED_MODEL,
             'cross_encoder_model': config.CE_MODEL,
             'settings': {key: getattr(config, key) for key in (
-                'CORE_PROFILE_MAX_ITEMS', 'QUERY_PROFILE_DIGEST',
+                'CORE_PROFILE_MAX_ITEMS', 'QUERY_PROFILE_DIGEST', 'EXTRACT_SPAN_REFS',
                 'SEARCH_SOURCE_EXCERPT_CHARS', 'SEARCH_SOURCE_MESSAGES_PER_ITEM',
                 'SEARCH_DEADLINE_SECONDS', 'RERANK_MAX_PROMPT_BYTES',
                 'RERANK_CONCURRENCY', 'RERANK_DEADLINE_SECONDS',
                 'RERANK_REPAIR_MAX_CALLS',
                 'CASCADE_COARSE_LIMIT', 'CASCADE_FINE_LIMIT', 'CASCADE_LLM_LIMIT',
-                'CHOICE_ALLOW_INFERRED', 'CHOICE_ENTAILMENT_REVIEW', 'CHOICE_SEMANTIC_WITNESSES',
+                'CHOICE_ALLOW_INFERRED', 'CHOICE_BOUNDED_SUPPORT_SPANS', 'CHOICE_TYPOGRAPHIC_QUOTES', 'CHOICE_REPAIR_CONTEXT', 'CHOICE_REPAIR_SPAN_REFS', 'CHOICE_ADAPTIVE_INTEREST_RETRY', 'CHOICE_ENTAILMENT_REVIEW', 'CHOICE_SEMANTIC_WITNESSES', 'LISTWISE_SPAN_REFS',
                 'CE_BATCH_SIZE', 'CE_TIMEOUT_SECONDS', 'CE_DEADLINE_SECONDS',
                 'CE_RETRY_BATCHES', 'CE_RETRY_BATCH_SIZE',
                 'CE_MAX_DOCUMENT_BYTES', 'CE_MAX_REQUEST_BYTES', 'CE_API_FORMAT',
@@ -38,5 +38,6 @@ def versions():
                 'SEARCH_MAX_CALLS', 'SEARCH_MAX_TOKENS',
                 'EVIDENCE_FALLBACK_ITEMS',
                 'RECALL_VECTOR_LIMIT', 'RECALL_SOURCE_LIMIT', 'RECALL_FTS_LIMIT',
+                'SOURCE_RECALL_DIVERSITY',
                 'RECALL_PROFILE_LIMIT', 'RECALL_EXPANSION_LIMIT',
                 'RECALL_EXPANSION_MIN_DIRECT')}}

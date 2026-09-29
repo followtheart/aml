@@ -11,7 +11,7 @@ sys.path.insert(0, str(ROOT))
 from app import budget
 from selftest_answer_choice import entailment_response
 
-path = os.environ.get('ANSWER_CANDIDATE', str(ROOT / 'runs/iteration-20260924-13/candidate/answer_choice.py'))
+path = os.environ.get('ANSWER_CANDIDATE', str(ROOT / 'app/answer_choice.py'))
 spec = importlib.util.spec_from_file_location('app.scope_answer_candidate', path)
 gate = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(gate)
@@ -36,7 +36,7 @@ class ScopeFlowTests(unittest.IsolatedAsyncioTestCase):
                         return {'options': [dict(letter='A', kind='personal', claims=[dict(
                             text='walk every evening', status='unsupported', reason='no_source',
                             premise_type='habit', citations=[])])]}
-                    if stage == 'eval.choice_premise_scope':
+                    if stage in ('eval.choice_premise_scope', 'eval.choice_premise_scope.repair'):
                         if scenario == 'timeout':
                             raise TimeoutError('simulated')
                         if scenario == 'malformed':
@@ -51,8 +51,12 @@ class ScopeFlowTests(unittest.IsolatedAsyncioTestCase):
                      patch.object(gate.llm, 'complete_json', respond):
                     answer = await gate.answer(qa, [], diagnostics)
                 self.assertEqual(answer, 'A' if scenario == 'advice' else 'ABSTAIN')
-                self.assertEqual(stages, ['eval.choice_support', 'eval.choice_premise_scope', 'eval.choice_entailment'])
-                self.assertEqual([x[0] for x in usage], [1, 2, 3])
+                expected = ['eval.choice_support', 'eval.choice_premise_scope']
+                if scenario == 'malformed':
+                    expected.append('eval.choice_premise_scope.repair')
+                expected.append('eval.choice_entailment')
+                self.assertEqual(stages, expected)
+                self.assertEqual([x[0] for x in usage], list(range(1, len(expected) + 1)))
                 self.assertTrue(all(x[1] >= 10 for x in usage))
 
 

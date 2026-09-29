@@ -70,6 +70,8 @@ class ConsolidationTests(unittest.IsolatedAsyncioTestCase):
         prefs = self.st.get_by_type('u', ['preference'])
         self.assertEqual(len(prefs), 1)
         self.assertTrue(any('r2' in key for key in prefs[0]['support_sessions']))
+        self.assertEqual({d['source_id'] for d in self.st.dependencies_for(prefs[0]['id'])},
+                         {p1[0], p2[0], p3[0]})
 
     async def test_existing_preference_does_not_drop_later_item(self):
         first = await self._persisted_pair('The user enjoys gardening', 'preference')
@@ -117,6 +119,54 @@ class ConsolidationTests(unittest.IsolatedAsyncioTestCase):
         core = self.st.core_profile('u', 10)
         self.assertEqual([c['id'] for c in core], [rule, pref])
         self.assertNotIn(fact, [c['id'] for c in core])
+
+
+    async def test_rejected_support_cannot_reinforce_existing_profile(self):
+        old = await self._persisted_pair('The user has seasonal pollen discomfort.', 'preference')
+        unrelated = await self._persisted_pair('Chairs were arranged at the community center.')
+        request = req([('user', unrelated[1]['content'])])
+        self.st.save_messages(request)
+        answer = {'items': [{'content': old[1]['content'], 'basis': 'stated',
+                             'support_ids': [unrelated[0]]}]}
+        before = self.st.get_amus_by_ids([old[0]])[0]
+        with patch.object(config, 'FAKE', False), patch.object(profile.llm, 'complete_json',
+                AsyncMock(side_effect=[answer, {'valid': False, 'reason': 'unrelated evidence'}])) as calls, \
+                patch.object(profile, 'embed', AsyncMock(side_effect=AssertionError('rejected before embedding'))):
+            await profile.consolidate(self.st, request, [unrelated])
+        after = self.st.get_amus_by_ids([old[0]])[0]
+        self.assertEqual(after['support_sessions'], before['support_sessions'])
+        self.assertEqual(after['profile_status'], before['profile_status'])
+        self.assertEqual(self.st.dependencies_for(old[0]), [])
+        self.assertEqual(calls.call_args_list[1].kwargs['stage'], 'add.verify_profile_support')
+        verification = calls.call_args_list[1].args[0]
+        self.assertIn(request.messages[0].content, verification)
+        self.assertNotIn('Existing user profile:', verification)
+
+    async def test_support_verification_failure_keeps_other_items(self):
+        first = await self._persisted_pair('The user enjoys weaving.')
+        second = await self._persisted_pair('The user enjoys pottery.')
+        second[1]['_sources'] = [1]
+        request = req([('user', first[1]['content']), ('user', second[1]['content'])])
+        self.st.save_messages(request)
+        proposals = {'items': [dict(content=f['content'], basis='stated', support_ids=[mid])
+                               for mid, f in (first, second)]}
+        with patch.object(profile.llm, 'complete_json', AsyncMock(return_value=proposals)), \
+                patch.object(profile, '_verify_consolidation', AsyncMock(side_effect=[False, True])):
+            await profile.consolidate(self.st, request, [first, second])
+        self.assertEqual([p['content'] for p in self.st.get_by_type('u', ['preference'])],
+                         [second[1]['content']])
+
+    async def test_verifier_rejects_malformed_and_unavailable_evidence(self):
+        request = req([('user', 'I enjoy weaving.')])
+        fact = {'content': 'The user enjoys weaving.', '_sources': [0]}
+        for response in ({}, {'valid': 'true'}, RuntimeError('unavailable')):
+            mocked = AsyncMock(side_effect=response) if isinstance(response, Exception) else AsyncMock(return_value=response)
+            with patch.object(config, 'FAKE', False), patch.object(profile.llm, 'complete_json', mocked):
+                self.assertFalse(await profile._verify_consolidation(request, fact['content'], 'stated', ['m'], {'m': fact}))
+        with patch.object(profile.llm, 'complete_json', AsyncMock(side_effect=AssertionError('invalid input'))):
+            self.assertFalse(await profile._verify_consolidation(request, fact['content'], 'unknown', ['m'], {'m': fact}))
+            self.assertFalse(await profile._verify_consolidation(request, fact['content'], 'stated', ['m'],
+                             {'m': dict(fact, _sources=[10])}))
 
 
 class ForgetTests(unittest.IsolatedAsyncioTestCase):

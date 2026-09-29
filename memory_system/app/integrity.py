@@ -233,3 +233,53 @@ def state_boundary(fact):
     if temporal.get('precision') in ('day', 'instant'):
         return temporal.get('start')
     return fact.get('event_time')
+
+
+def in_received_correspondence(text, start, end):
+    """Explicitly received, delimited correspondence is another speaker's text.
+
+    Scope the guard to the quoted block, preserving user statements outside it
+    and drafts explicitly introduced as the user's own reply.
+    """
+    fences = list(re.finditer(r'(?m)^[ \t]*(?P<marker>-{3,}|```[^\n]*)[ \t]*$', text))
+    for opening, closing in zip(fences[::2], fences[1::2]):
+        if not (opening.end() <= start and end <= closing.start()):
+            continue
+        intro = text[:opening.start()]
+        received = re.search(
+            r'\b(?:got|received)\b[^.\n]{0,100}\b(?:email|message|letter|note)\b[^.\n]{0,60}\bfrom\b'
+            r'|\b(?:email|message|letter|note)\b[^.\n]{0,40}\b(?:I|we)\s+(?:got|received)\s+from\b'
+            r'|\b(?:sent|forwarded)\s+me\b[^.\n]{0,60}\b(?:email|message|letter|note)\b', intro, re.I)
+        own_draft = re.search(r'\b(?:here(?:[\x27’]s| is)|below is)\s+my\s+(?:draft|reply|response)\b', intro, re.I)
+        if received and not (own_draft and own_draft.start() > received.start()):
+            return True
+    return False
+
+
+def received_correspondence_only(fact, messages):
+    """Recognize only evidence wholly inside explicitly received correspondence.
+
+    Unknown or ambiguous spans do not establish third-party attribution. User
+    statements outside a received block and explicitly authored drafts remain
+    subject to the existing semantic evidence check.
+    """
+    evidence = fact.get('evidence')
+    if not isinstance(evidence, list) or not evidence:
+        return False
+    for item in evidence:
+        if not isinstance(item, dict):
+            return False
+        index, quote = item.get('message_index'), item.get('quote')
+        if (type(index) is not int or not 0 <= index < len(messages)
+                or not isinstance(quote, str) or not quote):
+            return False
+        text = messages[index].content
+        start, end = item.get('start'), item.get('end')
+        if (type(start) is not int or type(end) is not int
+                or not 0 <= start < end <= len(text) or text[start:end] != quote):
+            if text.count(quote) != 1:
+                return False
+            start, end = text.index(quote), text.index(quote) + len(quote)
+        if not in_received_correspondence(text, start, end):
+            return False
+    return True

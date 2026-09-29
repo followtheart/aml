@@ -1,4 +1,7 @@
 """Full-fidelity, local JSONL snapshots of committed Add requests."""
+import copy
+from contextlib import contextmanager
+from contextvars import ContextVar
 import json
 import logging
 import threading
@@ -11,17 +14,63 @@ from . import config
 
 log = logging.getLogger('aml.memory_debug')
 _lock = threading.Lock()
+_extraction = ContextVar('memory_debug_extraction', default=None)
+_segment = ContextVar('memory_debug_segment', default=None)
+
+
+@contextmanager
+def extraction_scope():
+    """Keep diagnostics private to this publish attempt, including child tasks."""
+    token = _extraction.set([] if config.MEMORY_DEBUG_LOG else None)
+    try:
+        yield
+    finally:
+        _extraction.reset(token)
+
+
+@contextmanager
+def segment_scope(index, message_indices):
+    trace = _extraction.get()
+    row = None
+    if trace is not None:
+        row = dict(segment_index=index, message_indices=list(message_indices), events=[])
+        trace.append(row)
+    token = _segment.set(row)
+    try:
+        yield
+    finally:
+        _segment.reset(token)
+
+
+def extraction_event(stage, **fields):
+    """Snapshot proposals before mutation; diagnostics never decide acceptance."""
+    row = _segment.get()
+    if row is None:
+        return
+    try:
+        row['events'].append(dict(stage=stage, **copy.deepcopy(fields)))
+    except Exception:
+        log.warning('Could not capture extraction diagnostic', exc_info=True)
 
 
 def capture(st, req):
     """Read actual stored representations from the final private snapshot."""
     ids = {r[0] for r in st.conn.execute(
         'SELECT amu_id FROM amu_sources WHERE request_id=?', (req.request_id,))}
-    # Include closed predecessors, which normal retrieval deliberately filters out.
-    for aid in list(ids):
-        row = st.conn.execute('SELECT supersedes FROM amu WHERE id=?', (aid,)).fetchone()
-        if row and row[0]:
-            ids.add(row[0])
+    # Superseded predecessors and dependent views can both change in this Add.
+    pending = list(ids)
+    while pending:
+        source_id = pending.pop()
+        related = [r[0] for r in st.conn.execute(
+            "SELECT a.id FROM amu current JOIN amu a ON a.id=current.supersedes "
+            "WHERE current.id=? AND a.user_id=?", (source_id, req.user_id))]
+        related.extend(r[0] for r in st.conn.execute(
+            "SELECT view_id FROM view_dependencies WHERE view_kind='amu' "
+            "AND source_id=? AND user_id=?", (source_id, req.user_id)))
+        for aid in related:
+            if aid not in ids:
+                ids.add(aid)
+                pending.append(aid)
     memories = []
     for aid in sorted(ids):
         row = st.conn.execute('SELECT * FROM amu WHERE id=?', (aid,)).fetchone()
@@ -40,6 +89,7 @@ def capture(st, req):
         memory['triples'] = [dict(r) for r in st.conn.execute(
             'SELECT * FROM triples WHERE amu_id=? ORDER BY id', (aid,))]
         memory['sources'] = st.sources_for_amu(aid)
+        memory['dependencies'] = st.dependencies_for(aid)
         memories.append(memory)
     scene_ids = sorted({m.get('scene_id') for m in memories if m.get('scene_id')})
     scenes = []
@@ -47,7 +97,7 @@ def capture(st, req):
         scene.pop('centroid', None)
         scenes.append(scene)
     return {
-        'event': 'memory.add.committed', 'schema_version': 2,
+        'event': 'memory.add.committed', 'schema_version': 4,
         'request_id': req.request_id, 'user_id': req.user_id, 'session_id': req.session_id,
         'fake': config.FAKE, 'configured_embedding_model': config.EMBED_MODEL,
         'configured_embedding_space': config.EMBEDDING_SPACE,
@@ -57,6 +107,8 @@ def capture(st, req):
         'memories': memories,
         'scenes': scenes,
         'session_summary': st.get_summary(req.user_id, req.session_id),
+        'extraction_trace': copy.deepcopy(sorted(_extraction.get() or [],
+                                                key=lambda row: row['segment_index'])),
     }
 
 

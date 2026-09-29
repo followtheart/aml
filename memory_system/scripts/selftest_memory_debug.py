@@ -9,7 +9,7 @@ from unittest.mock import AsyncMock, patch
 
 os.environ['AML_FAKE'] = '1'
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from app import add_pipeline as add, config, schemas, store
+from app import add_pipeline as add, config, memory_debug, schemas, store
 
 
 class DebugLogTests(unittest.IsolatedAsyncioTestCase):
@@ -102,6 +102,57 @@ class DebugLogTests(unittest.IsolatedAsyncioTestCase):
         with self.assertLogs('aml.memory_debug', level='WARNING'):
             await add.run_add(self.st, self.req)
         self.assertTrue(self.st.request_seen(self.req.request_id))
+
+
+    async def test_reinforced_views_and_dependency_chain_are_captured(self):
+        await add.run_add(self.st, self.req)
+        original = self.st.get_amus('u')[0]
+        view = self.st.insert_amu(user_id='u', session_id='s', content='Derived profile',
+                                 type='preference', embedding=original['embedding'])
+        outer = self.st.insert_amu(user_id='u', session_id='s', content='Another derived profile',
+                                  type='preference', embedding=original['embedding'])
+        unrelated = self.st.insert_amu(user_id='u', session_id='s', content='Unrelated',
+                                      embedding=original['embedding'])
+        self.st.register_dependencies('amu', view, [original['id']])
+        self.st.register_dependencies('amu', outer, [view])
+        self.st.add_support_keys(view, ['observation:1', 'observation:2'])
+        # Neither view is directly linked to this request's messages.
+        self.assertEqual(self.st.sources_for_amu(view), [])
+        record = memory_debug.capture(self.st, self.req)
+        memories = {m['id']: m for m in record['memories']}
+        self.assertIn(view, memories)
+        self.assertIn(outer, memories)
+        self.assertNotIn(unrelated, memories)
+        self.assertEqual(memories[view]['profile_status'], 'stable')
+        self.assertEqual(memories[view]['dependencies'], self.st.dependencies_for(view))
+        self.assertEqual(memories[outer]['dependencies'], self.st.dependencies_for(outer))
+        self.assertEqual(record['schema_version'], 4)
+
+
+
+    async def test_superseded_predecessor_includes_its_stale_dependents(self):
+        await add.run_add(self.st, self.req)
+        original = self.st.get_amus('u')[0]
+        view = self.st.insert_amu(user_id='u', session_id='s', content='City profile',
+                                 type='preference', embedding=original['embedding'])
+        descendant = self.st.insert_amu(user_id='u', session_id='s', content='City context',
+                                       type='preference', embedding=original['embedding'])
+        self.st.register_dependencies('amu', view, [original['id']])
+        self.st.register_dependencies('amu', descendant, [view])
+        self.st.close_validity(original['id'], '2026-01-01T00:00:00Z')
+        new = self.st.insert_amu(user_id='u', session_id='s', content='Alice lives in Berlin.',
+                                supersedes=original['id'], embedding=original['embedding'])
+        self.st.link_supersession(original['id'], new)
+        request = schemas.AddRequest(request_id='debug-new', user_id='u', session_id='s',
+            messages=[schemas.Message(role='user', content='Alice now lives in Berlin.')])
+        self.st.save_messages(request)
+        self.st.link_sources(new, request.request_id, [0])
+        records = {m['id']: m for m in memory_debug.capture(self.st, request)['memories']}
+        self.assertEqual(set(records), {original['id'], new, view, descendant})
+        self.assertEqual(records[view]['view_status'], 'stale')
+        self.assertEqual(records[descendant]['view_status'], 'stale')
+        self.assertEqual(records[view]['dependencies'], self.st.dependencies_for(view))
+
 
 
 if __name__ == '__main__':

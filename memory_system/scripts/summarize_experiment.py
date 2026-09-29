@@ -23,6 +23,7 @@ def summarize(root, prepared):
     search_by_id = {s['search_id']: s for s in searches}
     anomalies, exits, calls, statuses, rows = [], Counter(), Counter(), Counter(), []
     support_lengths, initial_support_lengths, support_failures = Counter(), Counter(), Counter()
+    all_attempt_calls, adaptive_status = Counter(), Counter()
     group_status, packet_omissions = Counter(), Counter()
     recovery_status, recovery_counts = Counter(), Counter()
     scope_status, scope_counts = Counter(), Counter()
@@ -42,6 +43,17 @@ def summarize(root, prepared):
         qa = questions[key]
         gold = qa['gold_labels']
         predicted = result['prediction']
+        adaptive_status[result.get('answer_adaptive_retry', {}).get('status', 'disabled')] += 1
+        attempts = result.get('answer_attempts')
+        all_calls = ([c for a in attempts for c in a['diagnostics'].get('answer_calls', [])]
+                     if attempts else result.get('answer_calls', []))
+        all_attempt_calls.update(f"{c['stage']}:{c.get('status', 'unknown')}" for c in all_calls)
+        if attempts:
+            selected = result['answer_adaptive_retry']['selected_attempt']
+            if attempts[selected].get('prediction') != predicted:
+                anomalies.append(f'adaptive_prediction_mismatch:{key}')
+            if attempts[selected]['diagnostics'].get('choice_alignment') != result.get('choice_alignment'):
+                anomalies.append(f'adaptive_alignment_mismatch:{key}')
         if result['score'] != float(predicted in gold):
             anomalies.append(f'score_mismatch:{key}')
         search = search_by_id.get(result.get('search_id'))
@@ -111,7 +123,7 @@ def summarize(root, prepared):
             calls[f"{call['stage']}:{call.get('status', 'unknown')}"] += 1
             if call['stage'].startswith('eval.choice_support'):
                 response = call.get('response')
-                if isinstance(response, dict) and isinstance(response.get('options'), list):
+                if isinstance(response, dict) and isinstance(response.get('options'), (list, dict)):
                     count = len(response['options'])
                 else:
                     count = 'no_options_list'
@@ -144,6 +156,8 @@ def summarize(root, prepared):
                 score=sum(r['score'] for r in results),
                 accuracy=sum(r['score'] for r in results) / len(results) if results else None,
                 exits=dict(exits), support_status=dict(statuses), answer_calls=dict(calls),
+                answer_calls_scope='chosen_attempt', all_attempt_calls=dict(all_attempt_calls),
+                adaptive_retry_status=dict(adaptive_status),
                 citation_recovery_status=dict(recovery_status), citation_recovery_counts=dict(recovery_counts),
                 premise_scope_status=dict(scope_status), premise_scope_counts=dict(scope_counts),
                 support_response_option_counts=dict(support_lengths),

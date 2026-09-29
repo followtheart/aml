@@ -6,6 +6,7 @@ constraint scope, and the final admissible option set are checked locally.
 import asyncio
 import copy
 from contextlib import nullcontext
+from contextvars import ContextVar
 import hashlib
 import json
 import re
@@ -13,10 +14,16 @@ import time
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
-from . import answer_context, budget, choice_premises, choice_witness, config, llm, metrics, persona_source, personal_evidence, profile, prompts
+from . import answer_context, budget, choice_premises, choice_witness, citation_text, config, integrity, llm, metrics, persona_source, personal_evidence, profile, prompts, repair_context
 
-VERSION = 'verified-source-choice-v16-local-premise-recovery'
+VERSION = 'verified-source-choice-v26-repair-span-contract'
 ABSTAIN = 'ABSTAIN'
+_inference_override = ContextVar('choice_inference_override', default=None)
+
+
+def inference_enabled():
+    override = _inference_override.get()
+    return config.CHOICE_ALLOW_INFERRED if override is None else override
 
 
 class StrictModel(BaseModel):
@@ -47,6 +54,57 @@ class Assessment(StrictModel):
 
 class Assessments(StrictModel):
     options: list[Assessment] = Field(min_length=1, max_length=26)
+
+
+class BoundedSpanAssessment(Assessment):
+    claims: list[Claim] = Field(max_length=16)
+
+
+class BoundedSpanAssessments(Assessments):
+    options: list[BoundedSpanAssessment] = Field(min_length=1, max_length=26)
+
+
+def parse_support_assessments(payload, expected):
+    """Recover only bounded lists of distinct original option references.
+
+    Generation still requests at most eight claims. This fallback neither drops
+    claims nor upgrades support; normal grounding and semantic gates follow it.
+    """
+    try:
+        return Assessments.model_validate(payload)
+    except ValidationError as original:
+        if not config.CHOICE_BOUNDED_SUPPORT_SPANS:
+            raise
+        errors = original.errors(include_input=False)
+        if not errors or any(
+                error['type'] != 'too_long' or len(error['loc']) != 3
+                or error['loc'][0] != 'options' or error['loc'][2] != 'claims'
+                for error in errors):
+            raise
+        rows = payload.get('options') if isinstance(payload, dict) else None
+        if not isinstance(rows, list):
+            raise
+        for row in rows:
+            claims = row.get('claims') if isinstance(row, dict) else None
+            if not isinstance(claims, list) or len(claims) <= 8:
+                continue
+            letter = row.get('letter')
+            if letter not in expected or len(claims) > 16:
+                raise original
+            spans = {s['id']: s['text'] for s in
+                     choice_premises.option_spans(letter, expected[letter])}
+            seen = set()
+            for claim in claims:
+                if not isinstance(claim, dict):
+                    raise original
+                sid = claim.get('span_id')
+                if not isinstance(sid, str) or sid not in spans or sid in seen:
+                    raise original
+                if claim.get('text', '') not in ('', spans[sid]):
+                    raise original
+                seen.add(sid)
+        # Revalidate all remaining fields, including every citation.
+        return BoundedSpanAssessments.model_validate(payload)
 
 
 class ConstraintMatch(StrictModel):
@@ -221,25 +279,29 @@ def _premise_level(claim, premise_type='unknown'):
     return max(level, 3) if strong else level
 
 
-def _in_received_correspondence(text, start, end):
-    """Explicitly received, delimited correspondence is another speaker's text.
+_in_received_correspondence = integrity.in_received_correspondence
 
-    Scope the guard to the quoted block, preserving user statements outside it
-    and drafts explicitly introduced as the user's own reply.
-    """
-    fences = list(re.finditer(r'(?m)^[ \t]*(?P<marker>-{3,}|```[^\n]*)[ \t]*$', text))
-    for opening, closing in zip(fences[::2], fences[1::2]):
-        if not (opening.end() <= start and end <= closing.start()):
-            continue
-        intro = text[:opening.start()]
-        received = re.search(
-            r'\b(?:got|received)\b[^.\n]{0,100}\b(?:email|message|letter|note)\b[^.\n]{0,60}\bfrom\b'
-            r'|\b(?:email|message|letter|note)\b[^.\n]{0,40}\b(?:I|we)\s+(?:got|received)\s+from\b'
-            r'|\b(?:sent|forwarded)\s+me\b[^.\n]{0,60}\b(?:email|message|letter|note)\b', intro, re.I)
-        own_draft = re.search(r'\b(?:here(?:[\x27’]s| is)|below is)\s+my\s+(?:draft|reply|response)\b', intro, re.I)
-        if received and not (own_draft and own_draft.start() > received.start()):
-            return True
-    return False
+
+_INQUIRY_PREAMBLE = re.compile(
+    r"^\s*I\s*(?:(?:['’]ve|have)\s+been\s+wondering|"
+    r"(?:['’]m|am)\s+(?:curious|wondering)|wonder|"
+    r"(?:would\s+like|want)\s+to\s+(?:know|understand))\s*(?:[—–:,;-]\s*)?", re.I)
+_INQUIRY_QUESTION = re.compile(
+    r'^(?:how|why|what|when|where|whether|which|can|could|do|does|is|are)\b', re.I)
+
+
+def inquiry_only_source(source, quote):
+    """A first-person inquiry preamble does not assert the queried event."""
+    if source.get('declared') == 'persona' or source.get('role') != 'user':
+        return False
+    if quote not in source['text']:
+        return False
+    remainder = _INQUIRY_PREAMBLE.sub('', source['text'], count=1)
+    if remainder == source['text'] or not _INQUIRY_QUESTION.match(remainder.strip()):
+        return False
+    # Inspect the complete visible source: a later personal clause or possessive
+    # may assert real facts even when the message opens with a question.
+    return not _SELF.search(remainder)
 
 
 def _self_scope(source, quote, claim):
@@ -265,14 +327,19 @@ def _self_scope(source, quote, claim):
     relation = _RELATION_SUBJECT.search(local_sentence)
     if relation and not re.search(r'\b' + re.escape(relation[1]) + r'\b', claim, re.I):
         return 'different_person'
-    if not _SELF.search(sentence):
+    if not _SELF.search(sentence) or inquiry_only_source(source, quote):
         return 'no_user_assertion'
     return None
 
 
 def _check_citation(citation, claim, sources, premise_type='unknown'):
-    c = citation.model_dump()
     source = sources.get(citation.source_id)
+    proposed_quote = citation.quote
+    if config.CHOICE_TYPOGRAPHIC_QUOTES and source:
+        resolved = citation_text.original_quote(source['text'], proposed_quote)
+        if resolved:
+            citation = citation.model_copy(update={'quote': resolved['quote']})
+    c = citation.model_dump()
     errors = []
     persona = bool(source and source.get('declared') == 'persona')
     # Model-supplied types constrain the gate; they cannot reclassify arbitrary
@@ -319,6 +386,10 @@ def _check_citation(citation, claim, sources, premise_type='unknown'):
         if (failure == 'no_user_assertion' and interest
                 and not _FRAME.search(source['text']) and not _ATTRIBUTED.search(source['text'])):
             c['basis'] = 'topic_interest'
+        elif failure == 'no_user_assertion' and inquiry_only_source(source, citation.quote):
+            # A query can explain terminology around a separate real self-report,
+            # but it cannot anchor ownership, frequency, or another stronger fact.
+            c['basis'] = 'context'
         elif failure:
             errors.append(failure)
     elif not interest:
@@ -333,6 +404,8 @@ def _check_citation(citation, claim, sources, premise_type='unknown'):
     if source and not errors:
         start = source['text'].find(citation.quote)
         c['source_span'] = dict(start=start, end=start + len(citation.quote))
+    if citation.quote != proposed_quote:
+        c.update(proposed_quote=proposed_quote, quote_normalization='typographic_quotes')
     return c
 
 
@@ -415,14 +488,14 @@ def _option_status(kind, claims, errors, option_text):
     if all(verified):
         return 'supported'
     primary = _primary_index(claims, option_text)
-    if (config.CHOICE_ALLOW_INFERRED and primary is not None and claims[primary]['status'] == 'inferred'):
+    if (inference_enabled() and primary is not None and claims[primary]['status'] == 'inferred'):
         return 'inferred'
     return 'partial' if primary is not None and verified[primary] else 'unsupported'
 
 
 def validate_assessments(payload, options, sources, *, expected=None):
-    parsed = Assessments.model_validate(payload)
     expected = option_map(options) if expected is None else expected
+    parsed = parse_support_assessments(payload, expected)
     if len(parsed.options) != len(expected) or {o.letter for o in parsed.options} != set(expected):
         raise ValueError('Assess every option exactly once')
     entries = {}
@@ -459,7 +532,7 @@ def validate_assessments(payload, options, sources, *, expected=None):
             if dropped:
                 warnings.append('citation_dropped')
             status = claim.status
-            if status == 'inferred' and (not config.CHOICE_ALLOW_INFERRED or _strong_trait(exact or claim.text)
+            if status == 'inferred' and (not inference_enabled() or _strong_trait(exact or claim.text)
                                         or claim.premise_type not in ('interest', 'experience')):
                 invalid.append('inference_not_allowed')
             # Derived, not proposed: a premise whose only anchors sit one rung
@@ -549,7 +622,7 @@ def eligible_choices(entries, blocked):
         return [e['letter'] for e in eligible if e['status'] in ('supported', 'partial', 'generic')]
     for tier in ('inferred', 'generic'):
         letters = [e['letter'] for e in eligible if e.get('selection_tier', e['status']) == tier
-                   and (tier != 'inferred' or config.CHOICE_ALLOW_INFERRED)]
+                   and (tier != 'inferred' or inference_enabled())]
         if letters:
             return letters
     return []
@@ -561,6 +634,166 @@ def _recoverable(claim):
     return (claim['status'] == 'unsupported' and not claim['validation_errors']
             and claim.get('reason') in ('none', 'no_source', 'source_too_weak')
             and any(r['anchor'] and not r.get('strength_gap') for r in claim['citations']))
+
+
+# A conditional interest is not an assertion that its antecedent is true.
+_CONDITIONAL_INTEREST_OPEN = re.compile(
+    r"^\s*(?:[A-Z][.)]\s*)?If\s+(?:you(?:['’]re|\s+are)\s+"
+    r"(?:drawn\s+to|interested\s+in|curious\s+about|in\s+the\s+mood\s+for|up\s+for)"
+    r"|you\s+(?:enjoy|like|love|prefer))\b[^,;.!?\n]*[,;]", re.I)
+_CONDITIONAL_PRESUPPOSED = re.compile(
+    r"\b(?:your|already|still|again|always|daily|weekly|monthly|previously|formerly|"
+    r"used\s+to|have|had|own\w*|diagnos\w*|professional\w*|since|because|given)\b", re.I)
+_UNSPECIFIED_ACTIVITY = re.compile(
+    r'^(?:focus\s+on|do|choose|pick|try|make\s+time\s+for|spend\s+(?:some\s+)?time\s+on)\s+'
+    r'(?:(?:an?|any|some)\s+(?:(?:non-work-related|relaxing|pleasant|enjoyable|different|new)\s+)?activity'
+    r'|something)\s+(?:that\s+)?you\s+(?:enjoy|like|find\s+relaxing)[.!;,]?$', re.I)
+_ADVICE_ASSERTED_PREFIX = re.compile(
+    r"\b(?:you|your|yourself|I|we|they|he|she|since|because|given|already|always|daily|weekly|used\s+to)\b", re.I)
+
+
+_INDEFINITE_ADVICE_OPEN = re.compile(
+    r'^\s*(?:[A-Z][.)]\s*)?After\s+(?:an?|any)\s+([^,;.!?\n]+),\s*'
+    r'(?=(?:it\s+(?:can|may|might)\s+help\s+to|you\s+(?:can|could|may|might)\s+)\b)', re.I)
+_ADVICE_EVENT_HISTORY = re.compile(
+    r'\b(?:you|your|my|our|we|I|last|yesterday|previously|recently|earlier|already|again|'
+    r'always|daily|weekly|monthly|ago|since|because|given|recent|\d{4})\b', re.I)
+
+
+def temporal_advice_claim(claim, option):
+    """Recognize an indefinite advice scenario, retaining specific personal history."""
+    span = claim.get('option_span')
+    if (not isinstance(span, dict) or claim.get('validation_errors')
+            or claim.get('reason') == 'contradicted'):
+        return False
+    start, end = span.get('start'), span.get('end')
+    if (type(start) is not int or type(end) is not int
+            or not 0 <= start < end <= len(option) or option[start:end] != claim['text']):
+        return False
+    opening = _INDEFINITE_ADVICE_OPEN.match(option)
+    if (not opening or end > opening.end()
+            or _ADVICE_EVENT_HISTORY.search(opening.group(1))):
+        return False
+    # Named participants and places can make an indefinite event specific.
+    return not re.search(r'\b[A-Z][A-Za-z]+\b', opening.group(1))
+
+
+def _nonasserted_scope_reason(claim, option):
+    """Recognize narrow advice forms in their exact original option scope."""
+    if temporal_advice_claim(claim, option):
+        return 'indefinite_advice_scenario'
+    if claim.get('validation_errors') or claim.get('reason') == 'contradicted':
+        return None
+    text, span = claim['text'], claim.get('option_span')
+    if not isinstance(span, dict):
+        return None
+    start, end = span.get('start'), span.get('end')
+    if (type(start) is not int or type(end) is not int
+            or not 0 <= start < end <= len(option) or option[start:end] != text):
+        return None
+    condition = _CONDITIONAL_INTEREST_OPEN.match(option)
+    if (condition and end <= condition.end()
+            and not _CONDITIONAL_PRESUPPOSED.search(condition.group())):
+        return 'conditional_interest_not_asserted'
+    if _UNSPECIFIED_ACTIVITY.fullmatch(text):
+        boundary = max(option.rfind(mark, 0, start) for mark in ('. ', ';', '\n'))
+        prefix = option[boundary + 1 if boundary >= 0 else 0:start]
+        if not _ADVICE_ASSERTED_PREFIX.search(prefix):
+            return 'unspecified_activity_advice'
+    return None
+
+
+def normalize_nonasserted_scopes(entries, diagnostics):
+    """Remove nonasserted fragments; complete options still require verification."""
+    result = copy.deepcopy(entries)
+    removed = []
+    for entry in result:
+        if entry.get('validation_status') != 'valid' or entry['validation_errors']:
+            continue
+        kept = []
+        for claim in entry['claims']:
+            reason = _nonasserted_scope_reason(claim, entry['option'])
+            if reason:
+                removed.append(dict(letter=entry['letter'], text=claim['text'], reason=reason))
+                entry.setdefault('removed_claims', []).append(dict(
+                    text=claim['text'], reason=reason, original_claim=copy.deepcopy(claim)))
+            else:
+                kept.append(claim)
+        if len(kept) != len(entry['claims']):
+            entry['claims'] = kept
+            entry['primary_claim'] = _primary_index(kept, entry['option'])
+            if not kept:
+                entry['kind'] = 'generic'
+            entry['status'] = _option_status(entry['kind'], kept, entry['validation_errors'], entry['option'])
+    diagnostics['answer_scope_normalization'] = dict(removed=removed)
+    return result
+
+
+def enrich_habit_context(checks, sources, diagnostics):
+    """Attach terminology context to existing habit checks without adding anchors."""
+    result = copy.deepcopy(checks)
+    added = []
+    for check in result:
+        if check['check_type'] != 'premise' or check.get('premise_type') != 'habit':
+            continue
+        needles = personal_evidence.terms(check['claim'])
+        cited = {source['id'] for source in check['sources']}
+        candidates = []
+        for source_id, source in sources.items():
+            text = source['text']
+            if (source_id in cited or source.get('role') != 'user'
+                    or source.get('declared') == 'persona' or '?' not in text):
+                continue
+            if _self_scope(source, text, check['claim']) != 'no_user_assertion':
+                continue
+            shared = needles & personal_evidence.terms(text)
+            if len(shared) >= 2:
+                candidates.append((len(shared), len(text), source_id, source))
+        chosen = sorted(candidates, key=lambda item: (-item[0], item[1], item[2]))[:2]
+        if chosen:
+            check['topic_context'] = [dict(id=source_id, role='user', text=source['text'],
+                anchor=False) for _, _, source_id, source in chosen]
+            added.append(dict(claim_id=check['claim_id'],
+                source_ids=[source_id for _, _, source_id, _ in chosen]))
+    diagnostics['answer_habit_context'] = dict(added=added)
+    return result
+
+
+_HABIT_CONTEXT_NOTE = (
+    '\nThe topic_context entries are already-visible, impersonal user questions, not personal anchors. '
+    'They may explain terminology used to describe an activity in a separately cited real self-report. '
+    'They cannot establish that the user performed that activity, its frequency, ownership, or any event. '
+    'All asserted personal facts must still come from the cited personal anchors; reject the claim if '
+    'those anchors do not describe the required activity or fact. Do not borrow a context question as an assertion.')
+
+
+_EXPERIENCE_CONTEXT = re.compile(
+    r'\b(?:during|before|after|since|while|when)\b[^,;.!?\n]+', re.I)
+
+
+def enrich_event_context(checks, diagnostics):
+    """Expose original experience qualifiers without changing evidence or verdicts."""
+    result = copy.deepcopy(checks)
+    added = []
+    for check in result:
+        if check.get('check_type') != 'premise' or check.get('premise_type') != 'experience':
+            continue
+        qualifiers = [match.group(0) for match in _EXPERIENCE_CONTEXT.finditer(check['claim'])]
+        if qualifiers:
+            check['required_event_context'] = qualifiers
+            added.append(dict(claim_id=check['claim_id'], qualifiers=qualifiers))
+    diagnostics['answer_event_context'] = dict(added=added)
+    return result
+
+
+_EVENT_CONTEXT_NOTE = (
+    '\nFor a premise with required_event_context, verify the complete experience INCLUDING each '
+    'listed temporal or situational qualifier. Evidence of a similar activity at an unspecified '
+    'time does not establish that it happened in the claimed setting. Do not infer a named episode, '
+    'setting, or activity from source timestamps or the question date alone. Accept paraphrases '
+    'when the cited original source actually connects the activity to the required context. '
+    'If only the activity is established and a required context is unsupported, the complete '
+    'premise is unsupported_personal.')
 
 
 def entailment_checks(entries, sources, options):
@@ -746,6 +979,49 @@ async def _judge(prompt, schema, validator, stage, diagnostics, *, attempts=2, r
                 prompt, schema, feedback = repair_request(result, detail)
 
 
+def support_object_request(prompt, schema, letters):
+    """Require each option by key while retaining the existing evidence schema."""
+    schema = copy.deepcopy(schema)
+    assessment = schema['$defs']['Assessment']
+    assessment['properties'].pop('letter')
+    assessment['required'] = [x for x in assessment['required'] if x != 'letter']
+    schema['properties']['options'] = dict(
+        type='object', additionalProperties=False,
+        properties={letter: {'$ref': '#/$defs/Assessment'} for letter in letters},
+        required=letters)
+    prompt += ('\nOUTPUT CONTRACT OVERRIDE: Return options as an OBJECT keyed by the exact option letters '
+        + ', '.join(letters) + ', with every key required exactly once. Each value contains kind and claims; '
+        'omit letter inside the value. Do not return an array. Preserve all evidence and claim rules above. '
+        'This shape replaces the earlier output example only.\n')
+    return prompt, schema
+
+
+def assessment_rows(payload):
+    """Normalize object replies and archived/repair arrays without changing identity."""
+    rows = payload.get('options') if isinstance(payload, dict) else None
+    if isinstance(rows, dict):
+        return [dict(value, letter=letter)
+                if isinstance(value, dict) and 'letter' not in value
+                else dict(letter=letter, invalid_map_value=value)
+                for letter, value in rows.items()]
+    return rows
+
+
+def canonical_support_payload(payload, expected):
+    """Relocate unambiguous option records split across one wrapper boundary."""
+    if not isinstance(payload, dict) or not isinstance(payload.get('options'), dict):
+        return payload
+    extras = set(payload) - {'options'}
+    if not extras or not extras <= set(expected):
+        return payload
+    nested = payload['options']
+    if not set(nested) <= set(expected) or extras & set(nested):
+        return payload
+    # Preserve every value; normal option and citation validation still applies.
+    return {'options': dict(nested, **{
+        letter: payload[letter] for letter in payload if letter != 'options'})}
+
+
 async def assess_support(prompt, schema, options, sources, diagnostics):
     """Freeze valid options; a bad sibling can never erase their evidence."""
     expected, accepted, failures = option_map(options), {}, {}
@@ -759,12 +1035,21 @@ async def assess_support(prompt, schema, options, sources, diagnostics):
     def repair_request(previous, pending):
         scoped = prompt.replace('Options:\n' + '\n'.join(options),
                                 'Options:\n' + '\n'.join(expected[k] for k in pending), 1)
+        context_targets = (repair_context.targets(pending, sources, failures)
+                           if config.CHOICE_REPAIR_CONTEXT else {})
+        if context_targets:
+            diagnostics.setdefault('answer_repair_context', []).append(dict(
+                pending=list(pending),
+                rejected_assistant_sources={k: sorted(v) for k, v in context_targets.items()}))
         # Keep option-specific hints aligned with the same repair scope.
         # Other options' hints must not masquerade as this option's anchors.
         witnesses = diagnostics.get('answer_witness_prefill')
         if isinstance(witnesses, dict):
             original_block = '\n<witnesses>\n' + choice_witness.render(witnesses) + '\n</witnesses>'
             pending_witnesses = {letter: items for letter, items in witnesses.items() if letter in pending}
+            if context_targets:
+                pending_witnesses = repair_context.triggered_witnesses(
+                    witnesses, pending, sources, failures)
             scoped = scoped.replace(original_block,
                 '\n<witnesses>\n' + choice_witness.render(pending_witnesses) + '\n</witnesses>', 1)
         # Repairs need first-party anchors. Assistant rewrites can otherwise
@@ -777,7 +1062,7 @@ async def assess_support(prompt, schema, options, sources, diagnostics):
                                in ('user', 'persona')}), ensure_ascii=False), 1)
         # Do not put an already accepted A back into the repair example when
         # the actual error is missing B/C/D. Constrain the schema as well.
-        previous_rows = previous.get('options', []) if isinstance(previous, dict) else []
+        previous_rows = assessment_rows(canonical_support_payload(previous, expected))
         if not isinstance(previous_rows, list):
             previous_rows = []
         feedback = dict(required_options=pending, accepted_options=list(accepted),
@@ -786,23 +1071,35 @@ async def assess_support(prompt, schema, options, sources, diagnostics):
                                                   if isinstance(r, dict) and r.get('letter') in pending])
         scoped += '\nAssess ONLY these option letters, exactly once each: ' + ', '.join(pending)
         repair_schema = scoped_schema(pending)
-        if any(any(marker in str(failures.get(k, '')) for marker in
-                   ('claim_not_in_option', 'Expected this option exactly once')) for k in pending):
+        needs_span_repair = any(any(marker in str(failures.get(k, '')) for marker in
+                   ('claim_not_in_option', 'Expected this option exactly once')) for k in pending)
+        if needs_span_repair or config.CHOICE_REPAIR_SPAN_REFS:
             # Use original spans when extraction failed or omitted an option.
             # A missing option has only one repair opportunity; avoid paraphrases.
             scoped = scoped.split('\nCORE TASK\n', 1)[0]
             scoped += '\n' + 'Assess the single option below against original sources. Do not choose an answer. Return one option assessment. A personal option relies on pre-existing user facts; list those premises using ONLY span_id from the original spans. Never return text. Pick the shortest span preserving subject, negation and time. Future suggestions and their intended benefits are not personal premises. Generic advice has kind=generic and claims=[]. Unsupported personal facts must still be listed. For example, Since you own a canoe, try a lake: the first clause is personal, the second is advice. Arrange pictures so guests see your history: advice, not prior history. Sources must establish the exact premise. Only user/persona self-report can establish ownership, habits or conditions; topical questions may support interest only. Assistant text, third-party quotes and hypotheticals are not user self-reports. Quote exact contiguous source text and retain its attribution. Status supported requires a valid current-user anchor; otherwise unsupported. Output options=[{letter,kind,claims}]. Each claim has span_id,status,premise_type,reason,citations. Each citation must contain exactly source_id,quote,basis,subject. source_id is the source card id; quote is an exact substring of its text. basis is self_report, topic_interest or context; subject is current_user, third_party or unknown. Do not copy the source card object as a citation. Use citations=[] when there is no valid evidence. Do not infer diagnosis, ownership or frequency from interest or questions. No reference answer is available.'
             spans = [span for letter in pending
                      for span in choice_premises.option_spans(letter, expected[letter])]
+            if config.CHOICE_REPAIR_SPAN_REFS:
+                diagnostics.setdefault('answer_repair_span_contract', []).append(dict(
+                    pending=list(pending), extended=not needs_span_repair,
+                    span_ids=[span['id'] for span in spans]))
             scoped += '\nOriginal spans: ' + json.dumps(spans, ensure_ascii=False)
             claim_schema = repair_schema['$defs']['Claim']
             claim_schema['properties'].pop('text', None)
             claim_schema['properties']['span_id'] = dict(type='string', enum=[s['id'] for s in spans])
             claim_schema['required'] = list(dict.fromkeys(claim_schema['required'] + ['span_id']))
+        if context_targets:
+            feedback = repair_context.triggered_feedback(feedback, sources, failures)
         return scoped, repair_schema, json.dumps(feedback, ensure_ascii=False)
 
     def validate(result, target=None):
-        rows = result.get('options') if isinstance(result, dict) else None
+        normalized = canonical_support_payload(result, expected)
+        if normalized is not result:
+            diagnostics.setdefault('answer_support_wrapper_repairs', []).append(
+                [letter for letter in result if letter != 'options'])
+        result = normalized
+        rows = assessment_rows(result)
         if not isinstance(rows, list) or set(result) != {'options'}:
             raise ValueError('Expected an object containing only the options list')
         for letter, text in expected.items():
@@ -823,6 +1120,10 @@ async def assess_support(prompt, schema, options, sources, diagnostics):
                                                         for d in c.get('dropped_citations', [])])
                                 for i, c in enumerate(entry['claims']) if c['validation_errors']])))
                 accepted[letter] = entry
+                if len(matches[0]['claims']) > 8:
+                    diagnostics.setdefault('answer_support_span_overflow', []).append(dict(
+                        letter=letter, count=len(matches[0]['claims']),
+                        span_ids=[c['span_id'] for c in matches[0]['claims']]))
                 failures.pop(letter, None)
             except (ValueError, TypeError, KeyError) as exc:
                 failures[letter] = (exc.errors(include_url=False, include_input=False, include_context=False)
@@ -833,7 +1134,9 @@ async def assess_support(prompt, schema, options, sources, diagnostics):
         return [accepted[k] for k in expected if k in accepted]
 
     try:
-        await _judge(prompt, scoped_schema(list(expected)), validate, 'eval.choice_support', diagnostics,
+        initial_prompt, initial_schema = support_object_request(
+            prompt, scoped_schema(list(expected)), list(expected))
+        await _judge(initial_prompt, initial_schema, validate, 'eval.choice_support', diagnostics,
                      attempts=1)
     except (ValueError, TypeError, KeyError):
         # A batch retry can repeatedly return only the first pending option.
@@ -1025,22 +1328,36 @@ async def reclassify_uncited(entries, diagnostics):
     return updated
 
 
+def retryable_quote_drops(claim, sources):
+    """Allow a fresh search after literal quote failure; never reuse the bad quote."""
+    dropped = claim.get('dropped_citations', [])
+    return bool(dropped) and all(
+        isinstance(ref, dict) and ref.get('validation_errors') == ['quote_not_in_source']
+        and ref.get('subject') == 'current_user'
+        and ref.get('source_id') in sources
+        and sources[ref['source_id']].get('role') == 'user'
+        for ref in dropped)
+
+
 async def recover_missing_citations(entries, sources, qa, diagnostics):
     """Find or supplement anchors once; subsequent verification decides support."""
     targets = {}
     for entry in entries:
         index = entry.get('primary_claim')
         if (entry.get('validation_status') != 'valid' or entry.get('validation_errors')
-                or entry['kind'] != 'personal' or entry['status'] != 'unsupported' or index is None):
+                or entry['kind'] != 'personal' or index is None):
             continue
         claim = entry['claims'][index]
         # An omitted explanation defaults to 'none'; it is not a negative
-        # evidence verdict. Also supplement cited but unsupported interests;
-        # keep existing anchors and leave promotion to independent verification.
-        if (claim['status'] == 'unsupported' and claim.get('reason') in ('none', 'no_source', 'source_too_weak')
+        # evidence verdict. Positive interest labels are also provisional until
+        # independent verification; they must not suppress complementary anchors.
+        # Preserve existing citations and the original proposed support status.
+        if ((claim['status'] == 'unsupported' or (
+                claim['status'] == 'supported' and claim.get('premise_type') == 'interest'))
+                and claim.get('reason') in ('none', 'no_source', 'source_too_weak')
                 and (not claim['citations'] or (claim.get('premise_type') == 'interest'
                     and all(c.get('valid') for c in claim['citations'])))
-                and not claim.get('dropped_citations')
+                and (not claim.get('dropped_citations') or retryable_quote_drops(claim, sources))
                 and not claim['validation_errors']):
             targets[f"{entry['letter']}:{index}"] = (entry, index, claim)
     if not targets or not sources:
@@ -1128,8 +1445,8 @@ async def recover_missing_citations(entries, sources, qa, diagnostics):
         citations = existing + [c for c in citations if (c['source_id'], c['quote']) not in seen]
         claim.update(citations=citations, premise_type=premise_type,
                      citation_recovery='awaiting_entailment')
-        # Keep status unsupported: _recoverable schedules an independent premise
-        # check. Whole-option approval separately governs the option tier.
+        # Recovery does not promote support. Both provisional positive claims and
+        # recoverable unsupported claims still receive independent premise checks.
         attached.append(proposal.claim_id)
     diagnostics['answer_citation_recovery'] = dict(status='checked', requested=list(targets),
         attached=attached, rejected=rejected, rejected_citations=rejected_citations)
@@ -1394,10 +1711,98 @@ async def answer(qa, memories, diagnostics):
     # Share an existing caller budget, or provide a bounded standalone answer
     # budget. Transport retries also consume these provider-call allowances.
     calls = 10 + max(0, len(qa['options']) - 1) + int(config.CHOICE_SEMANTIC_WITNESSES and not config.FAKE)
-    scope = nullcontext() if budget.current.get() else budget.scope(seconds=240, calls=calls, tokens=128000)
+    adaptive = config.CHOICE_ADAPTIVE_INTEREST_RETRY and not config.FAKE
+    scope = nullcontext() if budget.current.get() else budget.scope(
+        seconds=240, calls=calls * (2 if adaptive else 1), tokens=256000 if adaptive else 128000)
     with scope:
         async with asyncio.timeout(240):
-            return await _answer(qa, memories, diagnostics)
+            if not adaptive:
+                return await _answer(qa, memories, diagnostics)
+            return await _adaptive_answer(qa, memories, diagnostics)
+
+
+def verified_personal(entry, eligible):
+    if (entry['letter'] not in eligible or entry.get('kind') != 'personal'
+            or entry.get('status') not in ('supported', 'partial')):
+        return False
+    primary, claims = entry.get('primary_claim'), entry.get('claims', [])
+    return (type(primary) is int and 0 <= primary < len(claims)
+            and claims[primary].get('entailment_verified') is True)
+
+
+def interest_retry_letters(diagnostics):
+    entries = diagnostics.get('choice_alignment', [])
+    eligible = set(diagnostics.get('answer_eligible_options', []))
+    blocked = set(diagnostics.get('answer_blocked_options', []))
+    if any(verified_personal(entry, eligible) for entry in entries):
+        return []
+    return [entry['letter'] for entry in entries
+            if entry['letter'] not in blocked and entry.get('validation_status') == 'valid'
+            and not any(c.get('reason') == 'contradicted' for c in entry.get('claims', []))
+            and any(c.get('premise_type') == 'interest' and c.get('status') == 'unsupported'
+                    and set(c.get('validation_errors', [])) <= {'not_entailed'}
+                    and c.get('reason') in ('none', 'no_source', 'source_too_weak')
+                    and any(z.get('valid') and z.get('anchor') and z.get('strength_gap') == 0
+                            for z in c.get('citations', [])) for c in entry.get('claims', []))]
+
+
+def accept_interest_retry(prediction, diagnostics, letters):
+    return (prediction in letters and prediction not in diagnostics.get('answer_blocked_options', [])
+            and any(entry['letter'] == prediction and verified_personal(
+                entry, set(diagnostics.get('answer_eligible_options', [])))
+                for entry in diagnostics.get('choice_alignment', [])))
+
+
+async def _adaptive_answer(qa, memories, diagnostics):
+    """One strict decision, then at most one independently verified interest retry."""
+    local_deadline = time.monotonic() + 239
+    token = _inference_override.set(False)
+    try:
+        first = await _answer(qa, memories, diagnostics)
+        strict = copy.deepcopy(diagnostics)
+        attempts = [dict(mode='strict', prediction=first, diagnostics=strict)]
+        letters = interest_retry_letters(strict)
+        decision = dict(status='not_needed', retry_letters=letters, selected_attempt=0)
+        limits = budget.current.get()
+        # A retry shares caller reservations, tokens and deadline. Leave enough
+        # time for it to fail cleanly and retain the already completed answer.
+        remaining = min(limits.deadline, local_deadline) - time.monotonic()
+        if letters and (remaining < 15 or limits.max_calls - limits.calls - limits.reserved_calls < 4
+                        or limits.max_tokens - limits.tokens - limits.reserved_tokens < 16000):
+            decision['status'] = 'skipped_budget'
+        elif letters:
+            retry = {}
+            started, calls_before, tokens_before = time.monotonic(), limits.calls, limits.tokens
+            attempt = dict(mode='interest_retry', diagnostics=retry)
+            attempts.append(attempt)
+            _inference_override.set(True)
+            try:
+                async with asyncio.timeout(max(0.1, min(120, remaining - 1))):
+                    second = await _answer(qa, memories, retry,
+                                           witness_prefill=strict['answer_witness_prefill'])
+                attempt['prediction'] = second
+                if accept_interest_retry(second, retry, letters):
+                    diagnostics.clear()
+                    diagnostics.update(retry)
+                    first = second
+                    decision.update(status='accepted', selected_attempt=1)
+                else:
+                    decision['status'] = 'retained_strict'
+            except (ValueError, TypeError, KeyError, budget.BudgetExceeded, TimeoutError, llm.LLMError) as exc:
+                decision.update(status='retry_failed', error_type=type(exc).__name__)
+                attempt.update(error_type=type(exc).__name__, error_detail=str(exc)[:500])
+            attempt.update(elapsed_seconds=time.monotonic() - started,
+                           provider_calls=limits.calls - calls_before,
+                           provider_tokens=limits.tokens - tokens_before)
+        # Top-level fields describe the chosen attempt. Nested attempts retain
+        # all calls, rejected results and errors without mixing stage replays.
+        diagnostics['answer_attempts'] = attempts
+        diagnostics['answer_adaptive_retry'] = decision
+        diagnostics['answer_budget_usage'] = dict(calls=limits.calls, tokens=limits.tokens,
+                                                  max_calls=limits.max_calls, max_tokens=limits.max_tokens)
+        return first
+    finally:
+        _inference_override.reset(token)
 
 
 def local_context_match(text, option_terms):
@@ -1419,11 +1824,19 @@ def local_context_match(text, option_terms):
     return best
 
 
-async def _answer(qa, memories, diagnostics):
+async def _answer(qa, memories, diagnostics, *, witness_prefill=None):
     options = qa['options']
     letters = option_map(options)
     sources, constraints = build_catalog(memories)
-    witnesses = await choice_witness.select(qa['question'], options, sources, diagnostics)
+    if witness_prefill is None:
+        witnesses = await choice_witness.select(qa['question'], options, sources, diagnostics)
+    else:
+        witnesses = copy.deepcopy(witness_prefill)
+        for items in witnesses.values():
+            for item in items:
+                if item['source_id'] not in sources or item['quote'] not in sources[item['source_id']]['text']:
+                    raise ValueError('Reused witness does not match source catalog')
+        diagnostics['answer_witness_retrieval'] = dict(mode='reused_strict', status='reused')
     diagnostics.update(answer_policy=VERSION, answer_source_catalog=list(sources.values()),
                        answer_constraint_catalog=list(constraints.values()), answer_validation='pending',
                        answer_witness_prefill=witnesses)
@@ -1436,13 +1849,13 @@ async def _answer(qa, memories, diagnostics):
         'a clause, omit text when using the ID; keep subject, negation and time from the complete option):\n'
         + json.dumps([s for letter, text in letters.items() for s in choice_premises.option_spans(letter, text)],
                      ensure_ascii=False))
-    if config.CHOICE_ALLOW_INFERRED:
+    if inference_enabled():
         support_prompt += ('\nControlled inference is enabled: status inferred is allowed only for a strongly '
             'implied interest or experience with a valid current-user anchor. Never infer ownership, '
             'diagnosis, frequency, expertise, a specific subtype or a denied/hypothetical event. '
             'Prefer unsupported when the implication is merely possible.')
     support_schema = Assessments.model_json_schema()
-    if not config.CHOICE_ALLOW_INFERRED:
+    if not inference_enabled():
         support_schema['$defs']['Claim']['properties']['status']['enum'] = ['supported', 'unsupported']
     entries = await assess_support(support_prompt, support_schema, options, sources, diagnostics)
     entries = split_compound_interest_claims(entries, sources, diagnostics)
@@ -1450,8 +1863,11 @@ async def _answer(qa, memories, diagnostics):
     entries = recover_direct_board_wave_citations(entries, sources, diagnostics)
     entries = recover_direct_monitoring_citations(entries, sources, diagnostics)
     entries = await recover_missing_citations(entries, sources, qa, diagnostics)
+    entries = normalize_nonasserted_scopes(entries, diagnostics)
     diagnostics['choice_alignment'] = entries
     checks = entailment_checks(entries, sources, options)
+    checks = enrich_habit_context(checks, sources, diagnostics)
+    checks = enrich_event_context(checks, diagnostics)
     if checks:
         entailment_prompt = prompts.render('15_choice_entailment.txt', question=qa['question'],
             question_date=qa.get('question_date', ''), checks=json.dumps(checks, ensure_ascii=False))
@@ -1460,6 +1876,10 @@ async def _answer(qa, memories, diagnostics):
             'of ownership or expertise. Two or more distinct first-party questions directly about '
             'the same specific X can establish that interest. Require subject equivalence and do '
             'not promote one broad adjacent question into a narrow preference, habit or event.\n')
+        if diagnostics['answer_habit_context']['added']:
+            entailment_prompt += _HABIT_CONTEXT_NOTE
+        if diagnostics['answer_event_context']['added']:
+            entailment_prompt += _EVENT_CONTEXT_NOTE
         verdicts = await _judge(entailment_prompt, TypedEntailments.model_json_schema(),
             lambda result: _typed_verdicts(result, checks), 'eval.choice_entailment', diagnostics)
         verdicts = await review_entailments(verdicts, checks, entries, sources, qa, diagnostics)
@@ -1589,35 +2009,6 @@ async def _answer(qa, memories, diagnostics):
                         first=initial_selection, second=selected,
                         personal_options=[e['letter'] for e in verified_personal],
                         context_options=context_candidates, context_evidence=context_evidence)
-                    if selected == initial_selection and verified_personal and context_evidence:
-                        focused_prompt = review_prompt + (
-                            '\nOne last focused comparison because the first two judgments agree: '
-                            'inspect each verified core and its quoted source directly. '
-                            'A specific established topic can be a more targeted instance of a broad '
-                            'request category (for example, anime is a type of series). Count only the '
-                            'verified core as personalization; ignore unsupported neighboring details, '
-                            'which neither establish a preference nor erase the verified core. Compare '
-                            'that core with the current request and generic answer, then choose the most '
-                            'relevant eligible option.')
-                        limits = budget.current.get()
-                        if (limits is None or (limits.calls < limits.max_calls
-                                and limits.tokens < limits.max_tokens
-                                and limits.deadline - time.monotonic() > 15)):
-                            first_review = selected
-                            try:
-                                selected = await _judge(focused_prompt, schema, validate,
-                                    'eval.choice_select_focused_review', diagnostics, attempts=1)
-                                diagnostics['answer_selection_review']['focused'] = dict(
-                                    status='reviewed', first=first_review, second=selected)
-                            except (ValueError, TypeError, KeyError, budget.BudgetExceeded,
-                                    TimeoutError, llm.LLMError) as exc:
-                                selected = first_review
-                                diagnostics['answer_selection_review']['focused'] = dict(
-                                    status='kept_first_review', first=first_review,
-                                    error_type=type(exc).__name__)
-                        else:
-                            diagnostics['answer_selection_review']['focused'] = dict(
-                                status='skipped_budget', first=selected)
                 except (ValueError, TypeError, KeyError, budget.BudgetExceeded,
                         TimeoutError, llm.LLMError) as exc:
                     selected = initial_selection

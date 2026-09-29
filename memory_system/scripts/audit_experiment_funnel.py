@@ -203,6 +203,11 @@ def main():
         gold_eligible=[r['qa_id'] for r in gold_eligible],
         support_fallback_count=len(fallback), fallback_empty=sum(not r['prediction'] for r in fallback),
         fallback_score=sum(r['score'] for r in fallback),
+        answer_calls_scope='chosen_attempt',
+        adaptive_retry_status=distribution(r.get('answer_adaptive_retry', {}).get('status', 'disabled') for r in results),
+        all_attempt_calls=distribution(f"{c['stage']}:{c['status']}:{c.get('error_type', '')}"
+            for r in results for a in r.get('answer_attempts', [dict(diagnostics=r)])
+            for c in a['diagnostics'].get('answer_calls', [])),
         answer_calls=distribution(f"{c['stage']}:{c['status']}:{c.get('error_type', '')}"
                                   for r in results for c in r['answer_calls']),
         witness_status=distribution(r['answer_witness_retrieval']['status'] for r in results),

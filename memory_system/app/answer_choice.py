@@ -14,7 +14,7 @@ import time
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
-from . import answer_context, budget, choice_premises, choice_witness, citation_text, config, integrity, llm, metrics, persona_source, personal_evidence, profile, prompts, repair_context
+from . import mixed_advice, answer_context, budget, choice_premises, choice_witness, citation_text, config, integrity, llm, metrics, persona_source, personal_evidence, profile, prompts, repair_context
 
 VERSION = 'verified-source-choice-v26-repair-span-contract'
 ABSTAIN = 'ABSTAIN'
@@ -335,7 +335,12 @@ def _self_scope(source, quote, claim):
 def _check_citation(citation, claim, sources, premise_type='unknown'):
     source = sources.get(citation.source_id)
     proposed_quote = citation.quote
-    if config.CHOICE_TYPOGRAPHIC_QUOTES and source:
+    normalization = 'typographic_quotes'
+    resolved = citation_text.original_profile_json_quote(source or {}, proposed_quote)
+    if resolved:
+        citation = citation.model_copy(update={'quote': resolved['quote']})
+        normalization = 'persona_json_layout'
+    if config.CHOICE_TYPOGRAPHIC_QUOTES and source and not resolved:
         resolved = citation_text.original_quote(source['text'], proposed_quote)
         if resolved:
             citation = citation.model_copy(update={'quote': resolved['quote']})
@@ -405,7 +410,7 @@ def _check_citation(citation, claim, sources, premise_type='unknown'):
         start = source['text'].find(citation.quote)
         c['source_span'] = dict(start=start, end=start + len(citation.quote))
     if citation.quote != proposed_quote:
-        c.update(proposed_quote=proposed_quote, quote_normalization='typographic_quotes')
+        c.update(proposed_quote=proposed_quote, quote_normalization=normalization)
     return c
 
 
@@ -638,12 +643,9 @@ def _recoverable(claim):
 
 # A conditional interest is not an assertion that its antecedent is true.
 _CONDITIONAL_INTEREST_OPEN = re.compile(
-    r"^\s*(?:[A-Z][.)]\s*)?If\s+(?:you(?:['’]re|\s+are)\s+"
-    r"(?:drawn\s+to|interested\s+in|curious\s+about|in\s+the\s+mood\s+for|up\s+for)"
-    r"|you\s+(?:enjoy|like|love|prefer))\b[^,;.!?\n]*[,;]", re.I)
+    "^\\s*(?:[A-Z][.)]\\s*)?If\\s+(?:you(?:['’]re|\\s+are)\\s+(?:(?:drawn\\s+to|interested\\s+in|curious\\s+about|in\\s+the\\s+mood\\s+for|up\\s+for)|an?\\s+[^,;.!?\\n]{1,80}\\s+enthusiast)|you\\s+(?:enjoy|like|love|prefer))\\b[^,;.!?\\n]*[,;]", re.I)
 _CONDITIONAL_PRESUPPOSED = re.compile(
-    r"\b(?:your|already|still|again|always|daily|weekly|monthly|previously|formerly|"
-    r"used\s+to|have|had|own\w*|diagnos\w*|professional\w*|since|because|given)\b", re.I)
+    '\\b(?:your|already|still|again|always|daily|weekly|monthly|previously|formerly|used\\s+to|have|had|own\\w*|diagnos\\w*|professional(?:ly)?\\b|since|because|given)\\b', re.I)
 _UNSPECIFIED_ACTIVITY = re.compile(
     r'^(?:focus\s+on|do|choose|pick|try|make\s+time\s+for|spend\s+(?:some\s+)?time\s+on)\s+'
     r'(?:(?:an?|any|some)\s+(?:(?:non-work-related|relaxing|pleasant|enjoyable|different|new)\s+)?activity'
@@ -1297,6 +1299,11 @@ async def reclassify_uncited(entries, diagnostics):
     except (ValueError, TypeError, KeyError, budget.BudgetExceeded, TimeoutError, llm.LLMError) as exc:
         diagnostics['answer_premise_scope'] = dict(status='kept_original', error_type=type(exc).__name__)
         return entries
+    protected = []
+    for cid, target in targets.items():
+        if not scopes[cid] and choice_premises.asserted_causal_prefix(target):
+            scopes[cid] = True
+            protected.append(cid)
     updated = copy.deepcopy(entries)
     removed = []
     index_map = {}
@@ -1324,7 +1331,7 @@ async def reclassify_uncited(entries, diagnostics):
             entry['status'] = _option_status(entry['kind'], retained, entry['validation_errors'], entry['option'])
             entry['scope_reclassification'] = 'awaiting_option_verification'
     diagnostics['answer_premise_scope'] = dict(status='checked', requested=list(targets), removed=removed,
-                                               claim_index_map=index_map)
+                                               claim_index_map=index_map, protected_causal_claims=protected)
     return updated
 
 
@@ -1451,6 +1458,14 @@ async def recover_missing_citations(entries, sources, qa, diagnostics):
     diagnostics['answer_citation_recovery'] = dict(status='checked', requested=list(targets),
         attached=attached, rejected=rejected, rejected_citations=rejected_citations)
     return updated
+
+
+def document_signature_marker(text):
+    # Preserve literal closing markers; this is not an authorship classifier.
+    match = re.search(r"(?:^|\n)(?:[—–-][ \t]*|(?:Best|Regards|Sincerely|Thanks for understanding),?\s*\n)(?P<name>[A-Z][A-Za-z'’.-]*(?:[ \t]+[A-Z][A-Za-z'’.-]*){0,3})[ \t]*$", text)
+    if not match:
+        return None
+    return dict(signature_quote=match.group(0).lstrip('\n'), signer_name=match.group('name'))
 
 
 def _typed_verdicts(payload, checks):
@@ -1676,6 +1691,18 @@ async def review_entailments(verdicts, checks, entries, sources, qa, diagnostics
     if not config.CHOICE_ENTAILMENT_REVIEW:
         return verdicts
     rejected = {v['claim_id'] for v in verdicts['checks'] if not v['entailed']}
+    passed = {v['claim_id'] for v in verdicts['checks'] if v['entailed']}
+    # Reconcile an option-level disagreement only after every extracted
+    # personal premise passed the first verifier with its original anchor.
+    # Never use a second opinion to revive an individually rejected premise.
+    restorable = {f"{e['letter']}:option" for e in entries
+                if e['status'] == 'supported' and e['claims']
+                and all(f"{e['letter']}:{i}" in passed
+                        and c['status'] == 'supported'
+                        and any(r['anchor'] for r in c['citations'])
+                        for i, c in enumerate(e['claims']))}
+    if not (rejected & restorable):
+        return verdicts
     proposed = {f"{e['letter']}:{i}" for e in entries for i, c in enumerate(e['claims'])
                 if c['status'] == 'supported' and any(r['anchor'] for r in c['citations'])}
     proposed.update(f"{e['letter']}:option" for e in entries
@@ -1701,7 +1728,8 @@ async def review_entailments(verdicts, checks, entries, sources, qa, diagnostics
     except (ValueError, TypeError, KeyError, budget.BudgetExceeded, TimeoutError, llm.LLMError) as exc:
         diagnostics['answer_entailment_review'] = dict(status='kept_first_verdict', error_type=type(exc).__name__)
         return verdicts
-    approved = {v['claim_id'] for v in second['checks'] if v['entailed']}
+    approved = {v['claim_id'] for v in second['checks']
+                if v['entailed'] and v['claim_id'] in restorable}
     diagnostics['answer_entailment_review'] = dict(status='reviewed', first=verdicts, second=second,
                                                   restored_check_ids=sorted(approved))
     return dict(checks=[dict(v, entailed=True) if v['claim_id'] in approved else v for v in verdicts['checks']])
@@ -1805,7 +1833,16 @@ async def _adaptive_answer(qa, memories, diagnostics):
         _inference_override.reset(token)
 
 
-def local_context_match(text, option_terms):
+def contrastive_context_terms(text):
+    terms = personal_evidence.terms(text) - {'use', 'uses', 'used', 'using', 'well', 'works', 'working'}
+    # Keep attached one-character qualifiers as phrases, not isolated option labels.
+    for left, right in re.findall(r'\b([A-Za-z]{2,})[ \t]+([A-Za-z0-9])\b', text):
+        if left.casefold() in terms and right.casefold() not in {'a', 'i'}:
+            terms.add(left.casefold() + ' ' + right.casefold())
+    return terms
+
+
+def local_context_match(text, option_terms, term_weights=None):
     """Count terms only in the exact sentence or profile line shown to review."""
     best = dict(shared_terms=[], excerpt='', source_span=dict(start=0, end=0))
     cursor = 0
@@ -1817,8 +1854,9 @@ def local_context_match(text, option_terms):
         if not excerpt:
             continue
         start += leading
-        shared = sorted(option_terms & personal_evidence.terms(excerpt))
-        if (len(shared), -len(excerpt)) > (len(best['shared_terms']), -len(best['excerpt'])):
+        shared = sorted(option_terms & contrastive_context_terms(excerpt))
+        rank = lambda terms: sum((term_weights or {}).get(t, 1) for t in terms)
+        if (rank(shared), -len(excerpt)) > (rank(best['shared_terms']), -len(best['excerpt'])):
             best = dict(shared_terms=shared, excerpt=excerpt,
                         source_span=dict(start=start, end=start + len(excerpt)))
     return best
@@ -1868,8 +1906,20 @@ async def _answer(qa, memories, diagnostics, *, witness_prefill=None):
     checks = entailment_checks(entries, sources, options)
     checks = enrich_habit_context(checks, sources, diagnostics)
     checks = enrich_event_context(checks, diagnostics)
+    marker_refs = []
+    for check in checks:
+        for source in check.get('sources', []):
+            marker = document_signature_marker(source.get('context', source.get('quote', '')))
+            if marker:
+                source['document_signature'] = marker
+                marker_refs.append(dict(claim_id=check['claim_id'], source_id=source['id'], **marker))
+    diagnostics['answer_document_signatures'] = marker_refs
     if checks:
-        entailment_prompt = prompts.render('15_choice_entailment.txt', question=qa['question'],
+        mixed_ids = mixed_advice.mixed_advice_checks(checks)
+        template = '15_choice_entailment_mixed.txt' if mixed_ids else '15_choice_entailment.txt'
+        if mixed_ids:
+            diagnostics['answer_mixed_advice'] = dict(claim_ids=mixed_ids, template=template)
+        entailment_prompt = prompts.render(template, question=qa['question'],
             question_date=qa.get('question_date', ''), checks=json.dumps(checks, ensure_ascii=False))
         entailment_prompt += '\nOutput verdict instead of entailed. Choose personal_supported when all asserted prior personal facts are supported; no_personal_premise when the text asserts no prior personal fact (only advice, effects or a hypothetical); unsupported_personal when any asserted prior personal detail lacks support. For an option, no_personal_premise is a passing check, even with no sources. For an extracted premise, no_personal_premise means it was advice rather than a personal fact. Classify the actual text, not claimed_kind. Return every claim_id once.'
         entailment_prompt += ('\nFor an interest premise only, "drawn to X" expresses topical interest, not a claim '
@@ -1880,6 +1930,14 @@ async def _answer(qa, memories, diagnostics, *, witness_prefill=None):
             entailment_prompt += _HABIT_CONTEXT_NOTE
         if diagnostics['answer_event_context']['added']:
             entailment_prompt += _EVENT_CONTEXT_NOTE
+        if marker_refs:
+            entailment_prompt += ('\nSome sources contain document_signature metadata copied literally from their closing lines. '
+                'Before treating first-person statements in those documents as facts about the user, compare the named '
+                'signer with the user identity and the original introduction. The message role identifies the submitter, '
+                'not necessarily the document narrator. Explicit self-authorship or matching identity can support attribution; '
+                'a different named narrator cannot establish user experiences without an explicit link. Preserve that '
+                'distinction for both whole-option and individual-premise checks. An unsupported personal assertion remains '
+                'unsupported_personal, never no_personal_premise. A signature alone neither validates nor invalidates a claim.')
         verdicts = await _judge(entailment_prompt, TypedEntailments.model_json_schema(),
             lambda result: _typed_verdicts(result, checks), 'eval.choice_entailment', diagnostics)
         verdicts = await review_entailments(verdicts, checks, entries, sources, qa, diagnostics)
@@ -1933,17 +1991,19 @@ async def _answer(qa, memories, diagnostics, *, witness_prefill=None):
                                      for c in e.get('claims', []))]
         def context_terms(text):
             # Generic usage verbs and adverbs are not topic-specific evidence.
-            return personal_evidence.terms(text) - {'use', 'uses', 'used', 'using', 'well', 'works', 'working'}
+            return contrastive_context_terms(text)
         option_terms = {letter: context_terms(letters[letter]) for letter in eligible}
+        term_weights = {term: 1 + len(option_terms) - sum(term in ts for ts in option_terms.values())
+                        for terms in option_terms.values() for term in terms}
         context_matches = {}
         for letter in generic_eligible:
             matches = []
             for source in sources.values():
                 if source.get('role') != 'user' and source.get('declared') != 'persona':
                     continue
-                match = local_context_match(source['text'], option_terms[letter])
+                match = local_context_match(source['text'], option_terms[letter], term_weights)
                 if len(match['shared_terms']) >= 2:
-                    matches.append((len(match['shared_terms']), source, match))
+                    matches.append((sum(term_weights[t] for t in match['shared_terms']), source, match))
             context_matches[letter] = matches
         context_overlap = {letter: max((m[0] for m in matches), default=0)
                            for letter, matches in context_matches.items()}
@@ -1999,6 +2059,7 @@ async def _answer(qa, memories, diagnostics, *, witness_prefill=None):
                             + json.dumps(context_evidence, ensure_ascii=False)) if context_evidence else ''
             review_prompt = (prompt + context_note + '\nFocused relevance review: ' + focus
                              + ' Return only an eligible answer letter.')
+            review_prompt += ('\nFirst-pass eligible answer: ' + initial_selection + '. This provisional answer is not evidence and has no priority over the other eligible options. Compare all eligible options against the current request and supplied sources, correcting the provisional answer whenever another option fits better.')
             limits = budget.current.get()
             if limits is None or (limits.calls < limits.max_calls and limits.tokens < limits.max_tokens
                                   and limits.deadline - time.monotonic() > 15):

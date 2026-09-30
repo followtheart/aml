@@ -951,13 +951,12 @@ class AnswerFlowTests(OfflineCase, unittest.IsolatedAsyncioTestCase):
                 sources, _ = self.gate.build_catalog(packet)
                 qa = self.qa(['A. Since ' + claim + ', make a plan.', 'B. Take a break.'])
                 support = assessment(claim, next(iter(sources)), text)
-                mock = staged_mock(support, lambda prompt: entailment_response(prompt, {'A:0'}),
-                                   lambda prompt: entailment_response(prompt, {'A:0'}))
+                mock = staged_mock(support, lambda prompt: entailment_response(prompt, {'A:0'}))
                 diagnostics = {}
                 with patch.object(config, 'CHOICE_ENTAILMENT_REVIEW', True), patch.object(llm, 'complete_json', mock):
                     self.assertEqual(await self.gate.answer(qa, packet, diagnostics), 'B')
                 self.assertEqual([c.kwargs['stage'] for c in mock.call_args_list],
-                                 ['eval.choice_support', 'eval.choice_entailment', 'eval.choice_entailment_review'])
+                                 ['eval.choice_support', 'eval.choice_entailment'])
                 self.assertIn(text, mock.call_args_list[1].args[0])
                 self.assertIn(claim, mock.call_args_list[1].args[0])
                 self.assertEqual(diagnostics['answer_eligible_options'], ['B'])

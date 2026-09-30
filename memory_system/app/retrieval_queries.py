@@ -1,9 +1,47 @@
 """Bounded evidence queries; option text is a hypothesis, never a user fact."""
 import re
 
-from . import personal_evidence, rerank_query
+from . import choice_premises, personal_evidence, rerank_query
 
 MAX_QUERY_CHARS = 240
+
+
+_EMBEDDED_ROLE=re.compile(r'\byour\s+(?:[\w-]+\s+){1,5}as\s+an?\s+[\w-]+',re.I)
+_ROLE_SCOPE=re.compile(r'\b(?:if|unless|not|never|no|without|would|could|may|might|imagine|suppose|pretend|hypothetical|fictional)\b|n[’\x27]t\b',re.I)
+def _literal_role(option):
+ if rerank_query._premise(option):return None
+ # A trailing condition may qualify an earlier role. Preserve the whole
+ # option when bounded; otherwise leave the planner unchanged.
+ if _ROLE_SCOPE.search(option):
+  whole=choice_premises.option_spans('X',option)[0]
+  return whole if _EMBEDDED_ROLE.search(whole['text']) and len(whole['text'])<=240 else None
+ for span in sorted(choice_premises.option_spans('X',option), key=lambda s: len(s['text'])):
+  text=span['text'];match=_EMBEDDED_ROLE.search(text)
+  if not match or len(text)>240:continue
+  # Do not detach a role from any preceding conditional/negative frame.
+  if _ROLE_SCOPE.search(option[:span['start']]):continue
+  start=span['start']+match.start()
+  if not _ROLE_SCOPE.search(option[:start]):
+   tail=option[start:span['end']]
+   boundary=re.search(r'[—,;.!?\n]',tail)
+   end=start+(boundary.start() if boundary else len(tail))
+   while end>start and option[end-1].isspace():end-=1
+   return dict(span,id=span['id']+':role',start=start,end=end,text=option[start:end])
+  return span
+ return None
+
+
+def _preserve_embedded_role(option, proposed):
+    """Keep omitted role wording as a query hypothesis, never as evidence."""
+    span = _literal_role(option)
+    if span is None:
+        return proposed
+    match = _EMBEDDED_ROLE.search(span['text'])
+    words = personal_evidence.terms(span['text'][match.start():])
+    existing = personal_evidence.terms(proposed) if isinstance(proposed, str) else set()
+    if words and len(existing & words) < len(words) / 2:
+        return span['text']
+    return proposed
 
 
 def compact_option(text):
@@ -61,6 +99,8 @@ def build(query, options, plan, limit=6):
     valid_array = isinstance(proposed, list) and len(proposed) == len(options)
     for index, option in enumerate(options):
         value = proposed[index] if valid_array else None
+        if valid_array:
+            value = _preserve_embedded_role(option, value)
         allowed = personal_evidence.terms(option + ' ' + query)
         words = personal_evidence.terms(value) if isinstance(value, str) else set()
         # Vocabulary overlap with the whole option can validate advice-only

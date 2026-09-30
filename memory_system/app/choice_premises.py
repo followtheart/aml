@@ -25,7 +25,17 @@ _STRONG_CLAIM = re.compile(r"\b(?:own|owned|have|had|has|history of|diagnos\w*|d
 _BACKGROUND = re.compile(r'\byour (?:day[- ]to[- ]day activities|routine|needs)\b', re.I)
 _HISTORY = re.compile(r'\b(?:last|before|after|when|once|formerly|earlier|ago|yesterday)\b', re.I)
 _ASSERTION = re.compile(r'\b(?:you|yourself|I|we|they|he|she)\b', re.I)
-_IMPERATIVE = re.compile(r'^(?:connect|take|give|listen|acknowledge|remind|arrange|mix|add|choose|keep)\b', re.I)
+_IMPERATIVE = re.compile(r'^(?:connect|take|give|listen|acknowledge|remind|arrange|mix|add|choose|keep|incorporate)\b', re.I)
+
+
+_PREFERENCE_SELECTOR = re.compile(
+    r'\s+that\s+(?:appeals?\s+to\s+you|interests?\s+you|you\s+(?:enjoy|like|find\s+relaxing))[.!?;,]?$', re.I)
+# A selector over an open class does not assert a known favorite. Definite
+# referents and named activities ("the jazz", "chess") retain personal scope.
+_OPEN_SELECTION = re.compile(
+    r'^(?!(?:the|this|that|these|those)\b).*\b(?:activities|clubs|groups|hobbies|events|classes|options|projects)$', re.I)
+_OBJECT_HISTORY = re.compile(
+    r'\b(?:your|my|our|already|own|owned|bought|grew|visited|performed|previously)\b', re.I)
 
 
 def option_spans(letter, option):
@@ -103,12 +113,24 @@ def is_suggestion(claim, option):
     # qualifier stays a premise even when embedded inside a recommendation.
     if _HISTORY.search(claim):
         return False
-    if _ASSERTION.search(claim) and not re.match(r'^you\s+(?:could|should|might)\s+(?:try|consider|start)\b', claim, re.I):
+    selector_base = _PREFERENCE_SELECTOR.sub('', claim)
+    assertion_text = selector_base if _OPEN_SELECTION.fullmatch(selector_base.strip()) else claim
+    if _ASSERTION.search(assertion_text) and not re.match(r'^you\s+(?:could|should|might)\s+(?:try|consider|start)\b', claim, re.I):
         return False
     start = max(option.rfind(mark, 0, match.start()) for mark in ('. ', ';', '\n'))
     prefix = option[start + 1:match.start()]
     if (_IMPERATIVE.match(claim) and not _ASSERTION.search(prefix) and not _FACT.search(claim)
             and (not prefix.strip(' ABCDEFGHIJKLMNOPQRSTUVWXYZ.)') or re.search(r'[,;]\s*$', prefix))):
+        return True
+    # Support objects of the newly recognized Incorporate imperative first.
+    # Broader existing-verb expansion needs separate downstream validation.
+    # Inspect the rest of the clause so a trailing ownership/history qualifier
+    # cannot be silently detached from a short extracted object span.
+    remainder = option[match.end():]
+    boundary = re.search(r'[.!?;\n]', remainder)
+    clause = prefix + claim + remainder[:boundary.start() if boundary else len(remainder)]
+    if (re.match(r'incorporate\b', prefix.lstrip(), re.I) and not _FACT.search(claim)
+            and not _FACT_TAIL.search(clause) and not _OBJECT_HISTORY.search(clause)):
         return True
     # An imperative at the start of an option is also future advice.
     advice = list(_ADVICE.finditer(prefix + claim))
@@ -126,3 +148,18 @@ def is_suggestion(claim, option):
     if re.search(r'\b(?:since|because|given)\b', prefix, re.I) and ',' not in prefix:
         return False
     return True
+
+
+_CAUSAL_OPEN = re.compile(r'^\s*(?:[A-Z][.)]\s*)?(?:since|because|given)\b[^,;.!?\n]*[,;]',re.I)
+_CAUSAL_PERSONAL = re.compile(r'\b(?:you|your|yourself)\b',re.I)
+_CAUSAL_UNCERTAIN = re.compile(r'\b(?:if|unless|might|could|may|would|imagine|suppose|hypothetical|fictional)\b',re.I)
+
+
+def asserted_causal_prefix(target):
+    """Keep explicit causal premises in scope without granting evidence support."""
+    option,claim=target['option'],target['claim']
+    opening=_CAUSAL_OPEN.match(option)
+    if not opening or not _CAUSAL_PERSONAL.search(opening.group()) or _CAUSAL_UNCERTAIN.search(opening.group()):
+        return False
+    occurrences=list(re.finditer(re.escape(claim),option,re.I))
+    return len(occurrences)==1 and occurrences[0].end()<=opening.end()

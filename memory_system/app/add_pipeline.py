@@ -19,6 +19,9 @@ from .errors import InvalidRequest
 
 log = logging.getLogger("aml.add")
 
+# Preserve the narrator of embedded documents during first-pass extraction.
+_DOCUMENT_ATTRIBUTION_NOTE = '\nPreserve attribution inside submitted documents. When a NEW message asks to edit, polish, or summarize an embedded first-person document, resolve its narrator from the document signature and the outer framing, not from the session summary. Do not replace that narrator with the conversation user\'s name. Explicit wording such as "this email I wrote" can establish self-authorship; an editing request alone cannot. If self-authorship is not established, retain facts as statements made by the document narrator, with the narrator\'s name when explicit, otherwise "the document narrator". This also applies to episode narrative, compressed_chunk, entities, and every triple subject. Keep the substantive facts and exact original quotes; do not discard the document merely because it was submitted for editing. If attribution remains uncertain, preserve that uncertainty instead of merging people.\n'
+
 
 def _format_messages(msgs: List[schemas.Message]) -> str:
     return "\n".join(f"{m.role}: {m.content}" for m in msgs)
@@ -65,10 +68,20 @@ async def _verify_semantics(facts, messages):
         "Return valid=true only if EVERY fact is fully supported by its quoted "
         "source messages, with correct speaker, negation, event identity and context. "
         "A question alone does not establish its answer. EVERY nested triple must "
-        "be entailed by its OWN fact, not another fact. State metadata must express "
-        "an explicitly supported single-valued current state (e.g. primary residence), "
-        "never an event, multi-valued preference, or invented attribute. "
-        "Time expressions must describe the fact's event, not an unrelated event. "
+        'be entailed by its OWN fact, not another fact. The state field is OPTIONAL: null or absent '
+        'is valid, including for events, questions, plans, and multi-valued preferences. Do not '
+        'require a state object for an ordinary supported fact. Only when state is non-null must it '
+        'express an explicitly supported single-valued current state (e.g. primary residence), never '
+        'an event, multi-valued preference, or invented attribute. Time expressions are also '
+        'optional; null is not an error by itself. When supplied, a time expression must describe the'
+        " fact's event, not an unrelated event. A quoted question establishes that the speaker asked "
+        'that question, but never establishes the answer, possession, diagnosis, or commitment '
+        'presupposed by it. An accurate record of an inquiry is a fact about the conversation. '
+        'Assistant-authored drafts, examples and proposed invitations establish assistant output, not'
+        " the user's actual plans or experiences. An inferred label does not waive this speaker-"
+        "attribution requirement. Check every triple's subject, relation and object separately: a "
+        "fact about a product is not a fact about its manufacturer, and a third party's event is not "
+        "the user's event. "
         "Reject unsupported additions and uncertain associations.\n" +
         json.dumps({"facts": facts, "messages": messages}, ensure_ascii=False))
     memory_debug.extraction_event('semantic_request', prompt=prompt)
@@ -213,6 +226,7 @@ async def _extract_segment_impl(req: schemas.AddRequest, summary: Optional[str],
     else:
         prompt = prompts.render("01_extract_amu.txt", **prompt_values)
         schema = llm.STRUCTURED_SCHEMAS["extraction"]
+    prompt += _DOCUMENT_ATTRIBUTION_NOTE
     memory_debug.extraction_event('extract_request', prompt=prompt)
     try:
         data = await llm.complete_json(

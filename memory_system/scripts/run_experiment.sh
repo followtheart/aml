@@ -43,6 +43,6 @@ printf 'experiment_dir=%s\n' "$run_dir"
 printf 'rerank_mode=%s\n' "$rerank_mode"
 trap 'status=$?; printf "%s\n" "$status" > "$run_dir/exit-code"' EXIT
 
-python -u scripts/local_eval.py --data ./data/prepared/personamem-v2-32k.jsonl --convs 1 --limit 30 --chunk-messages "$eval_chunk_messages" --chunk-words "$eval_chunk_words" --output "$run_dir/completed/data/results/personamem-v2-32k.jsonl"
+python -u scripts/local_eval.py --data ./data/prepared/personamem-v2-32k.jsonl --convs 2 --limit 60 --chunk-messages "$eval_chunk_messages" --chunk-words "$eval_chunk_words" --output "$run_dir/completed/data/results/personamem-v2-32k.jsonl"
 
 # python scripts/local_eval.py --data ./data/prepared/personamem-v2-32k.jsonl --convs 2 --limit 50 --output data/results/personamem-v2-32k.jsonl

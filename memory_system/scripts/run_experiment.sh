@@ -6,6 +6,9 @@ source .venv/bin/activate
 
 eval_chunk_messages="${AML_EVAL_CHUNK_MESSAGES:-20}"
 eval_chunk_words="${AML_EVAL_CHUNK_WORDS:-2000}"
+eval_convs="${AML_EVAL_CONVS:-1}"
+eval_limit="${AML_EVAL_LIMIT:-30}"
+eval_data="${AML_EVAL_DATA:-./data/prepared/personamem-v2-32k.jsonl}"
 
 # Use the request bound validated against singleton scores for this provider.
 # Keep configured mode available for baseline/custom-provider comparisons.
@@ -43,6 +46,6 @@ printf 'experiment_dir=%s\n' "$run_dir"
 printf 'rerank_mode=%s\n' "$rerank_mode"
 trap 'status=$?; printf "%s\n" "$status" > "$run_dir/exit-code"' EXIT
 
-python -u scripts/local_eval.py --data ./data/prepared/personamem-v2-32k.jsonl --convs 2 --limit 60 --chunk-messages "$eval_chunk_messages" --chunk-words "$eval_chunk_words" --output "$run_dir/completed/data/results/personamem-v2-32k.jsonl"
+python -u scripts/local_eval.py --data "$eval_data" --convs "$eval_convs" --limit "$eval_limit" --chunk-messages "$eval_chunk_messages" --chunk-words "$eval_chunk_words" --output "$run_dir/completed/data/results/personamem-v2-32k.jsonl"
 
 # python scripts/local_eval.py --data ./data/prepared/personamem-v2-32k.jsonl --convs 2 --limit 50 --output data/results/personamem-v2-32k.jsonl

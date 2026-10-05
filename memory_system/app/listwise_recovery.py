@@ -1,5 +1,6 @@
 """Bounded review of deleted, source-backed evidence; never create new facts."""
 import asyncio
+import copy
 from contextlib import nullcontext
 import hashlib
 import json
@@ -117,6 +118,30 @@ def request_for(req, candidates):
                 reservation=reservation)
 
 
+def candidate_contract(request, candidates):
+    """Constrain decision cardinality without changing evidence or validators."""
+    request = copy.deepcopy(request)
+    prompt = request['prompt']
+    old_bytes = len(prompt.encode()) + len(json.dumps(request['schema']).encode())
+    prompt += ('\nRequest cardinality: ' + str(len(candidates))
+               + ' candidate(s), with IDs ' + json.dumps([c['candidate_id'] for c in candidates])
+               + '. Return exactly ' + str(len(candidates)) + ' decision object(s), one per candidate. '
+               'Multiple sources or matching targets still require only ONE decision for that candidate. '
+               'Choose its single best-supported target. Do not add separate negative decisions for '
+               'the other question or answer-option targets. Never repeat a candidate ID.\n')
+    schema = request['schema']
+    # The generic model allows up to MAX_CANDIDATES, but this request must
+    # produce exactly one decision for each actual candidate, never per option.
+    schema['properties']['decisions'].update(minItems=len(candidates), maxItems=len(candidates))
+    schema['$defs']['Decision']['properties']['candidate_id']['enum'] = [
+        c['candidate_id'] for c in candidates]
+
+    request['prompt'] = prompt
+    request['schema'] = schema
+    request['reservation'] += len(prompt.encode()) + len(json.dumps(schema).encode()) - old_bytes
+    return request
+
+
 def _check_citation(ref, kind, sources):
     source = next((s for s in sources if s['source_id'] == ref.source_id), None)
     if source is None or ref.quote not in source['text']:
@@ -227,6 +252,17 @@ async def recover(req, submitted, selected, irrelevant, *, deadline=None):
         trace['errors'].append(dict(error='TimeoutError' if seconds <= 0 else 'BudgetExceeded'))
         return selected, trace
     request = request_for(req, cards)
+    # Admit exactly the original candidates first. Use the stronger contract
+    # only if it fits the remaining prompt/token budget; never displace a card.
+    if not config.LISTWISE_SPAN_REFS:
+        bounded = candidate_contract(request, cards)
+        if (len(bounded['prompt'].encode()) <= min(MAX_PROMPT_BYTES, config.RERANK_MAX_PROMPT_BYTES)
+                and (not limits or bounded['reservation'] <=
+                     limits.max_tokens - limits.tokens - limits.reserved_tokens)):
+            request = bounded
+            trace['output_contract'] = dict(status='applied', count=len(cards))
+        else:
+            trace['output_contract'] = dict(status='kept_original_budget', count=len(cards))
     reservation = request.pop('reservation')
     prompt = request.pop('prompt')
     trace.update(candidate_ids=[c['candidate_id'] for c in cards],

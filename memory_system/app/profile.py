@@ -21,7 +21,7 @@ import re
 from datetime import datetime, timezone
 from typing import Dict, List, Optional, Tuple
 
-from . import config, integrity, llm, prompts, store
+from . import config, integrity, llm, persona_source, prompts, store
 from .embeddings import embed
 
 log = logging.getLogger("aml.profile")
@@ -156,7 +156,61 @@ def _consolidation_evidence_prompt(content, basis, supports):
             dict(proposed_assertion=content, basis=basis, supports=supports), ensure_ascii=False))
 
 
-async def _verify_consolidation(req, content, basis, support, by_id):
+def _profile_identity_names(st, req):
+    """Use only explicit original persona identities from this user/session."""
+    rows=st.sources_for_session(req.user_id, req.session_id)
+    names=set()
+    for source in rows:
+        if source.get('role')!='user':
+            continue
+        text=source.get('content','')
+        if persona_source.is_persona_message(text):
+            parsed=persona_source.parse(text)
+            name=parsed.get('name') if isinstance(parsed,dict) else None
+            if isinstance(name,str) and name.strip():
+                names.add(name.strip())
+    for source in rows:
+        text=source.get('content','')
+        if source.get('role')=='user' and is_forget_request(text):
+            if (re.search(r'\b(?:name|identity|persona|everything)\b|who I am|姓名|名字|身份|所有',text,re.I)
+                    or any(name.casefold() in text.casefold() for name in names)):
+                return []
+    return sorted(names)
+
+
+def _profile_name_key(value):
+    return ' '.join(re.findall(r"[\w’'-]+", value.casefold()))
+
+def _unlinked_profile_subjects(supports, identity_names):
+    names={_profile_name_key(n) for n in identity_names if isinstance(n,str) and n.strip()}
+    if len(names)!=1:
+        return []  # Unknown/conflicting identity requires existing semantic verification.
+    user_name=next(iter(names));blocked=[]
+    for support in supports:
+        memory=support['memory_content']
+        for source in support.get('sources',[]):
+            if source.get('role')!='user':continue
+            text=source['content']
+            match=re.search(r"(?:^|\n)[—–-][ \t]*([A-Z][A-Za-z'’.-]*(?:[ \t]+[A-Z][A-Za-z'’.-]*){1,3})[ \t]*$",text)
+            if not match:continue
+            signer=match[1]
+            signer_parts=_profile_name_key(signer).split(); user_parts=user_name.split()
+            if (_profile_name_key(signer)==user_name or (signer_parts and user_parts
+                    and signer_parts[-1]==user_parts[-1])):continue
+            # Only a supporting memory explicitly about this named person triggers.
+            if not memory.startswith(signer+' '):continue
+            intro=text.split('\n\n',1)[0]
+            explicit_authorship=re.search(r'\bI (?:wrote|drafted|authored)\b',intro,re.I)
+            if explicit_authorship and not re.search(r'\b(?:not|never)\b',intro,re.I):continue
+            alias=(re.search(r'\bmy (?:pen name|pseudonym|alias)\b',intro,re.I)
+                   and signer in intro and not re.search(r'\b(?:not|never)\b',intro,re.I))
+            if alias:continue
+            blocked.append(dict(memory_id=support['memory_id'],signer=signer,user_identity=user_name,
+                                reason='named_support_subject_differs_without_explicit_alias'))
+    return blocked
+
+
+async def _verify_consolidation(req, content, basis, support, by_id, identity_names=()):
     """Check new original observations before they can promote a profile."""
     if basis not in ('stated', 'inferred'):
         return False
@@ -173,6 +227,13 @@ async def _verify_consolidation(req, content, basis, support, by_id):
             dict(request_id=req.request_id, message_index=i, role=req.messages[i].role,
                  content=req.messages[i].content) for i in indices]))
     if not supports:
+        return False
+    conflicts=_unlinked_profile_subjects(supports, identity_names)
+    # Only direct self-report promotions supported entirely by mismatched named
+    # documents are rejected here. Mixed evidence and inferred topical interest
+    # still require the existing semantic verifier.
+    if basis == 'stated' and {c['memory_id'] for c in conflicts} == set(support):
+        log.warning('profile support rejected: unlinked named document subject memories=%s', [c['memory_id'] for c in conflicts])
         return False
     if config.FAKE:
         return True
@@ -213,6 +274,7 @@ async def consolidate(st: store.Store, req, persisted: List[Tuple[Optional[str],
             return
         valid_ids = {aid for aid, _ in candidates}
         by_id = dict(candidates)
+        identity_names = _profile_identity_names(st, req)
         for item in items[:3]:
             if not isinstance(item, dict):
                 continue
@@ -225,7 +287,7 @@ async def consolidate(st: store.Store, req, persisted: List[Tuple[Optional[str],
             min_support = 1 if basis == "stated" else config.PROFILE_MIN_SUPPORT
             if len(support) < min_support:
                 continue
-            if not await _verify_consolidation(req, content, basis, support, by_id):
+            if not await _verify_consolidation(req, content, basis, support, by_id, identity_names):
                 continue
             vec = (await embed([content], stage="add.embed_profile"))[0]
             neighbors = [n for n in st.nearest_by_embedding(req.user_id, vec, 3)

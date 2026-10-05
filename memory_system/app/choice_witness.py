@@ -182,7 +182,7 @@ and falls back without changing the source catalog or any support decisions.
 
 
 def supplement_first_party(options, sources, witnesses):
-    """Rescue a missed user/persona quote when semantic retrieval chose only context.
+    """Prefer a uniquely matching persona field over generic first-party hints.
 
     The quote remains a hint and must pass the existing citation and entailment
     gates. This addresses source-selection misses without relaxing validation.
@@ -191,6 +191,13 @@ def supplement_first_party(options, sources, witnesses):
     result = {letter: list(items) for letter, items in witnesses.items()}
     for letter, items in lexical.items():
         current = result.get(letter, [])
+        field_rescue = next((item for item in items if item.get('profile_field')), None)
+        if field_rescue is not None:
+            combined = [field_rescue]
+            combined.extend(item for item in current
+                            if item['source_id'] != field_rescue['source_id'])
+            result[letter] = combined[:MAX_PER_OPTION]
+            continue
         if any(item.get('first_party') for item in current):
             continue
         rescue = next((item for item in items if item.get('first_party')), None)
@@ -217,6 +224,20 @@ def build(options, sources):
         for quote in _sentences(card['text']):
             passages.append(dict(source_id=card['id'], role=card.get('declared') or card['role'],
                                  quote=quote, concepts=evidence_selection._topic_concepts(quote)))
+        # Persona data is often a large JSON block. Preserve exact field lines
+        # as independently retrievable quotations so one matching attribute
+        # is not buried inside a long source that shares only broad context.
+        if card.get('declared') == 'persona':
+            for match in re.finditer(r'^\s*"([^"\n]+)"\s*:\s*([^\n]+)', card['text'], re.M):
+                value = match.group(2).rstrip(', \t').strip()
+                end = match.end(2)
+                while end > match.start(2) and card['text'][end - 1] in ', \t':
+                    end -= 1
+                quote = card['text'][match.start():end].strip()
+                if 0 < len(quote) <= MAX_QUOTE_CHARS and quote in card['text']:
+                    passages.append(dict(source_id=card['id'], role='persona', quote=quote,
+                                         concepts=evidence_selection._topic_concepts(match.group(1)),
+                                         profile_field=True))
     if not passages:
         return {}
     frequency = {}
@@ -226,6 +247,10 @@ def build(options, sources):
     def weight(term):
         return 1 + math.log((len(passages) + 1) / (1 + frequency.get(term, 0)))
     witnesses = {}
+    option_terms = []
+    for option in options:
+        premise = retrieval_queries.compact_option(option)
+        option_terms.append({w for w in evidence_selection._topic_concepts(premise) if len(w) >= 3})
     for index, option in enumerate(options):
         match = re.match(r'\s*\(?([A-Z])[.)]\s*', option)
         letter = match[1] if match else chr(65 + index)
@@ -237,6 +262,11 @@ def build(options, sources):
         scored = []
         for p in passages:
             hits = wanted & p['concepts']
+            if p.get('profile_field'):
+                unique = {term for term in hits if sum(term in terms for terms in option_terms) == 1}
+                if unique:
+                    scored.append(((True, True, 1.0, len(unique)), p, sorted(unique)))
+                continue
             if not hits:
                 continue
             ratio = sum(weight(w) for w in hits) / total
@@ -254,7 +284,7 @@ def build(options, sources):
                 continue
             chosen.append(dict(source_id=p['source_id'], role=p['role'], quote=p['quote'],
                                matched=[h for h in hits if not h.startswith('topic_family:')] or hits,
-                               first_party=key[0]))
+                               first_party=key[0], profile_field=bool(p.get('profile_field'))))
             used_sources.add(p['source_id'])
             if len(chosen) >= MAX_PER_OPTION:
                 break

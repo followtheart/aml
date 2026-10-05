@@ -579,6 +579,12 @@ def _scope_overlap(constraint, option_span):
     hits = wanted & _topic_terms(option_span)
     if not (wanted and len(hits) >= min(2, len(wanted)) and len(hits) / len(wanted) >= .5):
         return False
+    # Adjectives such as "thought-provoking" are too broad to carry a forgotten
+    # preference from one media object to another (for example, documentaries to
+    # a literary question). Require the option to remain in the same media domain.
+    media_objects = r'\b(?:documentar(?:y|ies)|films?|movies?|videos?|television|tv)\b'
+    if re.search(media_objects, constraint, re.I) and not re.search(media_objects, option_span, re.I):
+        return False
     # Creating a thing is not the same activity as sharing/displaying/reading
     # it. Guard these explicit action predicates before semantic adjudication;
     # unrecognised predicates still go to the scoped semantic judge.
@@ -693,6 +699,25 @@ def _nonasserted_scope_reason(claim, option):
     if (type(start) is not int or type(end) is not int
             or not 0 <= start < end <= len(option) or option[start:end] != text):
         return None
+    # Generic identity expression is an intended effect of this proposed action.
+    # Specific histories, tastes, ownership and other assertions still require
+    # evidence, including in the independently checked complete option.
+    identity = r"(?:history|personality|personal style)"
+    effect = (r"so (?:guests|visitors|others|people) (?:can )?get "
+              r"(?:a sense|a glimpse|an idea) of (?:both )?your " + identity
+              + r"(?: and (?:your )?" + identity + r")?[.,]?")
+    # Defer when another part of the option asserts a specific existing fact.
+    # A generic effect cannot justify discarding that fact's evidence check.
+    surrounding = option[:start] + ' ' + option[end:]
+    asserted_context = re.search(
+        r'\b(?:because|since|given|already|previously|yesterday|used\s+to|last\s+year|'
+        r'you\s+(?:own|owned|visited|have|had|are\s+a))\b', surrounding, re.I)
+    if not asserted_context and re.fullmatch(effect, text.strip(), re.I):
+        boundary = max(option.rfind(mark, 0, start) for mark in ('. ', '! ', '? ', '\n'))
+        prefix = option[boundary + 1 if boundary >= 0 else 0:start]
+        if (re.search(r'\b(?:you\s+(?:could|can|might)|consider|try)\b', prefix, re.I)
+                and not re.search(r'\b(?:already|previously|since|because|given|yesterday|last\s+year|used\s+to)\b', prefix, re.I)):
+            return 'generic_identity_advice_effect'
     condition = _CONDITIONAL_INTEREST_OPEN.match(option)
     if (condition and end <= condition.end()
             and not _CONDITIONAL_PRESUPPOSED.search(condition.group())):
@@ -796,6 +821,83 @@ _EVENT_CONTEXT_NOTE = (
     'when the cited original source actually connects the activity to the required context. '
     'If only the activity is established and a required context is unsupported, the complete '
     'premise is unsupported_personal.')
+
+
+def add_event_subchecks(checks, diagnostics):
+    result = copy.deepcopy(checks)
+    children, skipped = [], []
+    used_bytes = 0
+    extra_limit = 12000
+    limits = budget.current.get()
+    if limits:
+        # Keep a conservative allowance for prompt scaffolding, output and
+        # downstream answer stages; omit optional checks instead of spending it.
+        base_bytes = len(json.dumps(checks, ensure_ascii=False).encode())
+        extra_limit = min(extra_limit, max(0, limits.max_tokens - limits.tokens
+            - limits.reserved_tokens - base_bytes - 20000))
+    for parent in checks:
+        if parent.get('check_type') != 'premise' or parent.get('premise_type') != 'experience':
+            continue
+        for index, qualifier in enumerate(parent.get('required_event_context', [])):
+            if qualifier.strip(' ,.;!?').casefold() == parent['claim'].strip(' ,.;!?').casefold():
+                skipped.append(dict(parent=parent['claim_id'], qualifier=qualifier, reason='whole_parent'))
+                continue
+            # "a while to process ..." uses while as a noun, not an event frame.
+            if re.match(r'while\s+to\b', qualifier, re.I):
+                skipped.append(dict(parent=parent['claim_id'], qualifier=qualifier, reason='noun_while'))
+                continue
+            child = dict(claim_id=parent['claim_id'] + ':event:' + str(index),
+                check_type='event_context', parent_claim_id=parent['claim_id'],
+                parent_claim=parent['claim'], claim=qualifier,
+                sources=copy.deepcopy(parent.get('sources', [])),
+                context_neighbors=copy.deepcopy(parent.get('context_neighbors', [])))
+            cost = len(json.dumps(child, ensure_ascii=False).encode())
+            if len(children) >= 8 or used_bytes + cost > extra_limit:
+                skipped.append(dict(parent=parent['claim_id'], qualifier=qualifier, reason='expansion_budget'))
+                continue
+            children.append(child)
+            used_bytes += cost
+    result.extend(children)
+    diagnostics['answer_event_subchecks'] = dict(children=[
+        dict(claim_id=c['claim_id'], parent=c['parent_claim_id'], qualifier=c['claim'])
+        for c in children], skipped=skipped, added_bytes=used_bytes, extra_limit=extra_limit)
+    return result
+
+
+def apply_event_subcheck_results(verdicts, checks, diagnostics):
+    result = copy.deepcopy(verdicts)
+    by_id = {v['claim_id']:v for v in result['checks']}
+    blocked = []
+    for check in checks:
+        if check.get('check_type') != 'event_context':
+            continue
+        if not by_id[check['claim_id']]['entailed']:
+            parent = check['parent_claim_id']
+            changed_parent = by_id[parent]['entailed']
+            by_id[parent]['entailed'] = False
+            blocked.append(dict(parent=parent, failed_context=check['claim_id'], changed_parent=changed_parent))
+    diagnostics['answer_event_subchecks']['blocked_parents'] = blocked
+    return result
+
+
+_EVENT_SUBCHECK_NOTE = (
+    '\nAn event_context check separately tests whether the cited original sources connect '
+    'the activity in parent_claim to the exact temporal or situational frame in claim. '
+    'It is not enough that the sources describe a similar activity at some other or unspecified '
+    'time. Return personal_supported only when this connection is established, including clear '
+    'paraphrases. Otherwise return unsupported_personal. Context neighbors can resolve references '
+    'but cannot invent the event. This extra check cannot make an unsupported parent supported.\n')
+
+
+def independent_entailment_checks(checks, diagnostics):
+    """Hide upstream verdict guesses from the independent verifier, preserving evidence."""
+    result = copy.deepcopy(checks)
+    removed = []
+    for check in result:
+        if 'proposed_status' in check:
+            removed.append(dict(claim_id=check['claim_id'], status=check.pop('proposed_status')))
+    diagnostics['answer_independent_entailment'] = dict(removed_statuses=removed)
+    return result
 
 
 def entailment_checks(entries, sources, options):
@@ -1735,6 +1837,43 @@ async def review_entailments(verdicts, checks, entries, sources, qa, diagnostics
     return dict(checks=[dict(v, entailed=True) if v['claim_id'] in approved else v for v in verdicts['checks']])
 
 
+_STREET = re.compile(r"\b(?P<number>[0-9]{1,6})[ \t]+(?:[A-Za-z][A-Za-z.'’-]*[ \t]+){1,6}(?:street|st|avenue|ave|road|rd|drive|dr|lane|ln|court|ct|boulevard|blvd|way|place|pl|terrace|ter)\b", re.I)
+_QUESTION_HOME = re.compile(r'\bmy\s+(?:home|house|residence)\s*(?:\(\s*)?(?:(?:located|situated)\s+)?(?:at|is(?:\s+at)?|:)\s*$',re.I)
+_OPTION_HOME = re.compile(r'\byour\s+(?:home|house|residence)\s+(?:(?:located|situated)\s+)?(?:at|is(?:\s+at)?)\s*$',re.I)
+_AMBIGUOUS = re.compile(r'\b(?:moving|move|relocat\w*|new\s+(?:home|house|residence|address)|hypothetical\w*|build(?:ing)?|buy(?:ing)?|purchas\w*|rent(?:ing)?|proposed|potential|alternative|future|imagine|example|suppose|forget|not|never)\b',re.I)
+
+# Quotation and modal/reporting scope are not current-user assertions.
+_NONASSERTED_HOME = re.compile(r"\b(?:if|unless|whether|would|could|might|were|mistaken\w*|incorrect\w*|erroneous\w*|wrong\w*|correct\w*|draft|quote\w*|says?|said|claim\w*|pretend|assum\w*|suppos\w*|formerly|previously|used\s+to|old\s+(?:home|house|residence|address))\b", re.I)
+_QUOTED_HOME = re.compile(r'"[^"\n]*"|“[^”\n]*”|‘[^’\n]*’|`[^`\n]*`|(?<!\w)\'[^\'\n]*\'(?!\w)')
+def _asserted_home_scope(text, address):
+    boundaries = list(re.finditer(r"[.!?](?:\s+|$)", text))
+    start = max((m.end() for m in boundaries if m.end() <= address.start()), default=0)
+    end = min((m.end() for m in boundaries if m.start() >= address.end()), default=len(text))
+    if _NONASSERTED_HOME.search(text[start:end]):
+        return False
+    return not any(m.start() <= address.start() < m.end() for m in _QUOTED_HOME.finditer(text))
+
+def current_home_conflicts(question, options):
+    """No positive support grant: defer unless both typed references are explicit."""
+    addresses=list(_STREET.finditer(question))
+    if len(addresses)!=1 or _AMBIGUOUS.search(question):return []
+    current=addresses[0]
+    if not _asserted_home_scope(question,current):return []
+    if not _QUESTION_HOME.search(question[max(0,current.start()-100):current.start()]):return []
+    blocked=[]
+    for option in options:
+        proposed=list(_STREET.finditer(option))
+        if len(proposed)!=1 or _AMBIGUOUS.search(option):continue
+        value=proposed[0]
+        if not _asserted_home_scope(option,value):continue
+        if not _OPTION_HOME.search(option[max(0,value.start()-100):value.start()]):continue
+        if int(current['number'])==int(value['number']):continue
+        blocked.append(dict(letter=option[0],reason='explicit_current_home_number_conflict',
+            question_address=current[0],question_span=dict(start=current.start(),end=current.end()),
+            option_address=value[0],option_span=dict(start=value.start(),end=value.end())))
+    return blocked
+
+
 async def answer(qa, memories, diagnostics):
     # Share an existing caller budget, or provide a bounded standalone answer
     # budget. Transport retries also consume these provider-call allowances.
@@ -1906,6 +2045,7 @@ async def _answer(qa, memories, diagnostics, *, witness_prefill=None):
     checks = entailment_checks(entries, sources, options)
     checks = enrich_habit_context(checks, sources, diagnostics)
     checks = enrich_event_context(checks, diagnostics)
+    checks = add_event_subchecks(checks, diagnostics)
     marker_refs = []
     for check in checks:
         for source in check.get('sources', []):
@@ -1919,8 +2059,9 @@ async def _answer(qa, memories, diagnostics, *, witness_prefill=None):
         template = '15_choice_entailment_mixed.txt' if mixed_ids else '15_choice_entailment.txt'
         if mixed_ids:
             diagnostics['answer_mixed_advice'] = dict(claim_ids=mixed_ids, template=template)
+        independent_checks = independent_entailment_checks(checks, diagnostics)
         entailment_prompt = prompts.render(template, question=qa['question'],
-            question_date=qa.get('question_date', ''), checks=json.dumps(checks, ensure_ascii=False))
+            question_date=qa.get('question_date', ''), checks=json.dumps(independent_checks, ensure_ascii=False))
         entailment_prompt += '\nOutput verdict instead of entailed. Choose personal_supported when all asserted prior personal facts are supported; no_personal_premise when the text asserts no prior personal fact (only advice, effects or a hypothetical); unsupported_personal when any asserted prior personal detail lacks support. For an option, no_personal_premise is a passing check, even with no sources. For an extracted premise, no_personal_premise means it was advice rather than a personal fact. Classify the actual text, not claimed_kind. Return every claim_id once.'
         entailment_prompt += ('\nFor an interest premise only, "drawn to X" expresses topical interest, not a claim '
             'of ownership or expertise. Two or more distinct first-party questions directly about '
@@ -1938,10 +2079,13 @@ async def _answer(qa, memories, diagnostics, *, witness_prefill=None):
                 'a different named narrator cannot establish user experiences without an explicit link. Preserve that '
                 'distinction for both whole-option and individual-premise checks. An unsupported personal assertion remains '
                 'unsupported_personal, never no_personal_premise. A signature alone neither validates nor invalidates a claim.')
+        if diagnostics['answer_event_subchecks']['children']:
+            entailment_prompt += _EVENT_SUBCHECK_NOTE
         verdicts = await _judge(entailment_prompt, TypedEntailments.model_json_schema(),
             lambda result: _typed_verdicts(result, checks), 'eval.choice_entailment', diagnostics)
         verdicts = await review_entailments(verdicts, checks, entries, sources, qa, diagnostics)
         verdicts = apply_direct_source_entailment_rules(verdicts, checks, diagnostics)
+        verdicts = apply_event_subcheck_results(verdicts, checks, diagnostics)
         direct_source_claim_ids = diagnostics.get('answer_entailment_rules', {}).get('claim_ids', [])
         entries = validate_entailments(verdicts, entries, checks,
                                        direct_source_claim_ids=direct_source_claim_ids)
@@ -1952,6 +2096,9 @@ async def _answer(qa, memories, diagnostics, *, witness_prefill=None):
             pairs=json.dumps(pairs, ensure_ascii=False))
         blocked, matches = await _judge(constraint_prompt, ConstraintDecisions.model_json_schema(),
             lambda result: validate_decisions(result, pairs, options, constraints), 'eval.choice_constraints', diagnostics)
+    current_conflicts = current_home_conflicts(qa['question'], options)
+    blocked.update(x['letter'] for x in current_conflicts)
+    diagnostics['answer_current_home_conflicts'] = current_conflicts
     diagnostics.update(answer_constraints=matches, answer_blocked_options=sorted(blocked))
     eligible = eligible_choices(entries, blocked)
     diagnostics['answer_eligible_options'] = eligible
@@ -1996,18 +2143,28 @@ async def _answer(qa, memories, diagnostics, *, witness_prefill=None):
         term_weights = {term: 1 + len(option_terms) - sum(term in ts for ts in option_terms.values())
                         for terms in option_terms.values() for term in terms}
         context_matches = {}
-        for letter in generic_eligible:
+        excluded_context_sources = set()
+        for letter in sorted(generic_eligible):
             matches = []
             for source in sources.values():
                 if source.get('role') != 'user' and source.get('declared') != 'persona':
+                    continue
+                # A general question supplies topical context, not a distinguishing
+                # first-party detail warranting a generic-option review by itself.
+                if (source.get('declared') != 'persona' and source['text'].rstrip().endswith('?')
+                        and not _SELF.search(source['text'])):
+                    excluded_context_sources.add(source['id'])
                     continue
                 match = local_context_match(source['text'], option_terms[letter], term_weights)
                 if len(match['shared_terms']) >= 2:
                     matches.append((sum(term_weights[t] for t in match['shared_terms']), source, match))
             context_matches[letter] = matches
+        diagnostics['answer_review_context_filter'] = dict(
+            excluded_source_ids=sorted(excluded_context_sources),
+            reason='general_question_without_first_person_reference')
         context_overlap = {letter: max((m[0] for m in matches), default=0)
                            for letter, matches in context_matches.items()}
-        context_candidates = [letter for letter in generic_eligible
+        context_candidates = [letter for letter in sorted(generic_eligible)
                               if context_overlap[letter] >= 2
                               and context_overlap[letter] > context_overlap.get(selected, 0)]
         context_evidence = []
@@ -2047,7 +2204,7 @@ async def _answer(qa, memories, diagnostics, *, witness_prefill=None):
                          'is unrelated or the generic choice answers better. The cited original excerpts '
                          'below are attached to those verified cores; compare their topic with the current '
                          'request directly.')
-            else:
+            elif context_candidates:
                 focus = ('Some eligible generic options match distinct details in original first-party '
                          'context. Treat those details only as context for relevance, not as evidence of '
                          'new personal facts. Reconsider whether a directly matching option answers this '

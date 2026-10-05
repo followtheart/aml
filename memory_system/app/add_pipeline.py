@@ -133,7 +133,7 @@ def _validate_fact(raw, batch, start, req):
             for entry in evidence:
                 source = batch[entry["message_index"]].content
                 if integrity.quote_in(expression, source):
-                    entry["quote"] = source
+                    entry.update(quote=source, start=0, end=len(source))
                     break
             else:
                 raise ValueError("Time expression is not present in cited source messages")

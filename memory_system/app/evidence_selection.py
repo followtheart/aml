@@ -26,7 +26,13 @@ def _text(value):
 
 
 def fragments(row):
-    """Only source text actually visible to the ranker can represent evidence."""
+    """Only source text actually visible to the ranker can represent evidence.
+
+    When a memory is a derived fact with an exact source quote, that fact is an
+    additional visible obligation. A second profile projection from the same
+    large persona message does not cover it merely because both cite the whole
+    message (the source may contain many independent fields).
+    """
     body = _text(row.get('_rank_text', row.get('content', '')))
     result = []
     for source in row.get('_packet_item', {}).get('sources', []):
@@ -37,7 +43,16 @@ def fragments(row):
         if not sid and source.get('request_id') is not None and source.get('message_index') is not None:
             sid = f"{source['request_id']}:{source['message_index']}"
         if sid:
-            result.append(((sid, source.get('role')), text))
+            quotes = [e.get('quote') for e in row.get('evidence', [])
+                      if e.get('quote') and e.get('quote') in text
+                      and e.get('message_index') == source.get('message_index')
+                      and (not e.get('request_id') or e['request_id'] == source.get('request_id'))]
+            visible = list(dict.fromkeys(_text(quote) for quote in quotes if _text(quote) in body))
+            if visible:
+                key = f"profile-quote:{row['id']}" if row.get('type') == 'profile' else sid
+                result.extend(((key, source.get('role')), quote) for quote in visible)
+            else:
+                result.append(((sid, source.get('role')), text))
     return result
 
 
@@ -172,6 +187,21 @@ def option_champions(ordered, requirements, visible, limit):
                     # For comparable topical coverage, prefer a first-party
                     # question over a long assistant essay with many keywords.
                     score = (role == 'user', family_hit, ratio)
+                    best = max(best, score) if best else score
+            # A profile field can witness an option only when the field name
+            # itself is distinctive to exactly one option requirement. Broad
+            # topic overlap in the quote is too noisy for reservation.
+            if c.get('type') == 'profile':
+                match = re.search(r"the user's\s+(.+?)\s+is\b", c.get('content') or '', re.I)
+                field_terms = {t for t in pe.terms(match.group(1)) if len(t) >= 5} if match else set()
+                specific = field_terms & wanted
+                unique = {term for term in specific if sum(
+                    term in _topic_concepts(r['text']) for r in requirements
+                ) == 1}
+                first_party = any(e.get('source_role') in ('persona', 'user')
+                                  and e.get('quote') for e in c.get('evidence', []))
+                if unique and first_party:
+                    score = (True, True, 1.0 + min(len(unique), 10) / 100)
                     best = max(best, score) if best else score
             if best:
                 scores[c['id']] = best

@@ -720,6 +720,18 @@ class ConstraintTests(OfflineCase):
                                     'Listen to some live music at a local cafe.')
         self.assertEqual(blocked, set())
 
+    def test_documentary_adjective_overlap_does_not_block_literary_question(self):
+        blocked, _ = self.constraint(
+            'Please forget that I like watching thought-provoking documentaries.',
+            'Use a blackboard with a thought-provoking literary question.')
+        self.assertEqual(blocked, set())
+
+    def test_documentary_forget_still_blocks_documentary_recommendation(self):
+        blocked, _ = self.constraint(
+            'Please forget that I like watching thought-provoking documentaries.',
+            'Watch a thought-provoking documentary at the festival.')
+        self.assertEqual(blocked, {'A'})
+
     def test_forged_constraint_or_option_quote_cannot_block(self):
         rule = 'Please forget that I enjoy photography.'
         option = 'Since you enjoy photography, visit a camera exhibit.'

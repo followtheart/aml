@@ -97,9 +97,14 @@ def validate(result, count):
     return ranking, set(irrelevant), groups
 
 
-def listwise_request(req, plan, rows, *, repair=False):
+def listwise_request(req, plan, rows, *, repair=False, shared_sources=None):
     """Use the same full request bound for scheduling and provider dispatch."""
     prompt = listwise_prompt(req, plan, rows)
+    if rows and (config.LISTWISE_SHARED_SOURCES if shared_sources is None else shared_sources):
+        from .listwise_sources import prompt_with_shared
+        compact = prompt_with_shared(listwise_prompt)(req, plan, rows)
+        if len(compact.encode('utf-8')) < len(prompt.encode('utf-8')):
+            prompt = compact
     output_limit = max(256, 24 * len(rows))
     output_schema = schema(len(rows))
     system = ('Rank the supplied evidence for the question and call emit_json_result. '
@@ -157,7 +162,7 @@ async def rank(req, plan, candidates):
         smallest_ce = min((sizes[c['id']] for c in pending), default=0)
         for c in coarse:
             budget.check()
-            request = listwise_request(req, plan, [c])
+            request = listwise_request(req, plan, [c], shared_sources=False)
             if (len(request['prompt'].encode('utf-8')) <= config.RERANK_MAX_PROMPT_BYTES
                     and request['reservation'] + smallest_ce <= available):
                 headroom = max(headroom, request['reservation'])
@@ -319,7 +324,7 @@ async def rank(req, plan, candidates):
     submitted, token_limited = [], False
     mandatory = carried_ids
     for c in sorted(ordered, key=lambda c: c['id'] not in mandatory):
-        request = listwise_request(req, plan, submitted + [c])
+        request = listwise_request(req, plan, submitted + [c], shared_sources=False)
         if len(request['prompt'].encode('utf-8')) > config.RERANK_MAX_PROMPT_BYTES:
             trace['omitted'].append(dict(id=c['id'], stage='listwise', reason='prompt_budget'))
         elif limits and request['reservation'] > limits.max_tokens - limits.tokens - limits.reserved_tokens:
@@ -327,6 +332,22 @@ async def rank(req, plan, candidates):
             trace['omitted'].append(dict(id=c['id'], stage='listwise', reason='token_budget'))
         else:
             submitted.append(c)
+    baseline_ids = {c['id'] for c in submitted}
+    if config.LISTWISE_SHARED_SOURCES and submitted:
+        # Preserve the original admission before spending any compression gain.
+        # CE scheduling above stays original; full request tokens still apply.
+        for c in sorted(ordered, key=lambda c: c['id'] not in mandatory):
+            if c['id'] in baseline_ids:
+                continue
+            trial = sorted(submitted + [c], key=lambda c: -positions[c['id']])
+            request = listwise_request(req, plan, trial)
+            if len(request['prompt'].encode('utf-8')) > config.RERANK_MAX_PROMPT_BYTES:
+                continue
+            if limits and request['reservation'] > limits.max_tokens - limits.tokens - limits.reserved_tokens:
+                continue
+            submitted.append(c)
+            trace['omitted'] = [o for o in trace['omitted']
+                                if not (o['id'] == c['id'] and o['stage'] == 'listwise')]
     submitted.sort(key=lambda c: -positions[c['id']])
     submitted_ids = {c['id'] for c in submitted}
     trace['omitted'].extend(dict(id=c['id'], stage='listwise', reason='listwise_limit')
@@ -396,7 +417,9 @@ async def rank(req, plan, candidates):
             status = 'recovered'
     trace['listwise'] = dict(status=status, input_count=len(submitted), output_count=len(selected),
         candidate_ids=[c['id'] for c in submitted], selected_ids=[c['id'] for c in selected],
-        input_bytes=len(listwise_prompt(req, plan, submitted).encode('utf-8')) if submitted else 0,
+        input_bytes=len(listwise_request(req, plan, submitted)['prompt'].encode('utf-8')) if submitted else 0,
+        shared_sources=config.LISTWISE_SHARED_SOURCES,
+        baseline_candidate_ids=sorted(baseline_ids),
         attempts=attempts, errors=errors, selection=admission_selection, carried_ids=sorted(carried_ids),
         primary_selected_ids=primary_selected_ids, primary_irrelevant_ids=[submitted[i]['id'] for i in sorted(irrelevant)],
         recovery=recovery)

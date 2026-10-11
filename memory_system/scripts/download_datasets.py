@@ -30,6 +30,9 @@ SOURCES = {
         "url": HF + "bowen-upenn/PersonaMem-v2/resolve/main/benchmark/text/benchmark.csv",
         "file": "personamem-v2.csv", "license": "CC-BY-4.0",
         "source": "https://github.com/bowen-upenn/PersonaMem-v2"},
+    "personamem-v3": {
+        "source": "https://github.com/bowen-upenn/PersonaMem-v3",
+        "license": "CC-BY-NC-4.0; pre-built derived data"},
     "beam": {
         "url": HF + "Mohammadta/BEAM/resolve/main/data/100K-00000-of-00001.parquet",
         "file": "beam-100k.parquet", "license": "CC-BY-SA-4.0",
@@ -84,6 +87,8 @@ def main():
     p.add_argument("--persona-size", choices=["32k", "128k"], default="32k")
     p.add_argument("--persona-convs", type=int, default=0, help="Limit history files; 0 downloads all")
     p.add_argument("--workers", type=int, default=4)
+    p.add_argument("--persona-v3-users", nargs="+", default=["1"],
+                   help="Pinned v3 user IDs; default 1 (not the full dataset)")
     args = p.parse_args()
     if args.persona_convs < 0 or not 1 <= args.workers <= 16:
         p.error("Invalid history limit or workers (1-16)")
@@ -91,7 +96,10 @@ def main():
     requested = list(SOURCES) if "all" in args.datasets else list(dict.fromkeys(args.datasets))
     for name in requested:
         source = SOURCES[name]
-        if name == "scriptmem":
+        if name == "personamem-v3":
+            from download_personamem_v3 import download_users
+            download_users(args.persona_v3_users, root / "personamem-v3")
+        elif name == "scriptmem":
             for stem in ["angry", "enemy", "friends", "man_earth"]:
                 fetch(f"https://raw.githubusercontent.com/memorax-ai/ScriptMem/main/data/raw/{stem}.json",
                       root / "scriptmem" / f"{stem}.json")

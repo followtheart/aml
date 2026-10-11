@@ -30,12 +30,23 @@ _MERGE_SIM = 0.80
 
 FORGET_RE = re.compile(
     r"\b(forget(?:ting)?\s+(?:that|this|about|it|the|my|their|his|her|our|everything|they|he|she|I|we)\b|do(?:es)? not remember\b|"
-    r"don'?t remember\b|erase\b|stop (?:remembering|mentioning)\b|"
+    r"don'?t remember\b|stop (?:remembering|mentioning)\b|"
     r"delete (?:that|this|the)\b|remove\b.{0,30}\bfrom (?:your )?memory\b)"
     r"|忘记|忘掉|删除.{0,6}记忆|别记|不要记住", re.I)
 # "don't forget the milk" is a reminder, not a deletion request.
 _FORGET_NEGATED_RE = re.compile(
     r"\b(?:don'?t|do not|never|not to|won'?t|can'?t|cannot)\s+forget\b|\b(?:forgetting|forgot)\b", re.I)
+
+# Descriptive prose such as "demolition would erase collective memory" is
+# not an instruction to the assistant. Preserve direct and reported requests.
+_ERASE_REQUEST_RE = re.compile(
+    r"(?:^|[.!?;\n]\s*)\s*(?:(?:please|kindly)\s+)?(?:permanently\s+)?erase\b"
+    r"|\b(?:can|could|would|will)\s+you\s+(?:please\s+)?(?:permanently\s+)?erase\b"
+    r"|\b(?:please|kindly)\s+(?:permanently\s+)?erase\b"
+    r"|\b(?:want|need|would like)\s+you\s+to\s+(?:permanently\s+)?erase\b"
+    r"|\b(?:ask(?:s|ed)?|request(?:s|ed)?|instruct(?:s|ed)?|tell|tells|told)\s+"
+    r"(?:(?:the\s+)?assistant\s+|you\s+)?to\s+(?:permanently\s+)?erase\b",
+    re.I)
 
 _PERSONA_TYPES = ("preference", "profile", "fact", "event")
 
@@ -47,7 +58,7 @@ def _one_line(text: str) -> str:
 def is_forget_request(text) -> bool:
     """True for an explicit, non-negated request to forget/delete a memory."""
     text = str(text or "")
-    return bool(FORGET_RE.search(text)) and not _FORGET_NEGATED_RE.search(text)
+    return bool(FORGET_RE.search(text) or _ERASE_REQUEST_RE.search(text)) and not _FORGET_NEGATED_RE.search(text)
 
 
 def is_forget_rule(memory: Dict) -> bool:
@@ -227,6 +238,13 @@ async def _verify_consolidation(req, content, basis, support, by_id, identity_na
             dict(request_id=req.request_id, message_index=i, role=req.messages[i].role,
                  content=req.messages[i].content) for i in indices]))
     if not supports:
+        return False
+    if config.PROFILE_REQUIRE_USER_SUPPORT and not any(
+            source['role'] == 'user' for item in supports for source in item['sources']):
+        # An assistant draft or summary may remain a conversational memory,
+        # but it cannot independently establish a derived user preference.
+        # A user source only permits the existing semantic check to proceed.
+        log.info('profile support omitted: no original user source memories=%s', support)
         return False
     conflicts=_unlinked_profile_subjects(supports, identity_names)
     # Only direct self-report promotions supported entirely by mismatched named

@@ -1,5 +1,6 @@
 """Offline boundaries for optional oversized original-span support responses."""
 import copy
+import asyncio
 from pathlib import Path
 import sys
 import unittest
@@ -56,6 +57,42 @@ class BoundedSupportTests(unittest.TestCase):
     def test_free_text_overflow_rejected(self):
         self.payload['options'][0]['claims'][0].pop('span_id')
         self.payload['options'][0]['claims'][0]['text'] = 'owning something else'
+        with self.assertRaises(ValidationError): self.parse()
+
+    def test_exact_literal_overflow_preserved(self):
+        for claim, span in zip(self.payload['options'][0]['claims'], self.spans):
+            claim.pop('span_id')
+            claim['text'] = span['text']
+        before = copy.deepcopy(self.payload)
+        got = self.parse()
+        self.assertEqual([c.text for c in got.options[0].claims], [s['text'] for s in self.spans])
+        self.assertTrue(all(c.status == 'unsupported' for c in got.options[0].claims))
+        self.assertEqual(self.payload, before)
+
+    def test_literal_overflow_assessment_has_no_hidden_error(self):
+        for claim, span in zip(self.payload['options'][0]['claims'], self.spans):
+            claim.pop('span_id')
+            claim['text'] = span['text']
+        async def judge(prompt, schema, validate, stage, diagnostics, **kwargs):
+            return validate(self.payload)
+        diagnostics = {}
+        with patch.object(ac, '_judge', judge):
+            asyncio.run(ac.assess_support('Options:\n'+self.expected['A'],
+                ac.Assessments.model_json_schema(), list(self.expected.values()), {}, diagnostics))
+        self.assertEqual(diagnostics['answer_support_validation']['errors'], {})
+        self.assertEqual(diagnostics['answer_support_validation']['unresolved_options'], [])
+        self.assertEqual(diagnostics['answer_support_span_overflow'][0]['literal_count'], len(self.spans))
+
+    def test_mixed_literal_reference_duplicate_rejected(self):
+        claim = self.payload['options'][0]['claims'][1]
+        claim.pop('span_id')
+        claim['text'] = self.spans[0]['text']
+        with self.assertRaises(ValidationError): self.parse()
+
+    def test_literal_polarity_change_rejected(self):
+        claim = self.payload['options'][0]['claims'][0]
+        claim.pop('span_id')
+        claim['text'] = self.spans[0]['text'].replace('own', 'do not own')
         with self.assertRaises(ValidationError): self.parse()
 
     def test_reference_text_mismatch(self):

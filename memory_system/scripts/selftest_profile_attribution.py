@@ -34,6 +34,54 @@ class ProfileAttributionIntegration(unittest.IsolatedAsyncioTestCase):
         await self.trial('I got an email from Pat.\n---\nI enjoy music.\n---\nI enjoy pottery.','I enjoy pottery.',True)
 
 
+class OriginalUserSupport(unittest.IsolatedAsyncioTestCase):
+    async def trial(self, roles, indices, *, enabled=True, semantic=True, basis='stated'):
+        st = store.Store(':memory:')
+        try:
+            req = schemas.AddRequest(request_id='r', user_id='u', session_id='s',
+                messages=[schemas.Message(role=role, content='I enjoy pottery.') for role in roles])
+            st.save_messages(req)
+            mid = st.insert_amu(user_id='u', session_id='s', content='Pottery was discussed.',
+                               embedding=np.array([1., 0.], dtype=np.float32))
+            st.link_sources(mid, 'r', indices)
+            fact = dict(content='Pottery was discussed.', type='fact', _sources=indices,
+                        evidence=[dict(message_index=i, quote='I enjoy pottery.') for i in indices])
+            proposal = {'items': [dict(content='The user enjoys pottery.', basis=basis, support_ids=[mid])]}
+            user_supported = any(roles[i] == 'user' for i in indices)
+            checked = not enabled or user_supported
+            accepted = checked and semantic
+            replies = [proposal] + ([{'valid': semantic}] if checked else [])
+            with patch.object(config, 'FAKE', False), \
+                    patch.object(config, 'PROFILE_REQUIRE_USER_SUPPORT', enabled), \
+                    patch.object(config, 'PROFILE_MIN_SUPPORT', 1), \
+                    patch.object(profile.llm, 'complete_json', AsyncMock(side_effect=replies)) as calls, \
+                    patch.object(profile, 'embed', AsyncMock(return_value=[np.array([1., 0.], dtype=np.float32)])) as embed:
+                await profile.consolidate(st, req, [(mid, fact)])
+            self.assertEqual(len(st.get_by_type('u', ['preference'])), int(accepted))
+            self.assertEqual(calls.call_count, 1 + int(checked))
+            self.assertEqual(embed.call_count, int(accepted))
+            self.assertEqual(st.sources_for_amu(mid)[0]['content'], 'I enjoy pottery.')
+        finally:
+            st.conn.close()
+
+    async def test_assistant_only_stated_and_inferred_promotions_rejected(self):
+        for basis in ('stated', 'inferred'):
+            with self.subTest(basis=basis):
+                await self.trial(['assistant'], [0], basis=basis)
+
+    async def test_uncited_user_message_cannot_launder_assistant_support(self):
+        await self.trial(['user', 'assistant'], [1])
+
+    async def test_original_user_statement_reaches_verification(self):
+        await self.trial(['user'], [0])
+
+    async def test_mixed_sources_still_require_semantic_acceptance(self):
+        await self.trial(['user', 'assistant'], [0, 1], semantic=False)
+
+    async def test_disabled_flag_preserves_existing_path(self):
+        await self.trial(['assistant'], [0], enabled=False)
+
+
 class AttributionSpans(unittest.TestCase):
     def check(self, text, quote, **extra):
         messages = [schemas.Message(role='user', content=text)]

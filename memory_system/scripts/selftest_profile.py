@@ -239,6 +239,27 @@ class ForgetTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(rules[0]['evidence'][0]['message_index'], 0)
         self.assertTrue(profile.is_forget_rule(rules[0]))
 
+    def test_erase_requests_and_descriptive_memory_are_distinct(self):
+        for text in ('Erase my earlier preference.', 'Please permanently erase that detail.',
+                     'Could you please erase my address from memory?',
+                     'I want you to erase my earlier preference.',
+                     'The user asked the assistant to erase this detail.',
+                     'The user requested to erase their address.'):
+            with self.subTest(text=text):
+                self.assertTrue(profile.is_forget_request(text))
+                rules = profile.ensure_forget_rules(req([('user', text)]), [], [[0]])
+                self.assertEqual(len(rules), 1)
+                self.assertTrue(profile.is_forget_rule(rules[0]))
+        for text in ('To dismantle this would erase the physical spaces where collective memory is grounded.',
+                     'Demolition would erase collective memory.',
+                     'Can redevelopment erase collective memory?',
+                     'Do not erase my address.', 'I cannot erase that memory.'):
+            with self.subTest(text=text):
+                self.assertFalse(profile.is_forget_request(text))
+                fact = dict(content=text, type='fact', _sources=[0])
+                self.assertEqual(profile.ensure_forget_rules(req([('user', text)]), [fact], [[0]]), [fact])
+                self.assertEqual(fact['type'], 'fact')
+
     def test_forget_request_stored_as_fact_is_retyped_and_not_duplicated(self):
         request = req([('user', 'Please forget that I have a vitamin D deficiency.')])
         facts = [{'content': 'Daniel requested to forget that he has a vitamin D deficiency.',

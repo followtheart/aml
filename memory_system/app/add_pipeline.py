@@ -60,7 +60,7 @@ def _is_grounded_fact(fact: Dict, source: str) -> bool:
     return any(cjk[i:i + 2] in source for i in range(len(cjk) - 1))
 
 
-async def _verify_semantics(facts, messages):
+async def _verify_semantics(facts, messages, *, stage="add.verify_evidence"):
     if config.FAKE:
         return
     prompt = (
@@ -77,6 +77,16 @@ async def _verify_semantics(facts, messages):
         " fact's event, not an unrelated event. A quoted question establishes that the speaker asked "
         'that question, but never establishes the answer, possession, diagnosis, or commitment '
         'presupposed by it. An accurate record of an inquiry is a fact about the conversation. '
+        'INTEREST EXCEPTION: a user\'s own substantive question, remark or first-person hypothetical '
+        'about a topic DOES establish that the user is interested in / engaged with that topic. Accept '
+        'facts of the form "The user is interested in <topic>" (or "has an interest in", "enjoys '
+        'discussing", "pays attention to") whenever the quoted user message is about that topic; do '
+        'not demand an explicit statement of preference for an interest-level fact. Apply the same '
+        'tolerance to the triple (user, interested_in, <topic>). Stronger claims (owns, practices '
+        'regularly, has a condition, did an event) still need explicit first-person support. '
+        'TRIPLES are a projection of their fact: reject a triple only when it adds an entity or '
+        'relation the fact itself does not state or reverses its meaning; synonymous relation labels '
+        'and shortened objects are acceptable. '
         'Assistant-authored drafts, examples and proposed invitations establish assistant output, not'
         " the user's actual plans or experiences. An inferred label does not waive this speaker-"
         "attribution requirement. Check every triple's subject, relation and object separately: a "
@@ -88,10 +98,50 @@ async def _verify_semantics(facts, messages):
     check = await llm.complete_json(
         prompt,
         '{"valid":false,"reason":"..."}',
-        schema=llm.STRUCTURED_SCHEMAS["evidence_check"], stage="add.verify_evidence")
+        schema=llm.STRUCTURED_SCHEMAS["evidence_check"], stage=stage)
     memory_debug.extraction_event('semantic_response', response=check)
     if check.get("valid") is not True:
         raise ValueError("Semantic evidence check rejected extraction: " + str(check.get("reason")))
+
+
+async def _isolate_triples(fact, messages, original_error):
+    if not config.EXTRACT_TRIPLE_ISOLATION or not fact.get('triples'):
+        raise original_error
+    isolated = dict(fact, triples=[])
+    memory_debug.extraction_event('semantic_triple_isolation_request',
+                                  fact=isolated, original_reason=str(original_error))
+    await _verify_semantics([isolated], messages, stage='add.verify_fact_without_triples')
+    memory_debug.extraction_event('semantic_triples_omitted', fact=isolated,
+                                  omitted_triples=fact['triples'], reason=str(original_error))
+    log.warning("semantic graph projection omitted source_indices=%s triple_count=%d "
+                "reason=%s; unchanged atomic fact independently verified",
+                fact['_sources'], len(fact['triples']), original_error)
+    return isolated
+
+
+def _repair_evidence_indices(fact, batch):
+    """Re-point a verbatim quote filed under the wrong in-batch index.
+
+    Small models often cite the right words with an off-by-one index. The
+    quote itself is never changed; a repair happens only when the quote is
+    absent from the cited message and present in exactly one other message.
+    """
+    evidence = fact.get('evidence')
+    if not isinstance(evidence, list):
+        return
+    for item in evidence:
+        if not isinstance(item, dict) or 'start' in item or 'end' in item:
+            continue
+        index, quote = item.get('message_index'), item.get('quote')
+        if not isinstance(quote, str) or not quote.strip():
+            continue
+        if type(index) is int and 0 <= index < len(batch) and integrity.quote_in(quote, batch[index].content):
+            continue
+        hits = [j for j, m in enumerate(batch) if integrity.quote_in(quote, m.content)]
+        if len(hits) == 1:
+            memory_debug.extraction_event('evidence_index_repaired', proposed_index=index,
+                                          repaired_index=hits[0], quote=quote[:200])
+            item['message_index'] = hits[0]
 
 
 def _validate_fact(raw, batch, start, req):
@@ -102,6 +152,7 @@ def _validate_fact(raw, batch, start, req):
         fact['evidence'] = [dict(e) if isinstance(e, dict) else e for e in raw['evidence']]
     if fact.get('epistemic_status', 'asserted') not in ('asserted', 'observed', 'inferred', 'planned'):
         raise ValueError('Invalid epistemic status')
+    _repair_evidence_indices(fact, batch)
     indices = integrity.verify_quotes(fact, batch)
     source_messages = [batch[j] for j in indices]
     # An assistant recommendation is evidence of advice, not a user instruction.
@@ -204,8 +255,14 @@ async def _extract_segment(req: schemas.AddRequest, summary: Optional[str],
         return await _extract_segment_impl(req, summary, seg_index, indices)
 
 
+async def _extract_coverage_segment(req, summary, seg_index, indices):
+    return await _extract_segment_impl(req, summary, seg_index, indices,
+                                       require_user_source=True)
+
+
 async def _extract_segment_impl(req: schemas.AddRequest, summary: Optional[str],
-                                seg_index: int, indices: List[int]) -> List[Dict]:
+                                seg_index: int, indices: List[int], *,
+                                require_user_source: bool = False) -> List[Dict]:
     facts: List[Dict] = []
     sensitivity = 'normal'
     start = indices[0]
@@ -252,6 +309,12 @@ async def _extract_segment_impl(req: schemas.AddRequest, summary: Optional[str],
             try:
                 fact = _validate_fact(raw, batch, start, req)
                 fact["_segment"] = seg_index
+                if require_user_source and not any(
+                        req.messages[i].role == 'user' for i in fact['_sources']):
+                    memory_debug.extraction_event('coverage_preverification_omitted', fact=fact,
+                        reason='no_original_user_source_in_retry_exchange')
+                    rejected_sources.update(fact['_sources'])
+                    continue
                 grounded.append(fact)
                 memory_debug.extraction_event('grounding_accepted', fact_index=fact_index, fact=fact)
             except Exception as exc:
@@ -274,24 +337,23 @@ async def _extract_segment_impl(req: schemas.AddRequest, summary: Optional[str],
             try:
                 await _verify_semantics(grounded, messages)
             except ValueError as exc:
-                if len(grounded) == 1:
-                    log.warning("semantic fact rejected segment_start=%d "
-                                "source_indices=%s reason=%s", start,
-                                grounded[0]["_sources"], exc)
-                    rejected_sources.update(grounded[0]["_sources"])
-                    grounded = []
                 # The normal path costs one check. Isolate semantic failures
                 # only when the batch-level check actually rejects the facts.
                 verified = []
                 for fact_index, fact in enumerate(grounded):
                     try:
+                        if len(grounded) == 1:
+                            raise exc
                         await _verify_semantics([fact], messages)
                         verified.append(fact)
-                    except ValueError as exc:
-                        rejected_sources.update(fact["_sources"])
-                        log.warning("semantic fact rejected segment_start=%d "
-                                    "fact_index=%d source_indices=%s reason=%s",
-                                    start, fact_index, fact["_sources"], exc)
+                    except ValueError as fact_error:
+                        try:
+                            verified.append(await _isolate_triples(fact, messages, fact_error))
+                        except ValueError as rejected:
+                            rejected_sources.update(fact["_sources"])
+                            log.warning("semantic fact rejected segment_start=%d "
+                                        "fact_index=%d source_indices=%s reason=%s",
+                                        start, fact_index, fact["_sources"], rejected)
                 grounded = verified
         if not grounded and not rejected_sources:
             rejected_sources.update(indices)
@@ -576,6 +638,13 @@ async def _run_add(st: store.Store, req: schemas.AddRequest) -> None:
         facts = persona_source.persona_facts(req, facts, data.get("segments") or [])
     except Exception:
         log.warning("Persona extraction failed; continuing with extracted facts", exc_info=True)
+    if config.EXTRACT_COVERAGE_RETRY:
+        from . import extraction_coverage
+        await extraction_coverage.supplement_facts(
+            req, st.get_summary(req.user_id, req.session_id),
+            data.get("segments") or [], facts, _extract_coverage_segment)
+        # Apply the same rule normalization to supplementary extraction.
+        facts = profile.ensure_forget_rules(req, facts, data.get("segments") or [])
     vecs = await embed([_embed_text(f) for f in facts], stage="add.embed_facts")
     if len(vecs) != len(facts):
         raise ValueError("Embedding count does not match extracted facts")

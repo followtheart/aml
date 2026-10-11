@@ -267,5 +267,51 @@ class SemanticWitnessTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((scopes[0].reserved_calls, scopes[0].reserved_tokens), (0, 0))
 
 
+class CoverageWitnessTests(unittest.TestCase):
+    """Retrieval coverage tags point the support judge at the user turn behind each option."""
+
+    def setUp(self):
+        self.lake = memory('Why does the water in local lakes feel warmer in late July than early June?', mid='lake')
+        self.lake['coverage_ids'] = ['option:0']
+        self.bike = memory('Our school is organizing a cycling fundraiser along the river trail.', mid='bike')
+        self.bike['coverage_ids'] = ['option:1']
+        self.packet = seal(self.lake, self.bike)
+        self.sources, _ = answer_choice.build_catalog(self.packet)
+        self.options = ['A. Since you enjoy swimming in summer, try a lake.',
+                        'B. Since you enjoy cycling, ride early.', 'C. Stay hydrated.']
+
+    def sid(self, text):
+        return next(k for k, c in self.sources.items() if text in c['text'])
+
+    def test_missing_user_witness_is_rescued_from_option_coverage(self):
+        out = choice_witness.supplement_from_coverage(self.options, self.sources, {}, self.packet)
+        self.assertEqual([w['source_id'] for w in out['A']], [self.sid('lakes')])
+        self.assertTrue(out['A'][0]['coverage_rescue'])
+        self.assertIn(out['A'][0]['quote'], self.sources[self.sid('lakes')]['text'])
+        self.assertEqual([w['source_id'] for w in out['B']], [self.sid('cycling')])
+        self.assertNotIn('C', out)
+
+    def test_existing_witness_from_same_source_is_not_duplicated(self):
+        sid = self.sid('lakes')
+        given = {'A': [dict(source_id=sid, role='user', quote='Why does the water in local lakes feel warmer', first_party=True)]}
+        out = choice_witness.supplement_from_coverage(self.options, self.sources, given, self.packet)
+        self.assertEqual(len(out['A']), 1)
+        self.assertFalse(out['A'][0].get('coverage_rescue'))
+
+    def test_rescue_is_prepended_and_capped(self):
+        given = {'A': [dict(source_id=self.sid('cycling'), role='user', quote='Our school', first_party=True)]}
+        out = choice_witness.supplement_from_coverage(self.options, self.sources, given, self.packet)
+        self.assertEqual(out['A'][0]['source_id'], self.sid('lakes'))
+        self.assertLessEqual(len(out['A']), choice_witness.MAX_PER_OPTION)
+
+    def test_assistant_only_coverage_adds_nothing(self):
+        helper = memory('Lakes warm slowly because of water\'s heat capacity.', role='assistant', mid='help')
+        helper['coverage_ids'] = ['option:0']
+        packet = seal(helper)
+        sources, _ = answer_choice.build_catalog(packet)
+        out = choice_witness.supplement_from_coverage(self.options, sources, {}, packet)
+        self.assertEqual(out, {})
+
+
 if __name__ == '__main__':
     unittest.main()

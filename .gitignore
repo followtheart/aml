@@ -5,7 +5,10 @@ __pycache__/
 
 # Local state
 *.db
+*.db-shm
+*.db-wal
 memory_system/memory.db
+/logs/
 
 # Secrets — NEVER commit
 .env

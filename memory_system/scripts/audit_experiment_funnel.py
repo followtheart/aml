@@ -29,6 +29,23 @@ def identity(source):
     return source.get('request_id'), source.get('message_index')
 
 
+def probe_source_index(sources):
+    index = {}
+    for source in sources:
+        request = source['request_id']
+        key = (request.split(':session:')[0],
+               f"S{request.split(':')[-1]}:{source['message_index']}")
+        index.setdefault(key, []).append(source)
+    return index
+
+
+def probe_source(index, user_id, label):
+    matches = index.get((user_id, label), [])
+    if len(matches) != 1:
+        raise ValueError(f'Ambiguous or missing probe source: {user_id}:{label} ({len(matches)})')
+    return matches[0]
+
+
 def distribution(values):
     return dict(Counter(values))
 
@@ -56,13 +73,12 @@ def main():
                          for session in d['sessions'] for s in session]
     assert [(s['role'], s['content']) for s in prepared_messages] == [
         (s['role'], s['content']) for s in source_rows]
-    source_by_label = {f"S{s['request_id'].split(':')[-1]}:{s['message_index']}": s for s in source_rows}
+    source_by_label = probe_source_index(source_rows)
     reference_path = (args.probe_reference_run.resolve() / 'completed/logs/memory-debug.jsonl'
                       if args.probe_reference_run else None)
     reference_sources = ([s for event in load(str(reference_path)) for s in event['source_messages']]
                          if reference_path else source_rows)
-    reference_by_label = {
-        f"S{s['request_id'].split(':')[-1]}:{s['message_index']}": s for s in reference_sources}
+    reference_by_label = probe_source_index(reference_sources)
     # A topical source can be present while the gold's stronger personal claim
     # remains unsupported. These probes measure passage transport only.
     probes = {
@@ -107,7 +123,7 @@ def main():
                             detail=r.get('error_detail')) if a is None else None
         traces = []
         for label, quote in probes.get(int(r['qa_id']), []):
-            reference = reference_by_label[label]
+            reference = probe_source(reference_by_label, s['user_id'], label)
             assert quote in reference['content'], (label, quote)
             if reference_path:
                 # Chunk numbers are not stable source identities. Match the full
@@ -120,7 +136,7 @@ def main():
                 assert len(candidates) == 1, ('ambiguous_or_missing_probe_source', label, len(candidates))
                 source = candidates[0]
             else:
-                source = source_by_label[label]
+                source = probe_source(source_by_label, s['user_id'], label)
             actual_label = f"S{source['request_id'].split(':')[-1]}:{source['message_index']}"
             mids = {mid for mid, m in snapshots.items()
                     if m['user_id'] == s['user_id'] and any(identity(z) == identity(source)
@@ -170,7 +186,8 @@ def main():
         terminal = ('correct' if r['score'] else 'answer_error' if answer_error else
                     'abstained' if not r['prediction'] or r['prediction'] == 'ABSTAIN'
                     else 'gold_excluded' if gold not in eligible else 'selection_error')
-        rows.append(dict(qa_id=r['qa_id'], category=r['category'], question=q['question'],
+        rows.append(dict(conversation_id=r['conversation_id'], qa_id=r['qa_id'],
+            category=r['category'], question=q['question'],
             gold=gold, gold_option=q['options'][ord(gold)-65], prediction=r['prediction'],
             score=r['score'], terminal=terminal, eligible=eligible,
             blocked=r.get('answer_blocked_options', []), gold_alignment=a, answer_error=answer_error,

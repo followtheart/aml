@@ -9,7 +9,7 @@ from itertools import islice
 from pathlib import Path
 
 DATASETS = ("normalized", "locomo-refined", "longmemeval-s",
-            "longmemeval-refined", "scriptmem", "clbench", "personamem-v2", "beam")
+            "longmemeval-refined", "scriptmem", "clbench", "personamem-v2", "personamem-v3", "beam")
 CHOICE_TYPES = {"single_choice", "multi_select", "ordering"}
 
 
@@ -357,7 +357,10 @@ def validate(conv):
 
 
 def convert_records(path, dataset, history_dir=None, size="32k"):
-    if dataset == "personamem-v2":
+    if dataset == "personamem-v3":
+        from .personamem_v3 import conversations
+        records = conversations(path)
+    elif dataset == "personamem-v2":
         records = persona_groups(path, history_dir, size)
     else:
         def converted():

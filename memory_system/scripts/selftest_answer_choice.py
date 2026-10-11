@@ -161,6 +161,21 @@ class CatalogTests(OfflineCase):
 
 
 class AssessmentTests(OfflineCase):
+    def test_verification_hint_requires_unique_claim_after_operator_in_same_sentence(self):
+        cases = [
+            ('Check whether the account was charged.', 'the account was charged', True),
+            ('Double-check that your key (e.g., [KEY]) is current.',
+             'your key (e.g., [KEY]) is current', True),
+            ('Since you own a camera, check whether its battery is charged.', 'you own a camera', False),
+            ('Check whether the room is ready. Your hobby is chess.', 'Your hobby is chess', False),
+            ('Check whether it works; your hobby is chess.', 'your hobby is chess', False),
+            ('Check whether it works. Check whether it works.', 'it works', False),
+        ]
+        for option, claim, expected in cases:
+            with self.subTest(option=option):
+                self.assertEqual(self.gate.verification_scope_applicable(dict(
+                    option=option, claim=claim)), expected)
+
     def test_direct_user_statement_and_generic_remain_eligible(self):
         self.assertEqual(self.eligible('I have twin boys.', 'you have twin boys'), ['A', 'B'])
 
@@ -332,6 +347,30 @@ class AssessmentTests(OfflineCase):
         entries = self.gate.validate_assessments(data, options, sources)
         self.assertEqual([e['status'] for e in entries], ['partial', 'supported', 'generic'])
         self.assertEqual(self.gate.eligible_choices(entries, set()), ['A', 'B', 'C'])
+
+    def test_inferred_interest_competes_with_unrelated_verified_trait_when_enabled(self):
+        packet = seal(memory('Why do lakes feel warmer in late July than June?', mid='lake'),
+                      memory('I follow the Jayhawks every season.', mid='hoops'))
+        sources, _ = self.gate.build_catalog(packet)
+        sid = {source['text']: key for key, source in sources.items()}
+        options = ['A. Since you enjoy swimming in summer, try a lake.',
+                   'B. As a Jayhawks fan, watch a game.', 'C. Stay hydrated.']
+        data = {'options': [
+            dict(letter='A', kind='personal', claims=[dict(text='you enjoy swimming in summer', status='inferred',
+                 premise_type='interest', citations=[dict(source_id=sid['Why do lakes feel warmer in late July than June?'],
+                 quote='Why do lakes feel warmer in late July than June?', basis='topic_interest', subject='current_user')])]),
+            dict(letter='B', kind='personal', claims=[dict(text='a Jayhawks fan', status='supported', premise_type='interest',
+                 citations=[dict(source_id=sid['I follow the Jayhawks every season.'],
+                 quote='I follow the Jayhawks every season.', basis='self_report', subject='current_user')])]),
+            dict(letter='C', kind='generic', claims=[])]}
+        with patch.object(config, 'CHOICE_ALLOW_INFERRED', True):
+            entries = self.gate.validate_assessments(data, options, sources)
+            self.assertEqual([e['status'] for e in entries], ['inferred', 'supported', 'generic'])
+            self.assertEqual(self.gate.eligible_choices(entries, set()), ['A', 'B', 'C'])
+        with patch.object(config, 'CHOICE_ALLOW_INFERRED', False):
+            entries = self.gate.validate_assessments(data, options, sources)
+            self.assertEqual(entries[0]['status'], 'unsupported')
+            self.assertEqual(self.gate.eligible_choices(entries, set()), ['B', 'C'])
 
     def test_missing_duplicate_unknown_option_and_extra_fields_are_rejected(self):
         sources, _ = self.catalog('I have twin boys.')
@@ -617,6 +656,34 @@ class EntailmentTests(OfflineCase):
 
 
 class ConstraintTests(OfflineCase):
+    def test_content_terms_recall_preserves_full_constraint_and_semantic_decision(self):
+        text = 'Please forget my preference about documenting travels through minimalist photography.'
+        _, constraints = self.catalog(text, constraint=True)
+        options = ['A. Curate a minimalist travel collection with simple compositions.']
+        with patch.object(config, 'CHOICE_CONSTRAINT_CONTENT_TERMS', False):
+            self.assertEqual(self.gate.constraint_pairs(options, constraints), [])
+        with patch.object(config, 'CHOICE_CONSTRAINT_CONTENT_TERMS', True):
+            pairs = self.gate.constraint_pairs(options, constraints)
+            self.assertEqual(len(pairs), 1)
+            self.assertEqual(pairs[0]['constraint_quote'], text)
+            for violates in (False, True):
+                blocked, _ = self.gate.validate_decisions({'decisions': [dict(
+                    pair_id=pairs[0]['pair_id'], violates=violates)]}, pairs, options, constraints)
+                self.assertEqual(blocked, {'A'} if violates else set())
+
+    def test_content_terms_keep_media_and_activity_scope_guards(self):
+        cases = [
+            ('Please forget that I take photos of my family.', 'Display photos of your family.'),
+            ('Please forget my preference for thought-provoking documentaries.',
+             'Read thought-provoking literary stories.'),
+            ('Please forget that I felt empathy fatigue from hearing consumer injury stories.',
+             'During endurance training fatigue, drink water.'),
+        ]
+        with patch.object(config, 'CHOICE_CONSTRAINT_CONTENT_TERMS', True):
+            for constraint, option in cases:
+                with self.subTest(constraint=constraint):
+                    self.assertFalse(self.gate._scope_overlap(constraint, option))
+
     def test_compound_forget_source_preserves_each_request_and_its_exact_span(self):
         text = 'Please forget that I enjoy photography. Please forget that I have asthma.'
         _, constraints = self.catalog(text, constraint=True)
@@ -742,6 +809,33 @@ class ConstraintTests(OfflineCase):
 
 
 class AnswerFlowTests(OfflineCase, unittest.IsolatedAsyncioTestCase):
+    async def test_verification_scope_advice_still_requires_whole_option_verification(self):
+        claim = 'the account has been charged'
+        qa = self.qa(['A. Check whether the account has been charged before retrying.'])
+        support = {'options': [dict(letter='A', kind='personal', claims=[
+            dict(text=claim, status='unsupported', reason='no_source', citations=[])])]}
+        for verdict, expected in [('no_personal_premise', 'A'), ('unsupported_personal', 'ABSTAIN')]:
+            mock = staged_mock(support, {'claims': [dict(claim_id='A:0', personal_fact=False)]},
+                               {'checks': [dict(claim_id='A:option', verdict=verdict)]})
+            diagnostics = {}
+            with patch.object(config, 'CHOICE_VERIFICATION_SCOPE', True), \
+                    patch.object(llm, 'complete_json', mock):
+                self.assertEqual(await self.gate.answer(qa, [], diagnostics), expected)
+            self.assertIn(self.gate.VERIFICATION_SCOPE_GUIDANCE, mock.call_args_list[1].args[0])
+            self.assertEqual(mock.call_args_list[-1].kwargs['stage'], 'eval.choice_entailment')
+
+    async def test_verification_scope_cannot_erase_asserted_causal_ownership(self):
+        qa = self.qa(['A. Since you own a camera, check its settings.'])
+        support = {'options': [dict(letter='A', kind='personal', claims=[
+            dict(text='you own a camera', status='unsupported', reason='no_source', citations=[])])]}
+        mock = staged_mock(support, {'claims': [dict(claim_id='A:0', personal_fact=False)]},
+                           lambda p: entailment_response(p, rejected=('A:option', 'A:0')))
+        diagnostics = {}
+        with patch.object(config, 'CHOICE_VERIFICATION_SCOPE', True), \
+                patch.object(llm, 'complete_json', mock):
+            self.assertEqual(await self.gate.answer(qa, [], diagnostics), 'ABSTAIN')
+        self.assertEqual(diagnostics['answer_premise_scope']['protected_causal_claims'], ['A:0'])
+
     def qa(self, options=None):
         return dict(question='What should I do?', scoring='choice', qa_type='single_choice',
                     options=options or ['A. Since you have twin boys, rest.', 'B. Take a break.'],

@@ -1098,6 +1098,18 @@ class Store(ProvenanceStore):
                 pass
         return max(candidates).isoformat() if candidates else None
 
+    def latest_message_time(self, user_id: str) -> Optional[str]:
+        """Newest source-message time only. Unlike latest_time it ignores memory
+        event times, so a stored future plan cannot move the question anchor."""
+        self._check_user(user_id)
+        with self._lock:
+            ts = self.conn.execute(
+                "SELECT MAX(timestamp) FROM source_messages WHERE user_id=?",
+                (user_id,)).fetchone()[0]
+        if not ts:
+            return None
+        return datetime.fromtimestamp(ts / 1000, tz=timezone.utc).isoformat()
+
     def list_scenes(self, user_id: str, include_cold=False) -> List[Dict]:
         self._check_user(user_id)
         with self._lock:

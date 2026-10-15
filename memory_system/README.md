@@ -270,3 +270,19 @@ HTTP 请求日志默认写入 `memory_system/logs/access.jsonl`，可用 `AML_AC
 模型调用阶段、耗时和 token 用量仍通过 `aml.metrics` 写入进程输出日志。
 当前后台 HTTPS 部署的访问日志为 `/root/aml-runtime/access.jsonl`，
 进程和模型日志为 `/root/aml-runtime/https.log`。
+
+## 平台评测部署清单（契约与数据处理）
+
+Agent Memory Leaderboard 要求评测数据"仅用于本次评测、避免留存日志、运行结束后 30 天内删除"。
+正式评测（smoke / full）前逐项确认：
+
+1. **调试日志关闭**：`AML_MEMORY_DEBUG_LOG` 与 `AML_SEARCH_DEBUG_LOG` 保持为空（默认）。两者会写入完整记忆正文与检索响应，只允许在本地实验开启。
+2. **访问日志仅元数据**：`AML_ACCESS_LOG` 只记录时间、request_id、路由、状态码、耗时，不含正文与 token；保留轮转默认值（10 MiB × 5），评测结束后清理。
+3. **进程日志**：`aml.metrics` 只输出阶段/模型/耗时/token 数；不要把 uvicorn 的 `--log-level debug` 用于评测部署。
+4. **数据删除**：评测结束 30 天内对评测 `user_id` 调用 `DELETE /memory/{user_id}`（会同步清理调试日志中的该用户记录），并删除 `AML_DB_PATH` 中残留的实验库或整库重建。
+5. **契约字段**：Search 只会收到 `{query, options?, user_id, top_k}`；`reference_time/as_of/min_revision/evidence_token_budget` 不会出现。时序锚点回退为该用户最新消息时间（`AML_ANCHOR_FALLBACK`），证据预算走意图分档（`AML_EVIDENCE_BUDGET_DEFAULT` / `AML_EVIDENCE_BUDGET_BY_INTENT`）。
+6. **返回内容面向 Answer 模型**：`content` 内的日期以文字形式双写（绝对日期 + 原始相对表述），被替换的版本带 `[outdated: …]`，用户规则带 `[user rule]`；平台忽略 `evidence_status/coverage_manifest` 等元数据。
+7. **文档类输入**：平台不传 `source_kind`，服务端按结构/指令密度识别粘贴文档（`AML_DOCUMENT_*`），整段保留并按 `AML_DOCUMENT_ITEM_MAX_BYTES` 原文打包。
+8. **选择题路径**：`/search` 中与选项相关的逻辑只在请求带 `options` 时启用；本地评测的 `answer_choice` 管线不参与线上服务（`local_eval.py --answer-policy platform` 可模拟平台 Answer 模型）。
+9. **容量**：Full 评测含 BEAM（百万 token 级）数据。先用 `scripts/stress_capacity.py` 在目标机器上压测单用户大规模写入与检索延迟，再填写并发上限。
+10. **模型规则**：开源方法赛道 Add 阶段须使用 gpt-4o-mini（`AML_LLM_MODEL`）；Search 侧模型是否受限以平台当期清单为准。

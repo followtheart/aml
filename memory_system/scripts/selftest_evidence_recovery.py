@@ -38,7 +38,7 @@ class RecoveryTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.st.fts_search('u', 'Milan', 10), [])
         async def rank(prompt, *args, **kwargs):
             self.assertIn('runway fashion in Milan', prompt)
-            self.assertIn('role: assistant', prompt)
+            self.assertIn('Assistant] I follow runway fashion in Milan.', prompt)
             return from_scores([0.9])
         with patch.object(search, '_understand', AsyncMock(return_value={'intent': 'fact'})), \
                 patch.object(search.llm, 'complete_json', side_effect=rank) as call:
@@ -192,7 +192,7 @@ class RecoveryTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn('Milan runway', rows[0]['_rank_text'])
         packet, _, _ = search._pack_evidence(self.st, self.req(), plan, rows, '2026-09-17T00:00:00Z')
         self.assertIn('Milan runway', packet[0]['content'])
-        self.assertIn('role: assistant', packet[0]['content'])
+        self.assertIn('Assistant] I follow Milan runway fashion and designers.', packet[0]['content'])
 
     def test_excerpt_keeps_nearby_subject_and_negation(self):
         text = 'Unrelated preface. ' * 30 + 'Claire described her garden. I do not have a garden. ' + 'Closing note. ' * 30

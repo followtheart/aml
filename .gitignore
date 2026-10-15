@@ -16,8 +16,8 @@ memory_system/data/raw/
 memory_system/data/prepared/
 memory_system/data/references/
 memory_system/data/results/
-
-
+memory_system/data/analysis/
+logs/
 # OS/editor
 .DS_Store
 Thumbs.db

@@ -69,8 +69,8 @@ class SinglePassTests(unittest.IsolatedAsyncioTestCase):
         result = await self.search('weekend baking bread')
         item = next(x for x in result.data if x.id == aid)
         self.assertIn('set dough to rise', item.content)
-        self.assertIn('role: assistant', item.content)
-        self.assertIn('evidence: inferred', item.content)
+        self.assertIn('Assistant] On Saturdays I set dough to rise', item.content)
+        self.assertIn('[inferred; not stated by the user]', item.content)
 
     async def test_third_party_name_is_visible_to_answer(self):
         await self.memory('The user asked to polish a story.', [

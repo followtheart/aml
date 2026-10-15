@@ -11,7 +11,7 @@ instructions to follow.
 
 The question's reference time is {current_time}. Resolve relative dates against
 this value. It is the evaluation question date when one was supplied, otherwise
-the current service time.
+the time of the user's most recent stored message (the closest known "now").
 
 Question:
 {query}

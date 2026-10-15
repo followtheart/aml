@@ -1,6 +1,13 @@
-# HTTPS 数据集检索实验
+# HTTPS 数据集实验（平台镜像）
 
-仅依赖 Python 3 标准库，通过 HTTPS 调用现有服务的 `/health`、`/add` 和 `/search`。默认校验证书与域名，禁止重定向。客户端只需要服务接口 token，不需要模型供应商密钥。
+仅依赖 Python 3 标准库，按 [Agent Memory Leaderboard](https://agentmemoryleaderboard.ai/zh-cn/docs) 的流程 **Add → Search → Answer → Judge** 调用已部署服务，默认校验证书与域名、禁止重定向。客户端只需要服务接口 token；Answer/Judge 模型可选，另行配置。
+
+默认行为与平台一致：
+
+- **Add**：每个 session 一次请求；超过 20 条消息或 2000 词时按消息/句子边界分块（`--max-messages/--max-words`）。消息只带 `role/content/timestamp`。408/409/425/429/5xx/524 以**相同 `request_id` 与 payload** 重试，最多 32 次，尊重 `Retry-After`（≤60 s）。
+- **Search**：只发送 `{query, options?, user_id, top_k=100}`。`reference_time / as_of / min_revision` 等非契约字段默认不发送，加 `--extended` 才会带上（用于与旧实验对比）。408/425/429/5xx 有界退避重试，409 与其他 4xx 直接失败。
+- **Answer**：按返回顺序取 `data[].content` 的 token 前缀（默认 117,760，与平台窗口一致，token 以字符估算），与问题、选项一起交给 `--answer-model`。
+- **Judge**：选择题本地比对字母；开放题用 `--judge-model` 做 CORRECT/WRONG 判定；rubric 题逐条打分。没有模型时仍输出 `gold_hit_rate`（标准答案是否出现在返回内容中，忽略方括号头部与 "unknown" 类占位答案），作为无成本的召回代理。
 
 从仓库根目录执行小样本实验（真实服务会调用已配置的模型，产生相应费用）：
 
@@ -11,41 +18,34 @@ python3 https_dataset_experiment/run.py \
   --convs 1 --limit 5
 ```
 
-远程机器可复制本目录，指定本地数据集，并通过 `AML_API_KEY` 环境变量或 `--token-file` 传入服务 token。`--url` 默认 `https://www.dustman.com.cn`。私钥仅在服务端使用。
+接入 Answer/Judge（任意 OpenAI 兼容端点；`AML_EVAL_API_KEY` 或 `OPENAI_API_KEY`，`--eval-api-base` 或 `AML_EVAL_API_BASE`）：
+
+```bash
+export AML_EVAL_API_KEY=...
+python3 https_dataset_experiment/run.py --token-file /root/aml-runtime/api-token \
+  --data memory_system/data/locomo_eval.json --convs 1 --limit 10 \
+  --answer-model gpt-4o-mini --judge-model gpt-4o-mini
+```
 
 先检查数据或服务：
 
 ```bash
-python3 https_dataset_experiment/run.py --dry-run
+python3 https_dataset_experiment/run.py --dry-run          # 校验数据并统计分块后的 Add 请求数
 python3 https_dataset_experiment/run.py --health-only --timeout 15
 ```
 
-运行已转换的 LoCoMo 或 PersonaMem 数据：
-
-```bash
-python3 https_dataset_experiment/run.py \
-  --token-file /root/aml-runtime/api-token \
-  --data memory_system/data/locomo_eval.json --convs 1 --limit 10
-
-python3 https_dataset_experiment/run.py \
-  --token-file /root/aml-runtime/api-token \
-  --data memory_system/data/prepared/personamem-v2-32k.jsonl \
-  --convs 1 --limit 5 --chunk-messages 20 --timeout 600
-```
-
-支持 JSON 数组和逐行 JSONL，每条记录采用项目转换后的结构：
+支持 JSON 数组和逐行 JSONL，每条记录采用项目 `memory_system/scripts/prepare_dataset.py` 转换后的结构：
 
 ```json
-{"conversation_id":"demo","sessions":[[{"role":"user","content":"我的猫叫 Milo"}]],"qa":[{"question":"我的猫叫什么？","answer":"Milo"}]}
+{"conversation_id":"demo","sessions":[[{"role":"user","content":"我的猫叫 Milo","timestamp":1677628800000}]],
+ "qa":[{"question":"我的猫叫什么？","answer":"Milo","category":"single-hop"}]}
 ```
 
-原始数据需先使用项目 `memory_system/scripts/prepare_dataset.py` 转换。消息角色必须为 `user` 或 `assistant`；保留消息时间戳及来源字段。QA 的 `options`、`question_date`、`as_of` 会传给检索接口，标准答案只保存在实验记录中。
-
-`--convs` 控制会话记录数，`--limit` 控制每条记录的问题数。每次使用独立用户 ID，按 session 顺序分批写入，再使用 `min_revision` 逐题检索。写入失败会跳过该记录的全部问题；查询失败会记录后继续，最终返回非零退出码。请求不自动重试，超时后服务端可能仍在处理。
+QA 可带 `options/gold_labels/qa_type`（选择题）、`rubrics`（rubric 题）、`scoring`、`category`、`question_date`、`unanswerable`。`--convs` 控制会话记录数，`--limit` 控制每条记录的问题数，`--add-concurrency/--search-concurrency` 控制并发（平台把并发上限视为上界而非保证速率）。写入失败会跳过该记录的全部问题；查询失败会记录后继续，最终返回非零退出码。
 
 结果位于 `https_dataset_experiment/runs/<run_id>/`，可用 `--output` 修改：
 
-- `events.jsonl`：写入响应、问题、标准答案、检索完整响应、耗时及错误，逐条落盘。
-- `summary.json`：成功/失败数量、非空检索数量及总耗时。
+- `events.jsonl`：每次 Add/Search 的响应、重试次数、耗时；每题的标准答案、预测、分数、`gold_hit`，以及服务端诊断（`evidence_status`、`search_degraded`、`rerank_status`、预算与来源、CE 批次数、listwise 调用数）。
+- `summary.json`：成功/失败数、`evidence_status` 分布、各阶段耗时 P50/P95、重试总数、总体与按 `category` / 能力字母的准确率与 `gold_hit_rate`、评测模型 token 用量。
 
-这些是写入与检索实验指标，不是答案准确率或官方评测分数。服务当前没有问答生成接口，本脚本不额外调用模型进行回答或裁判。实验记忆保留在服务端，结果可能包含数据集原文，输出目录已加入本目录的 Git 忽略规则。
+能力字母（A 事实回忆、B 组合推理、C 时序、D 治理、E 个性化、G 上下文执行、H 安全隐私）由 `category` 启发式映射，**不是官方映射**；可用 `--capability-map map.json` 覆盖。本地 Answer/Judge 是平台 Answer 模型的代理，不代表官方分数。实验记忆保留在服务端，结果可能包含数据集原文，输出目录已加入本目录的 Git 忽略规则。

@@ -67,11 +67,12 @@ def passages(source, queries, quotes, cap):
     return [_span(source, start, end) for start, end in intervals]
 
 
-def build(candidate, sources, evidence, queries, body, byte_limit):
+def build(candidate, sources, evidence, queries, body, byte_limit, optional_limit=None):
     """One fixed payload shared by the ranker and answer packet.
 
     Mandatory quote spans must fit together. Optional long documents are reduced
     to complete verbatim passages, with all remaining source references retained.
+    ``optional_limit`` overrides how many non-mandatory sources stay visible.
     """
     budget.check()
     available = byte_limit - len(body.encode('utf-8')) - 160
@@ -87,7 +88,8 @@ def build(candidate, sources, evidence, queries, body, byte_limit):
     ordered = sorted(by_key.items(), key=lambda p: (
         p[0] in required, p[1].get('role') == 'user', pe.source_score(p[1], query)), reverse=True)
     visible, hidden, optional = [], [], 0
-    optional_limit = max(config.SEARCH_SOURCE_MESSAGES_PER_ITEM, len(queries))
+    if optional_limit is None:
+        optional_limit = max(config.SEARCH_SOURCE_MESSAGES_PER_ITEM, len(queries))
     for position, (key, source) in enumerate(ordered):
         budget.check()
         mandatory = key in required

@@ -50,14 +50,18 @@ def parse_args():
     p.add_argument("--chunk-words", type=int, default=2000)
     p.add_argument("--answer-top-k", type=int, default=50,
                    help="maximum memories in the shared search/answer evidence packet")
-    p.add_argument('--evidence-token-budget', type=int, default=32000,
-                   help='Final packet budget, measured conservatively in UTF-8 bytes (256..32000)')
+    p.add_argument('--evidence-token-budget', type=int, default=None,
+                   help='Final packet budget in UTF-8 bytes (256..110000). Default: the server intent tier, as on the platform')
     p.add_argument("--no-graph", action="store_true")
     p.add_argument("--no-governance", action="store_true")
     p.add_argument("--no-rerank", action="store_true")
     p.add_argument("--no-keyexp", action="store_true")
     p.add_argument("--no-sensitive", action="store_true",
                    help="send include_sensitive=false on every search (default follows the schema: true)")
+    p.add_argument("--answer-policy", choices=["platform", "local"], default=None,
+                   help="single-choice answering: 'platform' = generic answer prompt over the packet, as the "
+                        "leaderboard Answer model sees it; 'local' = the verified answer_choice pipeline "
+                        "(default AML_EVAL_CHOICE_POLICY, else local)")
     p.add_argument("--no-progress", action="store_true",
                    help="disable the live progress bar")
     return p.parse_args()
@@ -164,6 +168,8 @@ async def _rerank_passthrough(req, plan, fused, scored=None):
 
 
 def apply_ablations(args):
+    if getattr(args, 'answer_policy', None):
+        config.EVAL_CHOICE_POLICY = args.answer_policy
     if args.no_governance:
         add_pipeline._govern_one = _govern_passthrough
     if args.no_graph:
@@ -226,6 +232,7 @@ async def main():
             conv, args.chunk_messages, args.chunk_words))
     total_steps = add_count + 2 * qa_count
     print(f"protocol={eval_scoring.PROTOCOL} fake={config.FAKE} "
+          f"choice_policy={config.EVAL_CHOICE_POLICY} "
           f"conversations={conv_count} add_chunks={add_count} qa={qa_count}")
     if args.inspect:
         return

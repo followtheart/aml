@@ -163,6 +163,24 @@ class RetryTests(unittest.IsolatedAsyncioTestCase):
             await self.run_call(call)
         sleep.assert_awaited_once()
 
+    async def test_http_failure_logs_status_without_response_or_credentials(self):
+        for direct_status in (False, True):
+            with self.subTest(direct_status=direct_status):
+                error = RuntimeError('private provider error')
+                if direct_status:
+                    error.status_code = 404
+                else:
+                    error.response = SimpleNamespace(status_code=404, text='private response')
+                call = AsyncMock(side_effect=error)
+                with self.assertLogs('aml.metrics', level='WARNING') as logs:
+                    with self.assertRaises(RuntimeError) as raised:
+                        await self.run_call(call, attempts=1)
+                self.assertIs(raised.exception, error)
+                self.assertEqual(call.await_count, 1)
+                self.assertIn('http_status=404', logs.output[0])
+                self.assertIn('will_retry=false', logs.output[0])
+                self.assertNotIn('private', logs.output[0])
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -121,9 +121,15 @@ class SearchTests(unittest.IsolatedAsyncioTestCase):
         self.st.insert_triple('u', 'Alice', 'works_in', 'Hangzhou', current)
         response = await self.run_search(self.req('Alice work previously'), {'intent': 'multi_hop', 'entities': ['Alice']})
         self.assertEqual({x.id for x in response.data}, {old, current})
+        by_id = {x.id: x.content for x in response.data}
+        # The platform answer model only sees content: a replaced version must
+        # announce itself so it is never read as the current state.
+        self.assertIn('[outdated: valid from 1 January 2020 until 1 January 2024; a later statement replaced it]', by_id[old])
+        self.assertIn('[valid since 1 January 2024]', by_id[current])
+        self.assertNotIn('outdated', by_id[current])
         trace = json.loads(self.path.read_text().splitlines()[-1])
         self.assertEqual(response.search_id, trace['search_id'])
-        self.assertEqual(trace['evidence_token_budget'], 32000)
+        self.assertEqual(trace['evidence_token_budget'], search.config.EVIDENCE_BUDGET_BY_INTENT['multi_hop'])
         self.assertEqual(trace['coverage_manifest']['included_ids'], [m.id for m in response.data])
         self.assertEqual(trace['packet_hash'], response.packet_hash)
         self.assertIn('pipeline_version', trace['versions'])

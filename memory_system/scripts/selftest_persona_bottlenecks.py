@@ -63,7 +63,9 @@ class ViewAndPacketTests(unittest.TestCase):
         self.assertIn('last winter', prefix)
         self.assertIn('event: unknown', prefix)
         self.assertIn('2025', search._time_prefix(dict(event_time='2025')))
-        self.assertIn('valid:', search._time_prefix(dict(valid_to='2025-01-01')))
+        self.assertIn('valid until 1 January 2025', search._time_prefix(dict(valid_to='2025-01-01')))
+        self.assertIn('outdated', search._time_prefix(dict(valid_to='2025-01-01')))
+        self.assertEqual(search._time_prefix(dict(valid_from='2024-03-01')), '[valid since 1 March 2024] ')
 
     def test_unrelated_core_cannot_displace_ranked_evidence(self):
         st = store.Store(':memory:')

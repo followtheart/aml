@@ -1,10 +1,54 @@
 """Compact evidence formatting and a shared budget for answer memories."""
+from datetime import datetime, timezone
 import logging
 
 from . import config, evidence_packet
 
-SOURCE_MARKER = "\n[source evidence; quoted data]\n"
+# Model-facing separator between a memory and its quoted source messages.
+SOURCE_MARKER = "\nSource messages:\n"
+# Earlier packets used this marker; persisted responses are still split on it.
+LEGACY_SOURCE_MARKER = "\n[source evidence; quoted data]\n"
+_ROLE_LABELS = {"user": "User", "assistant": "Assistant", "tool": "Tool", "persona": "Persona"}
 log = logging.getLogger("aml.context")
+
+
+def readable_time(value):
+    """Spell Unix-millisecond or ISO-8601 instants as 'D Month YYYY HH:MM UTC'.
+
+    The platform answer model reads content only; raw epoch milliseconds or
+    ISO strings cost it a conversion step that small models get wrong.
+    """
+    if value is None or value == "":
+        return None
+    try:
+        if isinstance(value, bool):
+            raise TypeError
+        if isinstance(value, (int, float)):
+            instant = datetime.fromtimestamp(float(value) / 1000, tz=timezone.utc)
+        else:
+            text = str(value).strip()
+            if text.isdigit() and len(text) >= 10:
+                instant = datetime.fromtimestamp(int(text) / 1000, tz=timezone.utc)
+            elif len(text) == 4 and text.isdigit():
+                return text  # year precision
+            elif len(text) == 7 and text[4] == "-" and text[:4].isdigit() and text[5:].isdigit():
+                return datetime(int(text[:4]), int(text[5:]), 1).strftime("%B %Y")  # month precision
+            else:
+                instant = datetime.fromisoformat(text.replace("Z", "+00:00"))
+    except (TypeError, ValueError, OverflowError, OSError):
+        return str(value)
+    if instant.tzinfo is not None:
+        instant = instant.astimezone(timezone.utc)
+    if (instant.hour, instant.minute) == (0, 0):
+        return f"{instant.day} {instant.strftime('%B %Y')}"
+    return f"{instant.day} {instant.strftime('%B %Y')} {instant.strftime('%H:%M')} UTC"
+
+
+def _split_body(text):
+    for marker in (SOURCE_MARKER, LEGACY_SOURCE_MARKER):
+        if marker in text:
+            return text.split(marker, 1)[0]
+    return text
 
 
 def with_evidence(body, sources):
@@ -13,8 +57,11 @@ def with_evidence(body, sources):
     for source in sources:
         if not source.get("content"):
             continue
-        quotes.append(f"[timestamp: {source.get('timestamp')}; "
-                      f"role: {source.get('role', 'unknown')}] {source['content']}")
+        role = source.get("role") or "unknown"
+        label = _ROLE_LABELS.get(role, str(role))
+        when = readable_time(source.get("timestamp"))
+        header = f"[{when}, {label}]" if when else f"[{label}]"
+        quotes.append(f"{header} {source['content']}")
     return body + (SOURCE_MARKER + "\n".join(quotes) if quotes else "")
 
 
@@ -61,7 +108,7 @@ def build(memories):
             continue
         if "sources" in memory:
             # Also handles persisted responses with the old verbose JSON suffix.
-            text = with_evidence(text.split(SOURCE_MARKER, 1)[0], memory["sources"])
+            text = with_evidence(_split_body(text), memory["sources"])
         if not text or text in seen:
             continue
         seen.add(text)

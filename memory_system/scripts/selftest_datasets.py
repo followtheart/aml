@@ -279,7 +279,27 @@ class DatasetTests(unittest.TestCase):
             self.assertIn("Hiking", prompt)
         self.assertEqual(diagnostics["answer_policy"], scoring.answer_choice.VERSION)
 
-    def test_answer_policy_metadata_uses_verified_answer_version(self):
+    def test_platform_choice_policy_uses_plain_answer_prompt(self):
+        qa = {"question": "Weekend ideas?", "options": ["A. Hiking", "B. Reading"],
+              "qa_type": "single_choice", "scoring": "choice", "gold_labels": ["A"]}
+        prompts_seen = []
+
+        async def answer(prompt, *args, **kwargs):
+            prompts_seen.append(prompt)
+            return "A"
+
+        with patch.object(scoring.config, "EVAL_CHOICE_POLICY", "platform"), \
+             patch.object(scoring.llm, "complete", side_effect=answer), \
+             patch.object(scoring.answer_choice, "answer", side_effect=AssertionError("local pipeline must stay off")):
+            pred, score, diagnostics = asyncio.run(scoring.evaluate(qa, [{"content": "I love hiking."}]))
+        self.assertEqual((pred, score), ("A", 1.0))
+        self.assertEqual(diagnostics["answer_policy"], "platform_prompt:platform")
+        self.assertEqual(len(prompts_seen), 1)
+        self.assertIn("Options:\nA. Hiking\nB. Reading", prompts_seen[0])
+        # Without options the choice-specific path is never entered, whatever the policy.
+        with patch.object(scoring.config, "EVAL_CHOICE_POLICY", "local"), \
+             patch.object(scoring.llm, "complete", side_effect=answer):
+            self.assertFalse(scoring._local_choice_pipeline(dict(qa, options=[])))
         self.assertEqual(run_metadata.versions()["answer_policy"], scoring.answer_choice.VERSION)
 
     def test_provider_error_reported(self):

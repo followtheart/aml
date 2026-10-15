@@ -19,11 +19,26 @@ class ContextTests(unittest.TestCase):
                   "OLD_VERBOSE_JSON", "sources": sources}
         original = copy.deepcopy(memory)
         result = context.build([memory])
-        for text in ("Caroline:", "last year", "1685020440000", "2023", "user"):
+        for text in ("Caroline:", "last year", "25 May 2023 13:14 UTC", "2023", "User"):
             self.assertIn(text, result)
-        for text in ("LONG_PRIVATE_ID", "SESSION", "OMITTED_ID", "OLD_VERBOSE_JSON"):
+        for text in ("LONG_PRIVATE_ID", "SESSION", "OMITTED_ID", "OLD_VERBOSE_JSON", "1685020440000"):
             self.assertNotIn(text, result)
         self.assertEqual(memory, original)
+
+    def test_readable_time_accepts_epoch_ms_iso_and_garbage(self):
+        self.assertEqual(context.readable_time(1684972800000), "25 May 2023")
+        self.assertEqual(context.readable_time("2023-05-25T13:14:00Z"), "25 May 2023 13:14 UTC")
+        self.assertEqual(context.readable_time("2023-05-25T15:14:00+02:00"), "25 May 2023 13:14 UTC")
+        self.assertIsNone(context.readable_time(None))
+        self.assertEqual(context.readable_time("not a date"), "not a date")
+        self.assertEqual(context.readable_time("2025"), "2025")
+        self.assertEqual(context.readable_time("2025-03"), "March 2025")
+
+    def test_legacy_marker_in_persisted_response_is_still_split(self):
+        memory = {"content": "body" + context.LEGACY_SOURCE_MARKER + "OLD",
+                  "sources": [{"content": "quoted", "role": "assistant", "timestamp": None}]}
+        result = context.build([memory])
+        self.assertEqual(result, "body" + context.SOURCE_MARKER + "[Assistant] quoted")
 
     def test_total_and_item_limits_apply_to_all_types(self):
         memories = [{"content": kind + "中文🙂" * 10000, "memory_type": kind}

@@ -13,7 +13,7 @@ from typing import Dict, List, Optional
 
 import numpy as np
 
-from . import config, integrity, llm, memory_debug, persona_source, profile, prompts, scenes, schemas, segment, store
+from . import config, document_units, integrity, llm, memory_debug, persona_source, profile, prompts, scenes, schemas, segment, store
 from .embeddings import embed
 from .errors import InvalidRequest
 
@@ -158,14 +158,19 @@ def _validate_fact(raw, batch, start, req):
 
 def _episode(req, indices, segment_index=0, episode=None, sensitivity="normal"):
     episode = episode or {}
-    raw = _format_messages([req.messages[i] for i in indices])
+    messages = [req.messages[i] for i in indices]
+    raw = _format_messages(messages)
     sensitivity = max([sensitivity] + [req.messages[i].sensitivity for i in indices],
                       key=lambda s: {'normal': 0, 'sensitive': 1, 'suppressed': 2}[s])
+    # A pasted document keeps its verbatim text: an LLM compression would drop
+    # the exact wording that context-learning tasks must follow.
+    document = document_units.any_document(messages)
     # Index the conversation itself. A summary such as "asked for editing"
     # cannot stand in for the facts or third-party attribution inside the draft.
     return {"content": raw,
-            "compressed_content": episode.get("compressed_chunk") or raw,
-            "retrieval_key": "Conversation episode", "type": "episode",
+            "compressed_content": raw if document else (episode.get("compressed_chunk") or raw),
+            "retrieval_key": document_units.RETRIEVAL_KEY if document else "Conversation episode",
+            "type": "episode",
             "_sources": list(indices), "_segment": segment_index,
             "entities": [], "keywords": [],
             "event_time": None, "sensitivity": sensitivity, 'epistemic_status': 'observed'}
@@ -298,8 +303,10 @@ async def _extract_segment_impl(req: schemas.AddRequest, summary: Optional[str],
         facts.extend(grounded)
         # §2.1 MemCell keeps the raw chunk (E) next to its atomic facts (F);
         # a single fully-extracted message would only duplicate its fact.
-        # Without episodes only rejected sources fall back to a chunk.
-        if config.STORE_EPISODES and (len(indices) > 1 or not grounded or rejected_sources):
+        # Without episodes only rejected sources fall back to a chunk. A pasted
+        # document is always kept whole: its facts never replace its wording.
+        if config.STORE_EPISODES and (len(indices) > 1 or not grounded or rejected_sources
+                                      or document_units.any_document(batch)):
             facts.append(_episode(req, indices, seg_index, data.get("episode"), sensitivity))
         elif rejected_sources:
             facts.append(_episode(req, sorted(rejected_sources), seg_index,

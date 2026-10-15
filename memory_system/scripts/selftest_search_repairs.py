@@ -325,7 +325,7 @@ class SearchAvailabilityRepairs(unittest.IsolatedAsyncioTestCase):
 
     async def test_literal_source_marker_in_memory_cannot_erase_ranked_body(self):
         qualification = 'Approval remains denied until inspection.'
-        body = 'OrchidMarker status is provisional.\n[source evidence; quoted data]\n' + qualification
+        body = 'OrchidMarker status is provisional.' + search.answer_context.SOURCE_MARKER + qualification
         memory_id = await self.memory(body)
         self.st.save_messages(schemas.AddRequest(request_id='marker-source', user_id='u', session_id='s',
             messages=[schemas.Message(role='user', content='OrchidMarker workflow is documented.')]))

@@ -156,7 +156,7 @@ class EvidenceTests(unittest.IsolatedAsyncioTestCase):
         aid = self.st.insert_amu(user_id='u', session_id='s', content='Talent show next month.', type='event', temporal=temporal)
         found = self.st.temporal_search('u', {'from': '2023-09-15', 'to': '2023-09-15'}, 10)
         self.assertEqual([a['id'] for a in found], [aid])
-        self.assertIn('precision: month', _time_prefix(found[0]))
+        self.assertEqual(_time_prefix(found[0]), '[event: September 2023; said as "next month" on 28 August 2023 15:19 UTC] ')
         self.assertEqual(self.st.temporal_search('u', {'from': '2023-10-01', 'to': '2023-10-02'}, 10), [])
 
     async def test_graph_edges_keep_fact_time_range(self):

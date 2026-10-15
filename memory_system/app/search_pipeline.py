@@ -14,7 +14,7 @@ from datetime import datetime, timezone
 from . import search_debug
 from typing import Dict, List, Optional
 
-from . import answer_context, budget, cascade_rerank, config, graph_fusion, evidence_packet, evidence_units, graph, integrity, llm, local_work, personal_evidence, profile, prompts, retrieval_queries, run_metadata, scenes, schemas, search_coverage, store
+from . import answer_context, budget, cascade_rerank, config, document_units, graph_fusion, evidence_packet, evidence_units, graph, integrity, llm, local_work, personal_evidence, profile, prompts, retrieval_queries, run_metadata, scenes, schemas, search_coverage, store
 from .embeddings import embed
 
 log = logging.getLogger("aml.search")
@@ -51,25 +51,48 @@ def _readable_range(temporal: Dict) -> str:
 
 
 def _time_prefix(a: Dict) -> str:
+    """Model-facing time header. Dates are written out in words, and a resolved
+    event keeps the original relative wording next to its reference date so the
+    answer model can check the arithmetic instead of redoing it."""
     prefix = ''
-    if a.get('valid_from') or a.get('valid_to'):
-        prefix = f"[valid: {a.get('valid_from') or 'unknown'} ~ {a.get('valid_to') or 'open'}] "
+    valid_from, valid_to = a.get('valid_from'), a.get('valid_to')
+    if valid_to:
+        since = f"from {answer_context.readable_time(valid_from)} " if valid_from else ''
+        prefix = f"[outdated: valid {since}until {answer_context.readable_time(valid_to)}; a later statement replaced it] "
+    elif valid_from:
+        prefix = f"[valid since {answer_context.readable_time(valid_from)}] "
     temporal = a.get("temporal")
     if temporal and any(temporal.get(k) for k in ('start', 'end', 'raw', 'reference_time')):
-        fields = [f"event: {_readable_range(temporal)}", f"precision: {temporal.get('precision', 'unknown')}"]
-        fields += [f'{label}: {temporal[key]}' for key, label in
-                   [('raw', 'original'), ('reference_time', 'reference')] if temporal.get(key)]
+        if not temporal.get('start') and not temporal.get('raw') and temporal.get('reference_time'):
+            # No event time was resolvable: only the time the statement was made is known.
+            return prefix + f"[stated on {answer_context.readable_time(temporal['reference_time'])}] "
+        fields = [f"event: {_readable_range(temporal)}"]
+        if temporal.get('raw'):
+            said = f'said as "{temporal["raw"]}"'
+            if temporal.get('reference_time'):
+                said += f" on {answer_context.readable_time(temporal['reference_time'])}"
+            fields.append(said)
+        elif temporal.get('reference_time'):
+            fields.append(f"reference: {answer_context.readable_time(temporal['reference_time'])}")
         return prefix + '[' + '; '.join(fields) + '] '
     event = a.get("event_time")
-    return prefix + (f"[event: {event}] " if event else "")
+    return prefix + (f"[event: {answer_context.readable_time(event)}] " if event else "")
 
 
 def _anchor_time(st: store.Store, req: schemas.SearchRequest) -> str:
-    """§5.1: query_time comes from the request layer (reference_time). When it
-    is missing the receive-time wall clock is the documented fallback — never
-    the user's latest memory time, which would leak future messages into the
-    anchor (ULM §5.1)."""
-    return req.reference_time or datetime.now(timezone.utc).isoformat()
+    """§5.1: query_time comes from the request layer (reference_time). The
+    leaderboard contract never supplies it, so the fallback is the user's
+    newest source-message time (Search runs only after every Add; memory
+    event times are ignored so stored future plans cannot shift the anchor).
+    The service wall clock is the last resort or an explicit configuration."""
+    if req.reference_time:
+        return req.reference_time
+    latest_known = getattr(st, 'latest_message_time', None)
+    if config.ANCHOR_FALLBACK == 'latest_message' and callable(latest_known):
+        latest = latest_known(req.user_id)
+        if latest:
+            return latest
+    return datetime.now(timezone.utc).isoformat()
 
 
 async def _understand(st: store.Store, req: schemas.SearchRequest,
@@ -155,6 +178,16 @@ def _historical(req, plan):
 def _snapshot(items):
     return [dict({k: v for k, v in c.items() if k not in ("embedding", "centroid")}, rank=i + 1)
             for i, c in enumerate(items)]
+
+
+def _evidence_budget(req, plan) -> int:
+    """Explicit request budget, else the intent tier; resolved once per search."""
+    if req.evidence_token_budget is not None:
+        return min(req.evidence_token_budget, config.EVIDENCE_BUDGET_MAX)
+    if plan.get('_evidence_budget') is None:
+        plan['_evidence_budget'] = config.EVIDENCE_BUDGET_BY_INTENT.get(
+            plan.get('intent'), config.EVIDENCE_BUDGET_DEFAULT)
+    return plan['_evidence_budget']
 
 
 def _query_terms(queries: List[str]) -> List[str]:
@@ -565,6 +598,17 @@ def _prime_source_cache(st, req, plan, candidates):
     plan['_source_cache_primed'] = plan.get('_source_cache_primed', 0) + len(ids)
 
 
+def _document_episode(candidate, sources) -> bool:
+    return candidate.get('type') == 'episode' and bool(sources) and (
+        candidate.get('retrieval_key') == document_units.RETRIEVAL_KEY or document_units.any_document(sources))
+
+
+def _truncate_bytes(text: str, limit: int) -> str:
+    marker = ' [excerpt truncated for ranking]'
+    budget_bytes = max(0, limit - len(marker.encode('utf-8')))
+    return text.encode('utf-8')[:budget_bytes].decode('utf-8', errors='ignore') + marker
+
+
 def _prepare_candidates(st, req, plan, fused):
     hydrated = []
     for c in fused:
@@ -580,7 +624,7 @@ def _prepare_candidates(st, req, plan, fused):
     candidates = _coalesce_preferences(hydrated, plan)
     anchor = plan.get('_anchor') or _anchor_time(st, req)
     queries = plan.get('_used_queries') or [req.query]
-    cap = min(config.SEARCH_ITEM_MAX_BYTES, config.CE_MAX_DOCUMENT_BYTES, req.evidence_token_budget,
+    cap = min(config.SEARCH_ITEM_MAX_BYTES, config.CE_MAX_DOCUMENT_BYTES, _evidence_budget(req, plan),
               max(256, config.RERANK_MAX_PROMPT_BYTES - len(_rerank_prompt(req, plan, []).encode('utf-8')) - 256))
     prepared = []
     for c in candidates:
@@ -589,7 +633,7 @@ def _prepare_candidates(st, req, plan, fused):
         sources = [dict(x) for x in sources]
         primary_source_keys = {(s['request_id'], s['message_index']) for s in sources}
         support_evidence = [e for m in full for e in m.get('evidence') or []]
-        body = ('[conversation excerpts; verify speaker attribution]'
+        body = ('Conversation excerpt:'
                 if c.get('type') == 'episode' and sources else c['content'])
         body = _memory_prefix(c, full[0] if full else c, anchor) + body
         primary_body = body
@@ -625,17 +669,28 @@ def _prepare_candidates(st, req, plan, fused):
         # Very long unsourced narrative text also uses whole verbatim passages.
         if len(body.encode('utf-8')) > cap // 2 and not queue and len(visited) == 1:
             if c.get('type') in ('episode', 'session_summary') and sources:
-                body = _memory_prefix(c, c, anchor) + '[source excerpts; full source retained by reference]'
+                body = _memory_prefix(c, c, anchor) + 'Conversation excerpt:'
             elif not _protected_rule(c):
                 chunks = evidence_units.passages(dict(content=c['content']), queries, [], max(128, cap // 2 - 160))
                 if chunks:
-                    body = _memory_prefix(c, c, anchor) + '[verbatim memory excerpts] ' + '\n'.join(x['content'] for x in chunks)
+                    body = _memory_prefix(c, c, anchor) + 'Excerpt: ' + '\n'.join(x['content'] for x in chunks)
             primary_body = body
-        unit = evidence_units.build(c, sources, support_evidence, queries, body, cap)
+        is_document = _document_episode(c, sources)
+        # A pasted document is packed whole (up to the document cap) so the
+        # answer model can follow it; ranking still sees a bounded excerpt.
+        unit_cap = max(cap, config.DOCUMENT_ITEM_MAX_BYTES) if is_document else cap
+        unit = evidence_units.build(c, sources, support_evidence, queries, body, unit_cap,
+                                    optional_limit=len(sources) if is_document else None)
         if unit is None:
-            plan.setdefault('_unit_omitted', []).append(dict(id=c['id'], reason='unit_budget', budget_bytes=cap))
+            plan.setdefault('_unit_omitted', []).append(dict(id=c['id'], reason='unit_budget', budget_bytes=unit_cap))
             continue
-        c['_rank_text'] = unit['content']
+        rank_text = unit['content']
+        if is_document and len(rank_text.encode('utf-8')) > cap:
+            excerpt = evidence_units.build(c, sources, support_evidence, queries, body, cap)
+            rank_text = excerpt['content'] if excerpt else _truncate_bytes(rank_text, cap)
+            c['_rank_excerpted'] = True
+        c['_rank_text'] = rank_text
+        c['_document'] = is_document
         visible = [x for x in unit['sources'] if x.get('content')]
         informative = [x for x in visible if not personal_evidence.editorial_request(x['content'])]
         c['_selection_evidence'] = dict(user_source=any(x.get('role') == 'user' for x in informative)
@@ -869,23 +924,25 @@ def _foresight_filter(ranked: List[Dict], plan: Dict) -> List[Dict]:
 
 
 def _memory_prefix(c: Dict, full: Optional[Dict], anchor: str) -> str:
+    """Only labels the platform answer model can act on; internal review hints
+    (profile stability, attribution checks) stay in SearchItem metadata."""
     item = full or c
     prefix = _time_prefix(c)
     status = _foresight_status(item, anchor)
     if status:
         prefix += f"[plan; status: {status}] "
-    if item.get("type") in ("preference", "profile", "rule"):
-        prefix += f"[profile: {scenes.profile_stability(item)}] "
+    if item.get("type") == "rule":
+        prefix += "[user rule] "
     if item.get("epistemic_status") == "inferred":
-        prefix += "[evidence: inferred; check source attribution] "
+        prefix += "[inferred; not stated by the user] "
     if item.get('resolution_status') == 'disputed':
-        prefix += '[evidence: disputed; unresolved conflicting claims] '
+        prefix += '[disputed; conflicting statements exist] '
     if profile.is_forget_rule(item):
         # Negative constraint: the forgotten trait must not be used or
         # recommended, even if other memories still mention it.
-        prefix += "[constraint: forgotten by user request; do NOT use or recommend this trait] "
+        prefix += "[constraint: the user asked to forget this; do not use or recommend it] "
     if c.get("type") == "session_summary":
-        prefix = "[session summary; derived context] " + prefix
+        prefix = "[session summary] " + prefix
     return prefix
 
 
@@ -916,12 +973,16 @@ def _pack_evidence(st, req, plan, ranked, anchor):
         item['_selection_bucket'] = candidate.get('_selection_bucket')
         items.append(item)
     requirements = [r['id'] for r in plan.get('_coverage_requirements', [])]
+    token_budget = _evidence_budget(req, plan)
+    manifest_budget = dict(evidence_token_budget=token_budget,
+                           budget_source='request' if req.evidence_token_budget is not None else 'intent_tier')
     if '_cascade' in plan:
-        packed, packet_hash, manifest = evidence_packet.pack_ranked(items, req.top_k, req.evidence_token_budget,
+        packed, packet_hash, manifest = evidence_packet.pack_ranked(items, req.top_k, token_budget,
             required_coverage=requirements, groups=plan.get('_evidence_groups', []))
     else:
-        packed, packet_hash, manifest = evidence_packet.pack(items, req.top_k, req.evidence_token_budget,
+        packed, packet_hash, manifest = evidence_packet.pack(items, req.top_k, token_budget,
             required_coverage=requirements, fallback_limit=config.EVIDENCE_FALLBACK_ITEMS)
+    manifest.update(manifest_budget)
     manifest['unit_omitted'] = plan.get('_unit_omitted', [])
     return packed, packet_hash, manifest
 
@@ -964,6 +1025,7 @@ async def _run_search(st: store.Store,
         trace["anchor_time"] = anchor
         plan = await _understand(st, req, anchor)
         plan['_anchor'] = anchor
+        trace['evidence_token_budget'] = _evidence_budget(req, plan)
         # Cold evidence remains eligible; contextual/sparse expansion is gated
         # locally inside recall; multi-hop may add one grounded follow-up.
         plan.update(_round=1, _cold=True)

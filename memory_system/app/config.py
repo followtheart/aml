@@ -234,12 +234,42 @@ VECTOR_CANDIDATE_LIMIT = max(64, int(os.environ.get('AML_VECTOR_CANDIDATE_LIMIT'
 EVIDENCE_MIN_RELEVANCE = min(1.0, max(0.0, float(os.environ.get("AML_EVIDENCE_MIN_RELEVANCE", "0.15"))))
 EVIDENCE_FALLBACK_ITEMS = max(1, int(os.environ.get("AML_EVIDENCE_FALLBACK_ITEMS", "8")))
 
+
+def _budget_tiers(raw):
+    tiers = {}
+    for part in raw.split(','):
+        if not part.strip():
+            continue
+        intent, _, value = part.partition('=')
+        if not value.strip().isdigit():
+            raise ValueError('AML_EVIDENCE_BUDGET_BY_INTENT entries must be intent=bytes')
+        tiers[intent.strip()] = int(value)
+    return tiers
+
+
+# Model-facing evidence budget (UTF-8 bytes, a conservative token bound) used
+# when the request sets none. The leaderboard never sends a budget and its
+# answer window admits 117,760 input tokens, so recall-heavy intents get more
+# room than single-fact lookups; EVIDENCE_BUDGET_MAX also caps explicit requests.
+EVIDENCE_BUDGET_MAX = 110000
+EVIDENCE_BUDGET_DEFAULT = min(EVIDENCE_BUDGET_MAX, max(256, int(os.environ.get("AML_EVIDENCE_BUDGET_DEFAULT", "48000"))))
+EVIDENCE_BUDGET_BY_INTENT = {intent: min(EVIDENCE_BUDGET_MAX, max(256, value)) for intent, value in _budget_tiers(
+    os.environ.get("AML_EVIDENCE_BUDGET_BY_INTENT",
+                   "multi_hop=96000,narrative=96000,document=96000,procedural=96000,temporal=64000")).items()}
+
 # ---- ULM lifecycle knobs (llm-memory-survey/memory-system-design.md) ----
 # §3.2 semantic boundary segmentation (embedding drop between adjacent windows)
 SEGMENT_MIN_MESSAGES = max(1, int(os.environ.get("AML_SEGMENT_MIN_MESSAGES", "2")))
 SEGMENT_SIM_DROP = float(os.environ.get("AML_SEGMENT_SIM_DROP", "0.35"))
 # §2.1 keep the raw chunk of every segment as an `episode` memory (Memory-Doc)
 STORE_EPISODES = os.environ.get("AML_STORE_EPISODES", "1") == "1"
+# Pasted documents / instruction blocks (no source_kind arrives from the
+# platform): detected heuristically, always kept as a whole-segment episode and
+# packed verbatim up to DOCUMENT_ITEM_MAX_BYTES while ranking uses an excerpt.
+DOCUMENT_UNITS_ENABLED = os.environ.get("AML_DOCUMENT_UNITS_ENABLED", "1") == "1"
+DOCUMENT_MIN_CHARS = max(200, int(os.environ.get("AML_DOCUMENT_MIN_CHARS", "600")))
+DOCUMENT_LONG_CHARS = max(DOCUMENT_MIN_CHARS, int(os.environ.get("AML_DOCUMENT_LONG_CHARS", "2000")))
+DOCUMENT_ITEM_MAX_BYTES = max(2048, int(os.environ.get("AML_DOCUMENT_ITEM_MAX_BYTES", "16000")))
 # Experimental current-segment references; ordinary extraction stays the default.
 EXTRACT_SPAN_REFS = os.environ.get("AML_EXTRACT_SPAN_REFS", "0") == "1"
 # §3.4 novelty gate: near-identical facts skip the governance LLM call
@@ -304,9 +334,24 @@ INVALIDATE_MAX_TARGETS = max(1, int(os.environ.get("AML_INVALIDATE_MAX_TARGETS",
 # P1: histories without timestamps stay undated (ULM §2.1): no synthetic
 # timeline is fabricated, and relative times resolve to unknown instead of
 # being anchored to the service wall clock.
+# Search question anchor when the request carries no reference_time. The
+# leaderboard contract never sends a question date and only searches after
+# every Add has completed, so the user's newest source-message time is the
+# closest known "now"; "wall_clock" restores the service receive time.
+ANCHOR_FALLBACK = os.environ.get("AML_ANCHOR_FALLBACK", "latest_message")
+if ANCHOR_FALLBACK not in ("latest_message", "wall_clock"):
+    raise ValueError("AML_ANCHOR_FALLBACK must be latest_message or wall_clock")
 # P3: query understanding sees a compact profile digest so expansions bind
 # generic questions to known user traits.
 QUERY_PROFILE_DIGEST = os.environ.get("AML_QUERY_PROFILE_DIGEST", "1") == "1"
+
+# Local evaluation only: how single-choice questions are answered. "local"
+# (default, keeps historical runs comparable) runs the verified answer_choice
+# pipeline, which never reaches /search; "platform" mirrors the leaderboard with
+# a plain answer prompt over the returned packet.
+EVAL_CHOICE_POLICY = os.environ.get("AML_EVAL_CHOICE_POLICY", "local")
+if EVAL_CHOICE_POLICY not in ("platform", "local"):
+    raise ValueError("AML_EVAL_CHOICE_POLICY must be platform or local")
 
 # Full stored content for local debugging; empty path disables the JSONL log.
 MEMORY_DEBUG_LOG = os.environ.get(

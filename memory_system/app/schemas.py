@@ -42,7 +42,9 @@ class SearchRequest(BaseModel):
     reference_time: Optional[str] = None
     as_of: Optional[str] = None
     min_revision: Optional[int] = Field(default=None, ge=0)
-    evidence_token_budget: int = Field(default=32000, ge=256, le=32000)
+    # UTF-8 byte bound for model-facing evidence. None selects the intent tier
+    # from config (the leaderboard contract never sends this field).
+    evidence_token_budget: Optional[int] = Field(default=None, ge=256, le=110000)
 
 
 class HTTPMessage(Message):

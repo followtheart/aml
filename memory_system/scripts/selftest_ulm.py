@@ -263,15 +263,21 @@ class LifecycleTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.data, [])
         self.assertEqual(self.trace()['foresight_dropped'], [aid])
 
-    async def test_anchor_time_uses_wall_clock_or_explicit_reference(self):
+    async def test_anchor_time_uses_latest_message_or_explicit_reference(self):
+        empty = search._anchor_time(self.st, schemas.SearchRequest(user_id='u', query='q'))
+        self.assertLess(abs((datetime.fromisoformat(empty) - datetime.now(timezone.utc)).total_seconds()), 5)
         req = request('r1', 'Alice plays tennis.')
         req.messages[0].timestamp = 1684972800000  # 2023-05-25
         self.st.save_messages(req)
         anchor = search._anchor_time(self.st, schemas.SearchRequest(user_id='u', query='q'))
-        self.assertLess(abs((datetime.fromisoformat(anchor) - datetime.now(timezone.utc)).total_seconds()), 5)
+        self.assertEqual(datetime.fromisoformat(anchor), datetime(2023, 5, 25, tzinfo=timezone.utc))
         self.assertEqual(search._anchor_time(self.st, schemas.SearchRequest(
             user_id='u', query='q', reference_time='2020-01-01T00:00:00Z')), '2020-01-01T00:00:00Z')
+        with patch.object(search.config, 'ANCHOR_FALLBACK', 'wall_clock'):
+            clock = search._anchor_time(self.st, schemas.SearchRequest(user_id='u', query='q'))
+        self.assertLess(abs((datetime.fromisoformat(clock) - datetime.now(timezone.utc)).total_seconds()), 5)
         self.assertIsNone(self.st.latest_time('nobody'))
+        self.assertIsNone(self.st.latest_message_time('nobody'))
 
     async def test_rules_are_always_recalled_and_profile_annotated(self):
         vec = (await embed(['unrelated words']))[0]
@@ -279,7 +285,8 @@ class LifecycleTests(unittest.IsolatedAsyncioTestCase):
                                   type='rule', embedding=vec)
         result = await self.run_search(schemas.SearchRequest(user_id='u', query='Alice tennis'))
         self.assertEqual(result.data[0].id, rule)
-        self.assertIn('[profile: rule]', result.data[0].content)
+        self.assertIn('[user rule]', result.data[0].content)
+        self.assertNotIn('[profile:', result.data[0].content)
 
 
 if __name__ == '__main__':

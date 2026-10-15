@@ -199,6 +199,10 @@ async def _measured_call(
                 f"completion_tokens={failed_usage[1]}",
                 f"total_tokens={failed_usage[2]}",
             ]
+            http_status = (getattr(exc, "status_code", None)
+                           or getattr(getattr(exc, "response", None), "status_code", None))
+            if isinstance(http_status, int) and 100 <= http_status <= 599:
+                parts.append(f"http_status={http_status}")
             if input_count is not None:
                 parts.append(f"input_count={input_count}")
             log.warning(" ".join(parts))

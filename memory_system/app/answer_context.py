@@ -78,6 +78,23 @@ def _source_keys(memory):
     return {(s.get("request_id"), s.get("message_index")) for s in memory.get("sources") or []}
 
 
+def _verified_display(memory):
+    """Render an authenticated legacy source suffix using the current format.
+
+    Match the whole suffix, never reconstruct hidden sources or split on marker
+    text inside a quote. The transport packet and its digest remain unchanged.
+    """
+    text = memory['content']
+    sources = memory.get('sources') or []
+    quotes = [f"[timestamp: {s.get('timestamp')}; role: {s.get('role')}] {s['content']}"
+              for s in sources if s.get('content')]
+    if quotes:
+        suffix = LEGACY_SOURCE_MARKER + '\n'.join(quotes)
+        if text.endswith(suffix):
+            return with_evidence(text[:-len(suffix)], sources)
+    return text
+
+
 def build(memories):
     """Preserve retrieval order; cap every item and the entire memory context.
 
@@ -93,7 +110,7 @@ def build(memories):
     if hashes - {None}:
         if len(hashes) != 1 or evidence_packet.digest(memories) not in hashes:
             raise ValueError('Evidence packet was modified after verification')
-        return '\n'.join(m['content'] for m in memories) or '(no memories)'
+        return '\n'.join(_verified_display(m) for m in memories) or '(no memories)'
     remaining = config.ANSWER_CONTEXT_MAX_CHARS
     blocks = []
     seen = set()

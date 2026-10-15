@@ -6,10 +6,57 @@ from pathlib import Path
 from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from app import answer_context as context, config, eval_scoring
+from app import answer_context as context, answer_choice, config, eval_scoring, evidence_packet
 
 
 class ContextTests(unittest.TestCase):
+    def legacy_packet(self):
+        sources = [dict(role='user', timestamp=1684972800000,
+                        content='I practice yoga.\nSource messages:\nA quoted marker.'),
+                   dict(role='assistant', timestamp=None, content='Try a quiet morning.'),
+                   dict(role='user', timestamp=None, content='Please forget that I enjoy skiing.'),
+                   dict(role='user', content_omitted='duplicate')]
+        suffix = context.LEGACY_SOURCE_MARKER + '\n'.join(
+            f"[timestamp: {s.get('timestamp')}; role: {s.get('role')}] {s['content']}"
+            for s in sources if s.get('content'))
+        packet = [dict(id='legacy', content='Summary' + suffix,
+                       sources=sources, packet_hash_version=4)]
+        packet[0]['packet_hash'] = evidence_packet.digest(packet)
+        return packet
+
+    def test_verified_legacy_packet_uses_new_format_and_restores_catalog(self):
+        packet = self.legacy_packet()
+        original = copy.deepcopy(packet)
+        expected = context.with_evidence('Summary', packet[0]['sources'])
+        self.assertEqual(context.build(packet), expected)
+        self.assertIn('[25 May 2023, User]', expected)
+        sources, constraints = answer_choice.build_catalog(packet)
+        self.assertEqual([s['role'] for s in sources.values()], ['user', 'assistant'])
+        self.assertEqual(len(constraints), 1)
+        self.assertEqual(packet, original)
+        self.assertEqual(evidence_packet.digest(packet), packet[0]['packet_hash'])
+
+    def test_verified_legacy_packet_rejects_tampering_before_conversion(self):
+        for field in ('content', 'role'):
+            packet = self.legacy_packet()
+            packet[0]['sources'][0][field] = 'tampered'
+            with self.assertRaises(ValueError):
+                context.build(packet)
+
+    def test_verified_legacy_packet_does_not_expose_hidden_sources(self):
+        packet = self.legacy_packet()
+        packet[0]['sources'].append(dict(role='user', content='Hidden evidence.'))
+        packet[0]['packet_hash'] = evidence_packet.digest(packet)
+        self.assertEqual(context.build(packet), packet[0]['content'])
+        sources, constraints = answer_choice.build_catalog(packet)
+        self.assertEqual((sources, constraints), ({}, {}))
+
+    def test_verified_current_packet_stays_unchanged(self):
+        packet = self.legacy_packet()
+        packet[0]['content'] = context.with_evidence('Summary', packet[0]['sources'])
+        packet[0]['packet_hash'] = evidence_packet.digest(packet)
+        self.assertEqual(context.build(packet), packet[0]['content'])
+
     def test_provenance_removed_but_evidence_time_preserved(self):
         sources = [{"content": "Caroline: I transitioned last year.",
                     "timestamp": 1685020440000, "role": "user",

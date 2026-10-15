@@ -1,6 +1,6 @@
 """Pydantic schemas for the AML Add/Search synchronous contract."""
 from typing import List, Literal, Optional
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_serializer
 
 
 class Message(BaseModel):
@@ -77,6 +77,15 @@ class SearchItem(BaseModel):
     temporal: Optional[dict] = None
     packet_hash: Optional[str] = None
     packet_hash_version: Optional[int] = None
+
+    @model_serializer(mode='wrap')
+    def serialize_optional_score(self, handler):
+        # AML accepts an absent score or a number, not an explicit null.
+        # Preserve nulls in provenance: those fields participate in the digest.
+        data = handler(self)
+        if self.score is None:
+            data.pop('score', None)
+        return data
 
 
 class SearchResponse(BaseModel):

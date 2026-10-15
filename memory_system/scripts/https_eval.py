@@ -53,6 +53,9 @@ def parse_args(argv=None):
                    help='Final evidence packet budget in UTF-8 bytes (256..32000)')
     p.add_argument('--no-sensitive', action='store_true')
     p.add_argument('--no-progress', action='store_true')
+    p.add_argument('--official-fields', action='store_true',
+                   help='Send only AML Add/Search contract fields; use --answer-top-k 100 for formal settings')
+    p.add_argument('--request-log', type=Path, help='Archive request payloads without authentication headers')
     args = p.parse_args(argv)
     u = urlsplit(args.url)
     if (u.scheme != 'https' or not u.hostname or u.username is not None
@@ -82,8 +85,27 @@ def search_request(args, uid, qa, revision=None):
         as_of=qa.get('as_of'), min_revision=revision)
 
 
-async def post(client, path, request, response_type):
-    response = await client.post(path, json=request.model_dump(exclude_none=True))
+def request_payload(path, request, official_fields=False):
+    payload = request.model_dump(exclude_none=True)
+    if official_fields:
+        if path == 'add':
+            payload = {k: payload[k] for k in ('request_id', 'user_id', 'session_id', 'messages')}
+            payload['messages'] = [{k: v for k, v in m.items() if k in ('role', 'content', 'timestamp')}
+                                   for m in payload['messages']]
+        elif path == 'search':
+            payload = {k: v for k, v in payload.items() if k in ('query', 'options', 'user_id', 'top_k')}
+        else:
+            raise ValueError('Unknown official contract endpoint')
+    return payload
+
+
+async def post(client, path, request, response_type, *, official_fields=False, request_log=None):
+    payload = request_payload(path, request, official_fields)
+    if request_log:
+        request_log.parent.mkdir(parents=True, exist_ok=True)
+        with request_log.open('a', encoding='utf-8') as stream:
+            stream.write(json.dumps(dict(path=path, payload=payload), ensure_ascii=False) + '\n')
+    response = await client.post(path, json=payload)
     response.raise_for_status()
     return response_type.model_validate(response.json())
 
@@ -147,7 +169,8 @@ async def main(argv=None):
                         session_id=f'{uid}:session:{sid}', messages=session)
                     # Fail fast on ingestion failure; scoring partial histories
                     # would silently change the evaluation task. No HTTP retries.
-                    added = await progress.run(post(client, 'add', req, schemas.AddResponse),
+                    added = await progress.run(post(client, 'add', req, schemas.AddResponse,
+                                               official_fields=args.official_fields, request_log=args.request_log),
                                                f'Add conv {ci}/{conv_count} session {sid} chunk {chunk_id}')
                     if (not added.success or added.request_id != req.request_id
                             or added.user_id != uid or added.session_id != req.session_id):
@@ -158,7 +181,8 @@ async def main(argv=None):
                     try:
                         resp = await progress.run(
                             post(client, 'search', search_request(args, uid, qa, revision),
-                                 schemas.SearchResponse),
+                                 schemas.SearchResponse, official_fields=args.official_fields,
+                                 request_log=args.request_log),
                             f'Search conv {ci}/{conv_count} QA {qi}/{len(qas)}')
                     except Exception as exc:
                         progress.done = before + 2  # Search failed; Answer/Judge skipped.
@@ -194,6 +218,8 @@ async def main(argv=None):
                             'protocol': conv.get('protocol', eval_scoring.PROTOCOL),
                             'fake': config.FAKE, 'model': config.LLM_MODEL, 'versions': run_metadata.versions(),
                             'transport': 'https', 'run_id': run_id, 'user_id': uid,
+                            'request_contract': 'official' if args.official_fields else 'extended',
+                            'request_top_k': args.answer_top_k,
                             'server_url': args.url, 'server_fake': None, 'server_versions': None,
                             **diagnostics}
                         output.write(json.dumps(result, ensure_ascii=False) + '\n')

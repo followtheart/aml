@@ -22,7 +22,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from fastapi.testclient import TestClient
 from app.main import app
-from app import add_pipeline, evidence_packet
+from app import add_pipeline, evidence_packet, schemas, search_pipeline
 
 client = TestClient(app)
 H = {"Authorization": "Bearer " + os.environ.get("AML_API_KEY", "testkey")}
@@ -79,6 +79,20 @@ check("search returns relevant memory",
       any("photography" in i["content"] for i in items),
       (items[0]["content"][:80] if items else "EMPTY"))
 check("item schema id/content", all(i.get("id") and i.get("content") for i in items))
+
+# Exercise the actual FastAPI response serializer, including a zero score and
+# nullable provenance protected by the packet digest.
+packet, digest, _ = evidence_packet.pack_ranked([
+    dict(id='constraint', content='Privacy rule', score=None, is_constraint=True),
+    dict(id='zero', content='Zero score', score=0.0),
+    dict(id='positive', content='Positive score', score=0.75)], 100, 32000)
+response = schemas.SearchResponse(data=[schemas.SearchItem(**x) for x in packet], packet_hash=digest)
+with patch.object(search_pipeline, 'run_search', AsyncMock(return_value=response)):
+    r = client.post('/search', json=sbody, headers=H)
+wire = r.json()['data']
+check('HTTP omits null score but preserves numeric scores', r.status_code == 200
+      and 'score' not in wire[0] and wire[1]['score'] == 0.0 and wire[2]['score'] == 0.75)
+check('HTTP score omission preserves packet digest', evidence_packet.digest(wire) == digest)
 
 # 5. isolation: other user sees nothing
 r = client.post("/search", json={**sbody, "user_id": "eval:other"}, headers=H)

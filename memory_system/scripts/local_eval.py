@@ -225,13 +225,15 @@ async def main():
     # Two streaming passes: preflight everything selected before paid calls,
     # then execute without retaining the complete corpus in memory.
     conv_count = total_steps = qa_count = add_count = 0
+    protocols = set()
     for conv, qas in selected():
+        protocols.add(conv.get('protocol', eval_scoring.PROTOCOL))
         conv_count += 1
         qa_count += len(qas)
         add_count += sum(1 for _ in eval_data.ingestion_chunks(
             conv, args.chunk_messages, args.chunk_words))
     total_steps = add_count + 2 * qa_count
-    print(f"protocol={eval_scoring.PROTOCOL} fake={config.FAKE} "
+    print(f"protocol={','.join(sorted(protocols))} fake={config.FAKE} "
           f"choice_policy={config.EVAL_CHOICE_POLICY} "
           f"conversations={conv_count} add_chunks={add_count} qa={qa_count}")
     if args.inspect:
@@ -313,7 +315,7 @@ async def main():
                               "predicted_answer": pred,
                               "score": score, "scoring": qa.get("scoring", "binary"),
                               "category": qa.get("category", "unknown"),
-                              "protocol": eval_scoring.PROTOCOL, "fake": config.FAKE,
+                              "protocol": conv.get("protocol", eval_scoring.PROTOCOL), "fake": config.FAKE,
                               "model": config.LLM_MODEL, 'versions': run_metadata.versions(), **diagnostics}
                     output.write(json.dumps(result, ensure_ascii=False) + "\n")
                     output.flush()

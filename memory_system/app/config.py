@@ -145,8 +145,13 @@ CE_MAX_REQUEST_BYTES = max(1024, int(os.environ.get('AML_CE_MAX_REQUEST_BYTES', 
 CASCADE_COARSE_LIMIT = max(1, int(os.environ.get('AML_CASCADE_COARSE_LIMIT', '50')))
 CASCADE_FINE_LIMIT = max(1, int(os.environ.get('AML_CASCADE_FINE_LIMIT', '16')))
 CASCADE_LLM_LIMIT = max(1, int(os.environ.get('AML_CASCADE_LLM_LIMIT', '16')))
-# Inference remains an opt-in controlled-validation experiment.
-CHOICE_ALLOW_INFERRED = os.environ.get('AML_CHOICE_ALLOW_INFERRED', '0') == '1'
+# Interest-level premises anchored only by the user's own topical turns are
+# admitted as a labelled `inferred` tier; the selection judge weighs their
+# question relevance against verified-but-unrelated traits.
+CHOICE_ALLOW_INFERRED = os.environ.get('AML_CHOICE_ALLOW_INFERRED', '1') == '1'
+# Offer the user source behind each option's retrieval-covering memory as an
+# extra witness hint when the semantic witness pass found no user source.
+CHOICE_COVERAGE_WITNESSES = os.environ.get('AML_CHOICE_COVERAGE_WITNESSES', '1') == '1'
 CHOICE_BOUNDED_SUPPORT_SPANS = os.environ.get('AML_CHOICE_BOUNDED_SUPPORT_SPANS', '0') == '1'
 CHOICE_TYPOGRAPHIC_QUOTES = os.environ.get('AML_CHOICE_TYPOGRAPHIC_QUOTES', '0') == '1'
 CHOICE_REPAIR_CONTEXT = os.environ.get('AML_CHOICE_REPAIR_CONTEXT', '0') == '1'
@@ -155,6 +160,22 @@ CHOICE_ADAPTIVE_INTEREST_RETRY = os.environ.get('AML_CHOICE_ADAPTIVE_INTEREST_RE
 # A failed entailment remains rejected by default; contextual re-review is opt-in.
 CHOICE_ENTAILMENT_REVIEW = os.environ.get('AML_CHOICE_ENTAILMENT_REVIEW', '0') == '1'
 CHOICE_SEMANTIC_WITNESSES = os.environ.get('AML_CHOICE_SEMANTIC_WITNESSES', '1') == '1'
+CHOICE_WITNESS_SPAN_REFS = os.environ.get('AML_CHOICE_WITNESS_SPAN_REFS', '0') == '1'
+CHOICE_INDEPENDENT_SELECTION_REVIEW = os.environ.get('AML_CHOICE_INDEPENDENT_SELECTION_REVIEW', '0') == '1'
+CHOICE_TYPED_SCOPE_CONSISTENCY = os.environ.get('AML_CHOICE_TYPED_SCOPE_CONSISTENCY', '0') == '1'
+CHOICE_SCOPE_ROLES = os.environ.get('AML_CHOICE_SCOPE_ROLES', '0') == '1'
+CHOICE_DIRECT_REQUEST_SELECTION = os.environ.get('AML_CHOICE_DIRECT_REQUEST_SELECTION', '0') == '1'
+CHOICE_STRUCTURED_REQUEST_SELECTION = os.environ.get('AML_CHOICE_STRUCTURED_REQUEST_SELECTION', '0') == '1'
+CHOICE_QUERY_CONTEXT = os.environ.get('AML_CHOICE_QUERY_CONTEXT', '0') == '1'
+CHOICE_PRESERVE_REPAIR_PREMISES = os.environ.get('AML_CHOICE_PRESERVE_REPAIR_PREMISES', '0') == '1'
+CHOICE_CURRENT_QUESTION_SOURCE = os.environ.get('AML_CHOICE_CURRENT_QUESTION_SOURCE', '0') == '1'
+CHOICE_SOURCE_SCOPE = os.environ.get('AML_CHOICE_SOURCE_SCOPE', '0') == '1'
+# Candidate: avoid recommendation text distracting premise-to-source matching.
+CHOICE_RECOVERY_CLAIM_ONLY = os.environ.get('AML_CHOICE_RECOVERY_CLAIM_ONLY', '0') == '1'
+CHOICE_RECOVERY_BEFORE_SCOPE = os.environ.get('AML_CHOICE_RECOVERY_BEFORE_SCOPE', '0') == '1'
+CHOICE_CONSTRAINT_CONTENT_TERMS = os.environ.get('AML_CHOICE_CONSTRAINT_CONTENT_TERMS', '0') == '1'
+CHOICE_CONSTRAINT_TERM_FORMS = os.environ.get('AML_CHOICE_CONSTRAINT_TERM_FORMS', '0') == '1'
+CHOICE_VERIFICATION_SCOPE = os.environ.get('AML_CHOICE_VERIFICATION_SCOPE', '0') == '1'
 GRAPH_FUSION_ENABLED = os.environ.get('AML_GRAPH_FUSION_ENABLED', '1') == '1'
 GRAPH_FUSION_MAX_CANDIDATES = max(16, int(os.environ.get('AML_GRAPH_FUSION_MAX_CANDIDATES', '256')))
 LLM_TEMPERATURE = 0.0
@@ -213,6 +234,7 @@ RERANK_MAX_CANDIDATES = max(
 # Bound each provider request independently of the total candidate pool.
 RERANK_BATCH_MAX_CANDIDATES = max(1, int(os.environ.get("AML_RERANK_BATCH_MAX_CANDIDATES", "24")))
 RERANK_MAX_PROMPT_BYTES = max(1024, int(os.environ.get("AML_RERANK_MAX_PROMPT_BYTES", "24000")))
+LISTWISE_SHARED_SOURCES = os.environ.get('AML_LISTWISE_SHARED_SOURCES', '0') == '1'
 RERANK_CONCURRENCY = max(1, int(os.environ.get("AML_RERANK_CONCURRENCY", "2")))
 RERANK_DEADLINE_SECONDS = max(1.0, float(os.environ.get("AML_RERANK_DEADLINE_SECONDS", "45")))
 RERANK_REPAIR_MAX_CALLS = max(0, int(os.environ.get("AML_RERANK_REPAIR_MAX_CALLS", "1")))
@@ -272,6 +294,9 @@ DOCUMENT_LONG_CHARS = max(DOCUMENT_MIN_CHARS, int(os.environ.get("AML_DOCUMENT_L
 DOCUMENT_ITEM_MAX_BYTES = max(2048, int(os.environ.get("AML_DOCUMENT_ITEM_MAX_BYTES", "16000")))
 # Experimental current-segment references; ordinary extraction stays the default.
 EXTRACT_SPAN_REFS = os.environ.get("AML_EXTRACT_SPAN_REFS", "0") == "1"
+EXTRACT_TRIPLE_ISOLATION = os.environ.get("AML_EXTRACT_TRIPLE_ISOLATION", "0") == "1"
+# Per Add: at most 4 uncovered exchanges, 8 provider calls, 64k tokens, 60 seconds.
+EXTRACT_COVERAGE_RETRY = os.environ.get("AML_EXTRACT_COVERAGE_RETRY", "0") == "1"
 # §3.4 novelty gate: near-identical facts skip the governance LLM call
 NOVELTY_DUP_THRESHOLD = float(os.environ.get("AML_NOVELTY_DUP_THRESHOLD", "0.97"))
 SURPRISE_MOMENTUM = 0.7
@@ -310,6 +335,7 @@ SUMMARY_ROUTE = os.environ.get("AML_SUMMARY_ROUTE", "0") == "1"
 # P0: interest consolidation after each Add promotes repeated "user asked
 # about X" signals into first-person `preference` AMUs.
 PROFILE_CONSOLIDATION_ENABLED = os.environ.get("AML_PROFILE_CONSOLIDATION", "1") == "1"
+PROFILE_REQUIRE_USER_SUPPORT = os.environ.get("AML_PROFILE_REQUIRE_USER_SUPPORT", "0") == "1"
 # Deterministic ingestion of a "[system] ... persona: {json}" opening message
 # into atomic profile/preference memories tagged source_role=persona.
 PERSONA_SOURCE_EXTRACTION = os.environ.get("AML_PERSONA_EXTRACTION", "1") == "1"
@@ -376,3 +402,18 @@ ANSWER_CONTEXT_MAX_CHARS = max(
     256, int(os.environ.get("AML_ANSWER_CONTEXT_MAX_CHARS", "24000")))
 ANSWER_CONTEXT_ITEM_MAX_CHARS = max(
     256, int(os.environ.get("AML_ANSWER_CONTEXT_ITEM_MAX_CHARS", "2400")))
+
+CHOICE_GROUPED_ENTAILMENT = os.environ.get('AML_CHOICE_GROUPED_ENTAILMENT', '0') == '1'
+
+CHOICE_REVIEW_REQUEST_TERMS = os.environ.get('AML_CHOICE_REVIEW_REQUEST_TERMS', '0') == '1'
+CHOICE_CONDITIONAL_LIST_SCOPE = os.environ.get('AML_CHOICE_CONDITIONAL_LIST_SCOPE', '1') == '1'
+CHOICE_TEMPLATE_PATH_SCOPE = os.environ.get('AML_CHOICE_TEMPLATE_PATH_SCOPE', '0') == '1'
+CHOICE_EXISTING_STATE_GUARD = os.environ.get('AML_CHOICE_EXISTING_STATE_GUARD', '0') == '1'
+CHOICE_REPAIR_VALID_CLAIMS = os.environ.get('AML_CHOICE_REPAIR_VALID_CLAIMS', '0') == '1'
+CHOICE_CITED_SCOPE = os.environ.get('AML_CHOICE_CITED_SCOPE', '0') == '1'
+
+# Experimental evidence-note comparison only when all eligible options are generic.
+CHOICE_SOURCE_NOTES_SELECTION = os.environ.get('AML_CHOICE_SOURCE_NOTES_SELECTION', '0') == '1'
+
+# Experimental full reader replacement; no semantic eligibility guarantees.
+CHOICE_DIRECT_CATALOG_READER = os.environ.get("AML_CHOICE_DIRECT_CATALOG_READER", "0") == "1"

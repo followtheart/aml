@@ -1,6 +1,7 @@
 """Conservative option-text normalization; never manufacture a personal premise."""
 from difflib import SequenceMatcher
 import re
+from . import config
 
 
 _WORDS = re.compile(r"\w+(?:['’]\w+)?", re.UNICODE)
@@ -92,9 +93,28 @@ def canonical_span(claim, option):
     return (matches[0], True) if len(matches) == 1 else (None, False)
 
 
+_EXISTING_PERSONAL_STATE = re.compile(
+    r'\byour\s+(?:existing|established|long[- ]standing)\s+'
+    r'(?:[\w’\x27-]+\s+){0,6}(?:habit|practice|membership|subscription|account|collection)\b', re.I)
+_UNCERTAIN_STATE = re.compile(r'\b(?:if|unless|imagine|suppose|hypothetical|fictional)\b', re.I)
+
+
+def asserted_existing_personal_state(claim, option):
+    """Retain an explicit presupposition, without granting evidence support."""
+    occurrences = list(re.finditer(re.escape(claim), option, re.I)) if claim else []
+    if len(occurrences) != 1 or not _EXISTING_PERSONAL_STATE.search(claim):
+        return False
+    match = occurrences[0]
+    start = max(option.rfind(mark, 0, match.start()) for mark in ('. ', ';', '\n'))
+    return not _UNCERTAIN_STATE.search(option[start + 1:match.end()])
+
+
 def is_suggestion(claim, option):
     match = re.search(re.escape(claim), option, re.I)
     if not match:
+        return False
+    if (config.CHOICE_EXISTING_STATE_GUARD
+            and asserted_existing_personal_state(claim, option)):
         return False
     # Universal background wording carries no distinguishing personal fact.
     if _BACKGROUND.fullmatch(claim.strip()) and _ADVICE.search(option[:match.end()]):

@@ -9,6 +9,22 @@ import json
 from pathlib import Path
 
 
+def indexed_probes(rows, results):
+    index = {}
+    for row in rows:
+        conversation = row.get('conversation_id')
+        if conversation is None:
+            matches = {r['conversation_id'] for r in results if r['qa_id'] == row['qa_id']}
+            if len(matches) != 1:
+                raise ValueError(f"Legacy audit has ambiguous question identity: {row['qa_id']}")
+            conversation = matches.pop()
+        key = conversation, row['qa_id']
+        if key in index:
+            raise ValueError(f'Duplicate audit question identity: {key}')
+        index[key] = row['probes']
+    return index
+
+
 def support_failure_detail(result, gold):
     """Keep the terminal per-option failure, including dropped citation causes."""
     raw = result.get('answer_support_validation', {}).get('errors', {}).get(gold)
@@ -36,22 +52,24 @@ def main(args):
     questions = {(d['conversation_id'], q['id']): q
         for d in map(json.loads, prepared_path.read_text().splitlines()) for q in d['qa']}
     funnel = json.loads((args.run / 'funnel/audit.json').read_text())
-    probes = {r['qa_id']: r['probes'] for r in funnel['rows']}
+    probes = indexed_probes(funnel['rows'], results)
     rows = []
     for r in results:
         q = questions[r['conversation_id'], r['qa_id']]
+        ps = probes[r['conversation_id'], r['qa_id']]
         assert len(q['gold_labels']) == 1
         gold = q['gold_labels'][0]
         assert r['score'] == float(r['prediction'] == gold)
         e = next((e for e in r.get('choice_alignment', []) if e['letter'] == gold), None)
         if e is None:
             detail, codes = support_failure_detail(r, gold)
-            rows.append(dict(qa_id=r['qa_id'], gold=gold, prediction=r['prediction'],
-                gate='answer_error', related_probe_count=len(probes[r['qa_id']]),
-                visible_related_probes=sum(bool(x['visible_source_ids']) for x in probes[r['qa_id']]),
-                source_visibility='related_missing' if probes[r['qa_id']] and not any(
-                    x['visible_source_ids'] for x in probes[r['qa_id']]) else
-                    'related_visible' if probes[r['qa_id']] else 'not_probed',
+            rows.append(dict(conversation_id=r['conversation_id'], qa_id=r['qa_id'],
+                gold=gold, prediction=r['prediction'],
+                gate='answer_error', related_probe_count=len(ps),
+                visible_related_probes=sum(bool(x['visible_source_ids']) for x in ps),
+                source_visibility='related_missing' if ps and not any(
+                    x['visible_source_ids'] for x in ps) else
+                    'related_visible' if ps else 'not_probed',
                 primary_text=None, primary_reason=None, primary_type=None,
                 primary_proposed_status=None, primary_status=None, primary_verified=None,
                 whole_option_verified=None, primary_source_ids=[], support_failure_codes=codes,
@@ -81,11 +99,11 @@ def main(args):
             gate = 'recovery_blocked_by_whole_option'
         else:
             gate = 'other_or_multiple_gates'
-        ps = probes[r['qa_id']]
         failure_detail, failure_codes = support_failure_detail(r, gold)
         visible = sum(bool(p['visible_source_ids']) for p in ps)
         visibility = 'related_visible' if visible else 'related_missing' if ps else 'not_probed'
-        rows.append(dict(qa_id=r['qa_id'], gold=gold, prediction=r['prediction'], gate=gate,
+        rows.append(dict(conversation_id=r['conversation_id'], qa_id=r['qa_id'],
+            gold=gold, prediction=r['prediction'], gate=gate,
             related_probe_count=len(ps), visible_related_probes=visible, source_visibility=visibility,
             primary_text=(primary or {}).get('text'), primary_reason=(primary or {}).get('reason'),
             primary_type=(primary or {}).get('premise_type'),
@@ -95,7 +113,7 @@ def main(args):
             primary_source_ids=sorted({c['source_id'] for c in refs}),
             support_failure_codes=failure_codes, support_failure_detail=failure_detail,
             gold_status=e['status'], gold_validation=e.get('validation_status')))
-    assert len({r['qa_id'] for r in rows}) == len(rows) == len(probes)
+    assert len({(r['conversation_id'], r['qa_id']) for r in rows}) == len(rows) == len(probes)
     artifact = dict(result_sha256=hashlib.sha256(raw).hexdigest(),
         caveat='Observed exclusion/selection gate, not causal proof. Related passages need not entail gold.',
         counts=dict(Counter(r['gate'] for r in rows)),

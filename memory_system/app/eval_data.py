@@ -9,7 +9,7 @@ from itertools import islice
 from pathlib import Path
 
 DATASETS = ("normalized", "locomo-refined", "longmemeval-s",
-            "longmemeval-refined", "scriptmem", "clbench", "personamem-v2", "beam")
+            "longmemeval-refined", "scriptmem", "clbench", "personamem-v2", "personamem-v3", "perma", "beam")
 CHOICE_TYPES = {"single_choice", "multi_select", "ordering"}
 
 
@@ -312,7 +312,11 @@ def persona_groups(path, history_dir, size):
 
 def validate(conv):
     required_text(conv, "conversation_id")
-    if not isinstance(conv.get("sessions"), list) or not conv["sessions"]:
+    perma_no_memory = (conv.get('dataset') == 'perma' and conv.get('protocol') == 'perma-mcq-local-v1'
+                      and conv.get('checkpoint') == 1 and conv.get('history_policy') == 'no_memory')
+    if perma_no_memory and (conv.get('sessions') != [] or any(q.get('checkpoint') != 1 for q in conv.get('qa', []))):
+        raise ValueError('PERMA type 1 must have no ingested history')
+    if not isinstance(conv.get("sessions"), list) or (not conv["sessions"] and not perma_no_memory):
         raise ValueError("Conversation requires nonempty sessions")
     ids = conv.get("session_ids")
     if ids is not None and (len(ids) != len(conv["sessions"]) or len(set(map(str, ids))) != len(ids)):
@@ -357,7 +361,13 @@ def validate(conv):
 
 
 def convert_records(path, dataset, history_dir=None, size="32k"):
-    if dataset == "personamem-v2":
+    if dataset == "perma":
+        from .perma import conversations
+        records = conversations(path)
+    elif dataset == "personamem-v3":
+        from .personamem_v3 import conversations
+        records = conversations(path)
+    elif dataset == "personamem-v2":
         records = persona_groups(path, history_dir, size)
     else:
         def converted():

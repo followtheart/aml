@@ -2,7 +2,7 @@
 import json
 import re
 
-from . import answer_choice, answer_context, config, llm, prompts
+from . import answer_choice, answer_context, config, direct_catalog_reader, llm, prompts
 
 PROTOCOL = "local-text-proxy-v1"
 REFINED_POLICY = "locomo-refined-local-v1"
@@ -127,10 +127,15 @@ def aggregate_rubrics(payload, count, mode):
 
 
 def _local_choice_pipeline(qa):
-    """The verified answer_choice pipeline only exists locally; the leaderboard
-    Answer model sees a plain prompt over the packet. Options must be present."""
+    """The verified local choice pipelines (answer_choice or the direct catalog
+    reader) only exist locally; the leaderboard Answer model sees a plain prompt
+    over the packet. Options must be present."""
     return (qa.get("scoring") == "choice" and qa.get("qa_type") == "single_choice"
             and bool(qa.get("options")) and config.EVAL_CHOICE_POLICY == "local")
+
+
+def _local_choice_reader():
+    return direct_catalog_reader if config.CHOICE_DIRECT_CATALOG_READER else answer_choice
 
 
 async def evaluate(qa, memories):
@@ -138,12 +143,12 @@ async def evaluate(qa, memories):
     scoring = qa.get("scoring", "binary")
     diagnostics = {}
     if scoring == "choice":
-        diagnostics["answer_policy"] = (answer_choice.VERSION if _local_choice_pipeline(qa)
+        diagnostics["answer_policy"] = (_local_choice_reader().VERSION if _local_choice_pipeline(qa)
                                         else f"platform_prompt:{config.EVAL_CHOICE_POLICY}"
                                         if qa.get("qa_type") == "single_choice" else "direct_evidence_v2")
     try:
         if _local_choice_pipeline(qa):
-            pred = (await answer_choice.answer(qa, memories, diagnostics)).strip()
+            pred = (await _local_choice_reader().answer(qa, memories, diagnostics)).strip()
         else:
             pred = (await llm.complete(answer_prompt(qa, memories), stage="eval.answer")).strip()
     except Exception as exc:

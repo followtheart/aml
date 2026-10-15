@@ -37,14 +37,28 @@ class EvidenceTests(unittest.IsolatedAsyncioTestCase):
                     evidence=[dict(message_index=0, quote=text)], time_expression=None,
                     triples=[dict(subject='Alice', relation='lives_in', object=value)])
 
-    async def test_wrong_source_index_preserves_episode(self):
+    async def test_wrong_source_index_is_repaired_to_the_unique_quoting_message(self):
         req = self.req('Where does Alice live?')
         req.messages.append(schemas.Message(role='assistant', content='Alice lives in Paris.'))
         with patch.object(llm, 'complete_json', AsyncMock(return_value={'facts': [self.fact()]})):
             result = await add._extract(self.st, req)
+        fact = result['facts'][0]
+        self.assertEqual(fact['type'], 'profile')
+        self.assertEqual(fact['_sources'], [1])
+        self.assertEqual(fact['evidence'][0]['message_index'], 1)
+        # Attribution follows the repaired source: an assistant quote is inferred.
+        self.assertEqual(fact['epistemic_status'], 'inferred')
+
+    async def test_unlocatable_quote_preserves_episode(self):
+        req = self.req('Where does Alice live?')
+        req.messages.append(schemas.Message(role='assistant', content='Alice lives in Paris.'))
+        fact = self.fact()
+        fact['evidence'][0]['quote'] = 'Alice lives in Rome.'
+        with patch.object(llm, 'complete_json', AsyncMock(return_value={'facts': [fact]})):
+            result = await add._extract(self.st, req)
         self.assertEqual(result['facts'][0]['type'], 'episode')
         self.assertEqual(result['facts'][0]['sensitivity'], 'normal')
-        self.assertIn('Alice lives in Paris.', result['facts'][0]['content'])
+        self.assertIn('Where does Alice live?', result['facts'][0]['content'])
         amu_id = await add._persist_fact(
             self.st, req, result['facts'][0], (await embed(['fallback episode']))[0])
         self.assertEqual(

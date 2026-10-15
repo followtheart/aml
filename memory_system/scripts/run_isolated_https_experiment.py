@@ -115,11 +115,12 @@ def main():
             if results.exists() and results.stat().st_size:
                 with open(env['AML_EVAL_DATA']) as stream:
                     dataset = json.loads(next(line for line in stream if line.strip())).get('dataset')
-                audit_script = 'audit_personamem_v3_https.py' if dataset == 'personamem-v3' else 'audit_https_funnel.py'
+                audit_script = 'audit_temporal_https.py' if dataset in ('personamem-v3', 'perma') else 'audit_https_funnel.py'
+                audit_args = ['--dataset', dataset] if dataset in ('personamem-v3', 'perma') else []
                 audit = subprocess.run([sys.executable, str(ROOT / 'scripts' / audit_script),
                                         '--run', str(run), '--prepared', env['AML_EVAL_DATA'],
                                         '--memory-log', env['AML_MEMORY_DEBUG_LOG'],
-                                        '--search-log', env['AML_SEARCH_DEBUG_LOG']], cwd=ROOT)
+                                        '--search-log', env['AML_SEARCH_DEBUG_LOG'], *audit_args], cwd=ROOT)
                 manifest['audit_exit_code'] = audit.returncode
                 save_manifest()
                 if audit.returncode:

@@ -417,6 +417,11 @@ class FakeLLM:
             return json.dumps({'decisions': [dict(pair_id=p['pair_id'], violates=False) for p in pairs]})
         if 'independent premise entailment module' in prompt:
             checks = json.loads(prompt.split('<checks>\n', 1)[1].split('\n</checks>', 1)[0])
+            if 'no_personal_premise' in prompt:
+                # Typed schema used by the current reader; fake mode only tests plumbing.
+                return json.dumps({'checks': [dict(claim_id=c['claim_id'], verdict=(
+                    'no_personal_premise' if c.get('claimed_kind') == 'generic' else 'unsupported_personal'))
+                    for c in checks]})
             return json.dumps({'checks': [dict(claim_id=c['claim_id'], entailed=c.get('claimed_kind') == 'generic') for c in checks]})
         if 'verified choice selection module' in prompt:
             section = prompt.split('Eligible options:\n', 1)[1].split('\nVerified judgments:', 1)[0]

@@ -14,6 +14,7 @@ from app.eval_data import read_records, safe_history_path
 
 HF = "https://huggingface.co/datasets/"
 SOURCES = {
+    "perma": {"source": "https://huggingface.co/datasets/ustclsc/PERMA", "license": "Apache-2.0"},
     "locomo-refined": {
         "url": "https://raw.githubusercontent.com/mem-eval-suite/LoCoMo_refined/main/data/raw/locomo_refined.json",
         "file": "locomo-refined.json", "license": "CC-BY-NC-4.0",
@@ -89,6 +90,9 @@ def main():
     p.add_argument("--workers", type=int, default=4)
     p.add_argument("--persona-v3-users", nargs="+", default=["1"],
                    help="Pinned v3 user IDs; default 1 (not the full dataset)")
+    p.add_argument('--perma-users', nargs='+', default=['user108'])
+    p.add_argument('--perma-variant', choices=['clean', 'noisy', 'style'], default='clean')
+    p.add_argument('--perma-domains', choices=['single', 'multi', 'both'], default='both')
     args = p.parse_args()
     if args.persona_convs < 0 or not 1 <= args.workers <= 16:
         p.error("Invalid history limit or workers (1-16)")
@@ -96,7 +100,10 @@ def main():
     requested = list(SOURCES) if "all" in args.datasets else list(dict.fromkeys(args.datasets))
     for name in requested:
         source = SOURCES[name]
-        if name == "personamem-v3":
+        if name == 'perma':
+            from download_perma import download_users
+            download_users(args.perma_users, root / 'perma', args.perma_variant, args.perma_domains, args.workers)
+        elif name == "personamem-v3":
             from download_personamem_v3 import download_users
             download_users(args.persona_v3_users, root / "personamem-v3")
         elif name == "scriptmem":

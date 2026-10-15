@@ -871,3 +871,42 @@ AML_EVAL_CONVS=1 AML_EVAL_LIMIT=1 AML_EVAL_RESULT_NAME=personamem-v3.jsonl \
 评分协议为 `personamem-v3-chatbot-text-proxy-v1`：当前模型按“回答问题且不虚构用户事实”和“恰当体现指定偏好”两个维度评分，单项取0/0.5/1，再求均值。参考示例不要求逐字匹配。它不是官方 v3 多维裁判得分，也不能与 v2 选择题准确率直接比较。`probe_personamem_v3_no_memory.py` 可对相同题目运行无记忆 Answer/Judge 对照；单题结果仅用于验证链路，不能证明系统有效性。
 
 接入验证结果：10项 v3 边界/审计测试及34项现有数据集测试通过。`runs/personamem-v3-smoke-user1` 首题真实 HTTPS 运行完成，client/audit 均退出0；199条源消息、11个批次逐条审计一致。记忆系统与无记忆对照的两个维度分别均为 `[1, 0]`，均值均为0.50。首题未观察到个性化评分提升；不能据此推断完整子集效果。完整记录在 `runs/personamem-v3-integration-review.json`。
+
+### PERMA：带检查点的个性化记忆选择题（2026-10-12）
+
+来源：[ustclsc/PERMA](https://huggingface.co/datasets/ustclsc/PERMA)，固定数据 revision `440e64e4fb8baec6f7ad10c1de135505f93e7cb1`；格式和评测规则参考 [官方代码](https://github.com/PolarisLiu1/PERMA) revision `d678640987170e8cfbe9260b311e0493b9cd2c31`。数据卡标注 Apache-2.0。下载器保留逐文件 SHA-256 收据，转换时重新验证历史和题目元数据。
+
+当前接入 MCQ 协议，支持 `single` / `multi` / `both` 领域及 `clean` / `noisy` / `style` 历史。默认只下载 `user108`：114道八选一题，含单领域75题、多领域39题；按检查点分为类型1的27题、类型2的27题、类型3的60题。已在本机准备三种历史版本，每种114条评测记录，它们是同一批题的不同历史条件，不能视为342道独立题。交互式多轮代理、工具执行和其成功率指标尚未接入。
+
+官方 `evaluation.py` 在类型1作答时明确使用 `No memory found.`：本适配器因此保留空历史、不构造占位消息，也不摄入该行附带的上下文。类型2/3仅摄入该任务提供的检查点 `context`，每题使用独立用户命名空间；不混入其他检查点或其他用户。`preferences`、`affinity_links`、`user_use_topic_dialog`、画像、任务目标和答案不作为记忆来源，Search/Answer 不接收正确标签。
+
+日期处理按上游精度：题目日期只有天，检查点允许包含当天历史；拒绝晚于题目日期的对话。Morning/Afternoon/Evening 按上游约定映射为06:00/15:00/19:00，以 UTC 毫秒适配本地接口，原始日期字段同时保留。这些小时是规范化约定，并非采集到的精确时刻。八个选项完整保留，按原始顺序从 `A:` 转为本地 `A.` 表示，不截断或改写答案正文。
+
+```bash
+# 默认 user108、干净历史、单领域和多领域
+.venv/bin/python scripts/download_datasets.py perma --perma-users user108
+.venv/bin/python scripts/prepare_dataset.py --dataset perma \
+  --input data/raw/perma/index.json --output data/prepared/perma-user108-clean.jsonl
+
+# 单独保存其他历史条件，避免覆盖默认下载清单
+.venv/bin/python scripts/download_perma.py --users user108 --variant noisy \
+  --output-dir data/raw/perma-noisy
+.venv/bin/python scripts/prepare_dataset.py --dataset perma \
+  --input data/raw/perma-noisy/index.json --output data/prepared/perma-user108-noisy.jsonl
+# 将 noisy 改为 style 可准备风格化历史。
+
+# 全量离线预检，不调用模型
+.venv/bin/python scripts/https_eval.py --data data/prepared/perma-user108-clean.jsonl \
+  --convs 0 --limit 0 --inspect
+.venv/bin/python scripts/selftest_perma.py
+
+# 真实 HTTPS 小批次：前两题覆盖无记忆和有记忆检查点
+AML_EVAL_DATA=data/prepared/perma-user108-clean.jsonl \
+AML_EVAL_CONVS=2 AML_EVAL_LIMIT=2 AML_EVAL_RESULT_NAME=perma.jsonl \
+.venv/bin/python scripts/run_isolated_https_experiment.py \
+  --run-dir runs/perma-https-example --port 18444 -- --no-progress
+```
+
+`--convs` 在此表示独立检查点快照。完整干净版本含6325个入库批次；不建议把114题默认当作低成本冒烟测试。下载其他用户可使用 `--users user109` 等官方用户ID。当前尚未运行真实付费模型的 PERMA 成绩实验，离线 fake 流程的分数没有质量意义。
+
+`audit_temporal_https.py --dataset perma` 验证原文入库、问题全集及顺序、时间界限、结果标签评分和搜索日志，并按领域/检查点汇总。原 PersonaMem-v3 审计入口保留兼容性。PERMA 使用确切标签匹配的0/1分数，但本地检索、前提验证和选择策略不同于官方基线，因此协议标为 `perma-mcq-local-v1`，不声称是官方排行榜结果；它也不能直接和 PersonaMem-v3 的双维度开放回答评分比较。

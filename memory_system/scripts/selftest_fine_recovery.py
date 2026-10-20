@@ -16,7 +16,7 @@ from selftest_graph_cascade import documents_in, permutation
 
 class RecoveryTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
-        settings = patch.multiple(config, CASCADE_COARSE_LIMIT=50, CASCADE_FINE_LIMIT=12,
+        settings = patch.multiple(config, LISTWISE_KEYED_OUTPUT=False, CASCADE_COARSE_LIMIT=50, CASCADE_FINE_LIMIT=12,
             CASCADE_LLM_LIMIT=10, CE_BATCH_SIZE=8, CE_MAX_REQUEST_BYTES=90000,
             CE_MAX_DOCUMENT_BYTES=4000, CE_TIMEOUT_SECONDS=1., CE_DEADLINE_SECONDS=10.,
             CE_RETRY_BATCHES=2, CE_RETRY_BATCH_SIZE=4, RERANK_CONCURRENCY=2,
@@ -33,6 +33,33 @@ class RecoveryTests(unittest.IsolatedAsyncioTestCase):
         if limits:
             limits.before_call()
         return permutation(len(documents_in(prompt)))
+
+    async def test_novel_unscored_evidence_can_reach_listwise_beyond_rescue_seat(self):
+        from selftest_fine_selection import candidate, source
+        rows = [candidate(f'g{i}', .9-i*.01,
+                          [source(f'g{i}', f'General background {i}.')]) for i in range(4)]
+        rows += [candidate(f'b{i}', .2-i*.01,
+                           [source(f'b{i}', f'I ask about stablecoins and digital currencies, detail {i}.')])
+                 for i in range(3)]
+        async def ce(query, docs, **kwargs):
+            if any('stablecoins' in doc for doc in docs):
+                raise TimeoutError('Unscored evidence must not become a negative judgment')
+            return [.8] * len(docs)
+        plan = {'_coverage_requirements': [
+            dict(id='question', text='emerging cryptocurrency markets')]}
+        with patch.multiple(config, FINE_EVIDENCE_ADAPTIVE=True, FINE_EXTRA_LIMIT=2,
+                            CASCADE_FINE_LIMIT=4, CASCADE_LLM_LIMIT=4, CE_BATCH_SIZE=1,
+                            CE_RETRY_BATCHES=0), \
+                patch.object(cross_encoder, 'rerank', side_effect=ce), \
+                patch.object(llm, 'complete_json', side_effect=self.identity):
+            result = await cascade.rank(schemas.SearchRequest(user_id='u', query='cryptocurrency markets'),
+                                        plan, rows)
+        self.assertEqual(plan['_cascade']['cross_encoder']['status'], 'partial')
+        self.assertTrue({'b0', 'b1', 'b2'} <= set(plan['_cascade']['listwise']['candidate_ids']))
+        self.assertLessEqual(len(plan['_cascade']['listwise']['candidate_ids']), 6)
+        added = plan['_cascade']['fine']['selection']['adaptive']['additions']
+        self.assertEqual(sum(a['unscored'] for a in added), 2)
+        self.assertTrue(all(not c.get('_supported_coverage_ids') for c in result))
 
     async def test_timeout_retries_only_failed_documents_in_smaller_bounded_batches(self):
         calls, failed = [], set()
@@ -57,6 +84,23 @@ class RecoveryTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(plan['_cascade']['cross_encoder']['status'], 'ok')
         self.assertEqual(limits.reserved_calls, 0)
         self.assertEqual(limits.reserved_tokens, 0)
+
+    async def test_remote_protocol_failure_uses_bounded_transport_retry(self):
+        calls = []
+        async def ce(query, docs, **kwargs):
+            budget.current.get().before_call()
+            calls.append(kwargs['stage'])
+            if len(calls) == 1:
+                raise httpx.RemoteProtocolError('peer disconnected')
+            return [.7] * len(docs)
+        plan = {}
+        with budget.scope(seconds=30, calls=5, tokens=64000) as limits, \
+                patch.object(cross_encoder, 'rerank', side_effect=ce), \
+                patch.object(llm, 'complete_json', side_effect=self.identity):
+            await cascade.rank(schemas.SearchRequest(user_id='u', query='Evidence'), plan, self.rows(4))
+        self.assertEqual(calls, ['search.cross_encoder.batch_1', 'search.cross_encoder.retry_1'])
+        self.assertEqual(plan['_cascade']['cross_encoder']['status'], 'ok')
+        self.assertEqual((limits.reserved_calls, limits.reserved_tokens), (0, 0))
 
     async def test_retry_cannot_consume_last_reserved_listwise_call(self):
         calls = []

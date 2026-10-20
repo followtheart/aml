@@ -12,6 +12,7 @@ import re
 import sys
 import time
 import unittest
+import httpx
 from unittest.mock import patch
 
 os.environ['AML_FAKE'] = '1'
@@ -56,8 +57,26 @@ def selected_ids(rows):
 
 
 class ListwiseRecoveryTests(unittest.IsolatedAsyncioTestCase):
+    def test_validation_diagnostics_distinguish_contract_failures(self):
+        valid = dict(ranking=[0, 1, 2, 3], irrelevant=[], groups=[])
+        cases = [
+            (None, 'response_not_object'),
+            (dict(valid, ranking=[0, 0, 2, 3]), 'ranking_invalid_indices'),
+            (dict(valid, ranking=[0, 1, 2]), 'ranking_incomplete'),
+            (dict(valid, irrelevant=[4]), 'irrelevant_invalid_indices'),
+            (dict(valid, groups=None), 'groups_not_array'),
+            (dict(valid, groups=[[0]]), 'group_invalid_indices_or_size'),
+            (dict(valid, irrelevant=[1], groups=[[0, 1]]), 'group_contains_irrelevant'),
+            (dict(valid, groups=[[0, 1], [1, 2]]), 'groups_overlap'),
+        ]
+        for payload, code in cases:
+            with self.subTest(code=code), self.assertRaises(ValueError) as caught:
+                cascade.validate(payload, 4)
+            self.assertEqual(caught.exception.validation_code, code)
+        self.assertEqual(cascade.validate(valid, 4), ([0, 1, 2, 3], set(), []))
+
     def setUp(self):
-        settings = patch.multiple(config, CASCADE_COARSE_LIMIT=50, CASCADE_FINE_LIMIT=12,
+        settings = patch.multiple(config, LISTWISE_SPAN_REFS=False, LISTWISE_KEYED_OUTPUT=False, RERANK_REPAIR_MAX_CALLS=1, CASCADE_COARSE_LIMIT=50, CASCADE_FINE_LIMIT=12,
             CASCADE_LLM_LIMIT=10, CE_BATCH_SIZE=8, CE_MAX_REQUEST_BYTES=90000,
             CE_MAX_DOCUMENT_BYTES=12000, CE_TIMEOUT_SECONDS=1., CE_DEADLINE_SECONDS=10.,
             RERANK_CONCURRENCY=2, RERANK_MAX_PROMPT_BYTES=24000, create=True)
@@ -69,8 +88,11 @@ class ListwiseRecoveryTests(unittest.IsolatedAsyncioTestCase):
 
     async def run_case(self, rows, decisions=(), *, deleted=None, calls=8,
                        primary=None, recovery_error=None, after_primary=None,
-                       query=QUESTION, options=None, ce_score=.95):
+                       query=QUESTION, options=None, ce_score=.95, requirements=(),
+                       primary_sequence=None):
         self.stages, self.prompts, self.ce_inputs = [], {}, []
+        self.systems = {}
+        sequence = iter(primary_sequence) if primary_sequence is not None else None
         async def ce(query, documents, **kwargs):
             budget.current.get().before_call()
             self.ce_inputs.extend(documents)
@@ -80,20 +102,26 @@ class ListwiseRecoveryTests(unittest.IsolatedAsyncioTestCase):
             stage = kwargs['stage']
             self.stages.append(stage)
             self.prompts[stage] = prompt
+            self.systems[stage] = kwargs.get('system', '')
             if stage == 'search.listwise.recovery':
                 if recovery_error:
                     raise recovery_error
                 return copy.deepcopy(decisions if isinstance(decisions, dict)
                                      else dict(decisions=list(decisions)))
-            if stage not in ('search.listwise', 'search.listwise.repair'):
+            if stage not in ('search.listwise', 'search.listwise.repair', 'search.listwise.retry'):
                 raise AssertionError('Unexpected model stage: ' + stage)
+            if sequence is not None:
+                result = next(sequence)
+                if isinstance(result, BaseException):
+                    raise result
+                return copy.deepcopy({k: result[k] for k in kwargs['schema']['properties'] if k in result})
             count = len(prompt_rows(prompt))
             result = primary if primary is not None else dict(ranking=list(range(count)),
                 irrelevant=list(range(count)) if deleted is None else list(deleted), groups=[])
             if after_primary:
                 after_primary(budget.current.get())
-            return copy.deepcopy(result)
-        plan = {}
+            return copy.deepcopy({k: result[k] for k in kwargs['schema']['properties'] if k in result})
+        plan = {'_coverage_requirements': list(requirements)}
         with budget.scope(seconds=30, calls=calls, tokens=64000) as limits, \
                 patch.object(cross_encoder, 'rerank', side_effect=ce), \
                 patch.object(llm, 'complete_json', side_effect=classify):
@@ -115,10 +143,27 @@ class ListwiseRecoveryTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn('m0', selected_ids(result),
                       f'Positive original user evidence was erased: stages={self.stages}; trace={plan["_cascade"]["listwise"]}')
 
+    async def test_keyed_irrelevant_still_requires_source_verified_review(self):
+        row = evidence('m0', RIDE_SOURCE)
+        with patch.object(config, 'LISTWISE_KEYED_OUTPUT', True):
+            result, plan = await self.run_case([row], [decision('m0', RIDE_SOURCE)],
+                primary_sequence=[dict(candidates=dict(c0=dict(priority=10, relevance='irrelevant')), groups=[])])
+        self.assertEqual(selected_ids(result), ['m0'])
+        self.assertEqual(plan['_cascade']['listwise']['recovery']['restored_ids'], ['m0'])
+        self.assertEqual(self.stages, ['search.listwise', 'search.listwise.recovery'])
+
+    async def test_keyed_uncertain_is_kept_without_deletion_review(self):
+        with patch.object(config, 'LISTWISE_KEYED_OUTPUT', True):
+            result, plan = await self.run_case([evidence('m0', RIDE_SOURCE)],
+                primary_sequence=[dict(candidates=dict(c0=dict(priority=10, relevance='uncertain')), groups=[])])
+        self.assertEqual(selected_ids(result), ['m0'])
+        self.assertEqual(self.stages, ['search.listwise'])
+        self.assertEqual(plan['_cascade']['listwise']['primary_irrelevant_ids'], [])
+
     async def test_partial_deletion_appends_restored_in_input_order_without_displacing_selected(self):
         rows = [evidence('m0', RIDE_SOURCE), evidence('m1', 'I enjoy swimming.'),
                 evidence('m2', 'I enjoy hiking on weekends.')]
-        result, _ = await self.run_case(rows, [decision('m2', rows[2]['content']),
+        result, plan = await self.run_case(rows, [decision('m2', rows[2]['content']),
             decision('m0', RIDE_SOURCE)], deleted=[0, 2])
         self.assertEqual(selected_ids(result), ['m1', 'm0', 'm2'])
 
@@ -126,24 +171,152 @@ class ListwiseRecoveryTests(unittest.IsolatedAsyncioTestCase):
         rows = [evidence('m0', RIDE_SOURCE), evidence('m1', 'I sorted receipts.')]
         negative = dict(candidate_id='m1', useful=False, target_id='', target_quote='',
                         evidence_kind='none', citations=[])
-        result, _ = await self.run_case(rows, [decision('m0', RIDE_SOURCE), negative])
+        result, plan = await self.run_case(rows, [decision('m0', RIDE_SOURCE), negative])
         self.assertEqual(selected_ids(result), ['m0'])
 
     async def test_no_deletion_does_not_spend_a_recovery_call(self):
-        result, _ = await self.run_case([evidence('m0', RIDE_SOURCE)], deleted=[])
+        result, plan = await self.run_case([evidence('m0', RIDE_SOURCE)], deleted=[])
         self.assertEqual(selected_ids(result), ['m0'])
         self.assertEqual(self.stages, ['search.listwise'])
 
+    async def test_unresolved_fallback_is_bounded_and_does_not_override_valid_negative(self):
+        query = 'How can I follow emerging cryptocurrency markets?'
+        rows = [evidence('m0', 'I follow stock news.'),
+                evidence('m1', 'I ask about stablecoins and digital currencies.'),
+                evidence('m2', 'I ask about cryptocurrency regulation.')]
+        invalid = decision('m1', rows[1]['content'], target_quote='not in the question')
+        negative = dict(candidate_id='m2', useful=False, target_id='', target_quote='',
+                        evidence_kind='none', citations=[])
+        with patch.object(config, 'LISTWISE_UNREVIEWED_LIMIT', 1):
+            result, plan = await self.run_case(rows, [invalid, negative], deleted=[1, 2],
+                query=query, requirements=[dict(id='question', text=query)])
+        self.assertEqual(selected_ids(result), ['m0', 'm1'])
+        recovery = plan['_cascade']['listwise']['recovery']
+        self.assertEqual(recovery['provisional_ids'], ['m1'])
+        self.assertFalse(recovery['restored_ids'])
+        self.assertEqual(recovery['status'], 'partial')
+        self.assertTrue(any(x['id'] == 'm2' and x['reason'] == 'irrelevant_confirmed'
+                            for x in plan['_cascade']['omitted']))
+        self.assertFalse(any(x['id'] == 'm1' and x['reason'] == 'irrelevant_confirmed'
+                             for x in plan['_cascade']['omitted']))
+
     async def test_invalid_primary_permutation_cannot_authorize_a_deleted_review(self):
-        result, _ = await self.run_case([evidence('m0', RIDE_SOURCE)],
+        result, plan = await self.run_case([evidence('m0', RIDE_SOURCE)],
             primary=dict(ranking=[True], irrelevant=[0], groups=[]))
         self.assertEqual(selected_ids(result), ['m0'])
         self.assertEqual(self.stages, ['search.listwise', 'search.listwise.repair'])
+        self.assertEqual([a['validation_code'] for a in plan['_cascade']['listwise']['attempts']],
+                         ['ranking_invalid_indices', 'ranking_invalid_indices'])
+
+    async def test_ranking_repair_receives_missing_and_repeated_indices(self):
+        result, plan = await self.run_case([evidence('m0', RIDE_SOURCE), evidence('m1', 'I swim.')],
+            primary_sequence=[dict(ranking=[0, 0], irrelevant=[], groups=[]),
+                              dict(ranking=[1, 0], irrelevant=[], groups=[])])
+        system = self.systems['search.listwise.repair']
+        self.assertIn('"missing": [1]', system)
+        self.assertIn('"repeated": [0]', system)
+        self.assertEqual(plan['_cascade']['listwise']['status'], 'recovered')
+        self.assertEqual(plan['_rerank_errors'], [])
+        self.assertEqual(len(selected_ids(result)), 2)
+
+    async def test_failed_group_repair_preserves_order_and_reviews_deletions(self):
+        result, plan = await self.run_case(
+            [evidence('m0', RIDE_SOURCE), evidence('m1', 'I swim.'), evidence('m2', 'I hike.')],
+            primary_sequence=[
+                dict(ranking=[2, 0, 1], irrelevant=[0], groups=[[0, 1]]),
+                dict(ranking=[0, 0, 1], irrelevant=[], groups=[[0, 1]])])
+        trace = plan['_cascade']['listwise']
+        self.assertEqual(trace['status'], 'groups_partial')
+        self.assertEqual(selected_ids(result), [trace['candidate_ids'][i] for i in [2, 1, 0]])
+        self.assertEqual(trace['primary_irrelevant_ids'], [trace['candidate_ids'][0]])
+        self.assertEqual(plan['_evidence_groups'], [])
+        self.assertEqual(plan['_rerank_status'], 'partial')
+        self.assertIn('search.listwise.recovery', self.stages)
+        self.assertIn(trace['candidate_ids'][0], trace['recovery']['unreviewed_ids'])
+
+    async def test_group_failure_cannot_bypass_negative_review(self):
+        result, plan = await self.run_case(
+            [evidence('m0', RIDE_SOURCE), evidence('m1', 'I swim.')],
+            [dict(candidate_id='m0', useful=False, target_id='', target_quote='',
+                  evidence_kind='none', citations=[])],
+            primary_sequence=[dict(ranking=[1, 0], irrelevant=[0], groups=[[0, 1]]),
+                              dict(groups=[[0, 1]])])
+        trace = plan['_cascade']['listwise']
+        self.assertEqual(trace['status'], 'groups_partial')
+        self.assertEqual(trace['candidate_contract_status'], 'valid')
+        self.assertEqual(trace['groups_status'], 'invalid')
+        self.assertEqual(selected_ids(result), ['m1'])
+        self.assertEqual(trace['recovery']['confirmed_irrelevant_ids'], ['m0'])
+        self.assertEqual(plan['_rerank_errors'][0]['stage'], 'listwise_groups')
+
+    async def test_wrapped_500_retries_once_and_recovers(self):
+        failure = llm.LLMError('provider failed')
+        failure.__cause__ = httpx.HTTPStatusError('server failure',
+            request=httpx.Request('POST', 'https://fixture.invalid'),
+            response=httpx.Response(500))
+        _, plan = await self.run_case([evidence('m0', RIDE_SOURCE)],
+            primary_sequence=[failure, dict(ranking=[0], irrelevant=[], groups=[])])
+        self.assertEqual(self.stages, ['search.listwise', 'search.listwise.retry'])
+        self.assertEqual(plan['_rerank_status'], 'recovered')
+        self.assertEqual(plan['_rerank_errors'], [])
+
+    async def test_transport_retry_is_bounded_and_preserves_candidates(self):
+        failure = httpx.ConnectError('connection failed')
+        result, plan = await self.run_case([evidence('m0', RIDE_SOURCE)],
+            primary_sequence=[failure, failure])
+        self.assertEqual(self.stages, ['search.listwise', 'search.listwise.retry'])
+        self.assertEqual(plan['_cascade']['listwise']['status'], 'fallback')
+        self.assertEqual(selected_ids(result), ['m0'])
+
+    async def test_transport_retry_cannot_exceed_call_budget(self):
+        result, plan = await self.run_case([evidence('m0', RIDE_SOURCE)], calls=2,
+            primary_sequence=[httpx.ConnectError('connection failed')])
+        self.assertEqual(self.stages, ['search.listwise'])
+        self.assertEqual(plan['_cascade']['listwise']['status'], 'fallback')
+        self.assertEqual(selected_ids(result), ['m0'])
+
+    async def test_permanent_provider_failure_is_not_retried(self):
+        failure = httpx.HTTPStatusError('unauthorized',
+            request=httpx.Request('POST', 'https://fixture.invalid'),
+            response=httpx.Response(401))
+        _, plan = await self.run_case([evidence('m0', RIDE_SOURCE)],
+            primary_sequence=[failure])
+        self.assertEqual(self.stages, ['search.listwise'])
+        self.assertEqual(plan['_cascade']['listwise']['status'], 'fallback')
+
+    async def test_transport_retry_obeys_listwise_deadline(self):
+        with patch.object(config, 'RERANK_DEADLINE_SECONDS', .03):
+            result, plan = await self.run_case([evidence('m0', RIDE_SOURCE)],
+                primary_sequence=[httpx.ConnectError('connection failed')])
+        self.assertEqual(self.stages, ['search.listwise'])
+        self.assertEqual(selected_ids(result), ['m0'])
+        self.assertEqual(plan['_cascade']['listwise']['status'], 'fallback')
+
+    async def test_group_repair_success_can_use_valid_groups(self):
+        _, plan = await self.run_case([evidence('m0', RIDE_SOURCE), evidence('m1', 'I swim.')],
+            primary_sequence=[dict(ranking=[1, 0], irrelevant=[], groups=[[0]]),
+                              dict(ranking=[1, 0], irrelevant=[], groups=[[0, 1]])])
+        trace = plan['_cascade']['listwise']
+        self.assertEqual(trace['status'], 'recovered')
+        self.assertEqual(plan['_evidence_groups'], [trace['candidate_ids']])
+        self.assertIn('group_invalid_indices_or_size', self.systems['search.listwise.repair'])
+
+    async def test_retry_token_exhaustion_does_not_erase_valid_ranking(self):
+        def exhaust(limits):
+            limits.tokens = limits.max_tokens
+        result, plan = await self.run_case(
+            [evidence('m0', RIDE_SOURCE), evidence('m1', 'I swim.')],
+            primary=dict(ranking=[1, 0], irrelevant=[], groups=[[0]]),
+            after_primary=exhaust)
+        trace = plan['_cascade']['listwise']
+        self.assertEqual(self.stages, ['search.listwise'])
+        self.assertEqual(trace['status'], 'groups_partial')
+        self.assertEqual(selected_ids(result), list(reversed(trace['candidate_ids'])))
 
     async def test_rules_bypass_and_never_supply_ordinary_evidence(self):
         rule = evidence('m1', 'Please forget that I enjoy cycling.')
         rule['_user_rule'] = True
-        result, _ = await self.run_case([rule, evidence('m0', RIDE_SOURCE)],
+        result, plan = await self.run_case([rule, evidence('m0', RIDE_SOURCE)],
                                        [decision('m0', RIDE_SOURCE)])
         self.assertEqual(selected_ids(result), ['m1', 'm0'])
         self.assertNotIn(rule['_rank_text'], self.ce_inputs)
@@ -154,21 +327,24 @@ class ListwiseRecoveryTests(unittest.IsolatedAsyncioTestCase):
         for text in ['My friend used to ride there before her old leg injury returned.',
                      'If I used to ride there before an old leg injury, what could help?']:
             with self.subTest(text=text):
-                result, _ = await self.run_case([evidence('m0', text)], [decision('m0', text)])
-                self.assertEqual(selected_ids(result), [])
+                result, plan = await self.run_case([evidence('m0', text)], [decision('m0', text)])
+                self.assertEqual(selected_ids(result), ['m0'])
+                self.assertFalse(plan['_cascade']['listwise']['recovery']['restored_ids'])
 
     async def test_assistant_cannot_be_relabelled_user_context(self):
-        result, _ = await self.run_case([evidence('m0', RIDE_SOURCE, role='assistant')],
+        result, plan = await self.run_case([evidence('m0', RIDE_SOURCE, role='assistant')],
                                        [decision('m0', RIDE_SOURCE)])
-        self.assertEqual(selected_ids(result), [])
+        self.assertEqual(selected_ids(result), ['m0'])
+        self.assertFalse(plan['_cascade']['listwise']['recovery']['restored_ids'])
 
     async def test_sentence_initial_relation_attribution_cannot_launder_quoted_first_person(self):
         quote = 'I used to ride before my old leg injury.'
         for prefix in ('My friend wrote: ', 'My friend says: ', 'Our colleague replied: ',
                        'Our colleague writes: ', 'Jordan said: '):
             with self.subTest(prefix=prefix):
-                result, _ = await self.run_case([evidence('m0', prefix + quote)], [decision('m0', quote)])
-                self.assertEqual(selected_ids(result), [])
+                result, plan = await self.run_case([evidence('m0', prefix + quote)], [decision('m0', quote)])
+                self.assertEqual(selected_ids(result), ['m0'])
+                self.assertFalse(plan['_cascade']['listwise']['recovery']['restored_ids'])
 
     async def test_counterevidence_and_background_preserve_qualifiers_without_promoting_coverage(self):
         cases = [('I have never owned a bicycle.', 'user', 'counterevidence'),
@@ -178,7 +354,7 @@ class ListwiseRecoveryTests(unittest.IsolatedAsyncioTestCase):
             with self.subTest(kind=kind):
                 row = evidence('m0', text, role=role)
                 original = copy.deepcopy(row)
-                result, _ = await self.run_case([row], [decision('m0', text, kind=kind)])
+                result, plan = await self.run_case([row], [decision('m0', text, kind=kind)])
                 self.assertEqual(selected_ids(result), ['m0'])
                 self.assertEqual(row['_rank_text'], original['_rank_text'])
                 self.assertEqual(row['_packet_item'], original['_packet_item'])
@@ -189,7 +365,7 @@ class ListwiseRecoveryTests(unittest.IsolatedAsyncioTestCase):
         text = 'Why do vinyl LPs have a warmer sound than digital recordings?'
         query = 'What music-related activity might interest me?'
         row = evidence('m0', text)
-        result, _ = await self.run_case([row],
+        result, plan = await self.run_case([row],
             [decision('m0', text, kind='topic_interest', target_quote=query)], query=query)
         self.assertEqual(selected_ids(result), ['m0'])
         self.assertFalse(row.get('_supported_coverage_ids'))
@@ -198,14 +374,16 @@ class ListwiseRecoveryTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_topic_question_cannot_be_relabelled_user_experience(self):
         text = 'Why do vinyl LPs have a warmer sound than digital recordings?'
-        result, _ = await self.run_case([evidence('m0', text)], [decision('m0', text)])
-        self.assertEqual(selected_ids(result), [])
+        result, plan = await self.run_case([evidence('m0', text)], [decision('m0', text)])
+        self.assertEqual(selected_ids(result), ['m0'])
+        self.assertFalse(plan['_cascade']['listwise']['recovery']['restored_ids'])
 
     async def test_third_party_question_is_not_current_user_topic_interest(self):
         text = 'My friend asks why vinyl LPs have a warmer sound than digital recordings.'
-        result, _ = await self.run_case([evidence('m0', text)],
+        result, plan = await self.run_case([evidence('m0', text)],
                                        [decision('m0', text, kind='topic_interest')])
-        self.assertEqual(selected_ids(result), [])
+        self.assertEqual(selected_ids(result), ['m0'])
+        self.assertFalse(plan['_cascade']['listwise']['recovery']['restored_ids'])
 
     async def test_recovery_requires_verbatim_candidate_local_source_and_target(self):
         bad = [dict(quote='I rode there before my injury.'), dict(source_id='s900'),
@@ -213,14 +391,16 @@ class ListwiseRecoveryTests(unittest.IsolatedAsyncioTestCase):
         for changes in bad:
             with self.subTest(changes=changes):
                 kwargs = dict(changes)
-                result, _ = await self.run_case([evidence('m0', RIDE_SOURCE)],
+                result, plan = await self.run_case([evidence('m0', RIDE_SOURCE)],
                     [decision('m0', kwargs.pop('quote', RIDE_SOURCE), **kwargs)])
-                self.assertEqual(selected_ids(result), [])
+                self.assertEqual(selected_ids(result), ['m0'])
+                self.assertFalse(plan['_cascade']['listwise']['recovery']['restored_ids'])
 
     async def test_citation_cannot_borrow_another_candidates_source(self):
         rows = [evidence('m0', RIDE_SOURCE), evidence('m1', 'I collect stamps.')]
-        result, _ = await self.run_case(rows, [decision('m1', RIDE_SOURCE)], deleted=[1])
-        self.assertEqual(selected_ids(result), ['m0'])
+        result, plan = await self.run_case(rows, [decision('m1', RIDE_SOURCE)], deleted=[1])
+        self.assertEqual(selected_ids(result), ['m0', 'm1'])
+        self.assertFalse(plan['_cascade']['listwise']['recovery']['restored_ids'])
 
     async def test_unsourced_summary_or_hidden_source_cannot_become_original_evidence(self):
         for hidden in (False, True):
@@ -230,8 +410,9 @@ class ListwiseRecoveryTests(unittest.IsolatedAsyncioTestCase):
                     row['_rank_text'] = 'A generic physical activity summary.'
                 else:
                     row['_packet_item']['sources'] = []
-                result, _ = await self.run_case([row], [decision('m0', RIDE_SOURCE)])
-                self.assertEqual(selected_ids(result), [])
+                result, plan = await self.run_case([row], [decision('m0', RIDE_SOURCE)])
+                self.assertEqual(selected_ids(result), ['m0'])
+                self.assertFalse(plan['_cascade']['listwise']['recovery']['restored_ids'])
 
     async def test_invalid_identity_bool_and_duplicate_response_never_resurrect(self):
         valid = decision('m0', RIDE_SOURCE)
@@ -239,8 +420,9 @@ class ListwiseRecoveryTests(unittest.IsolatedAsyncioTestCase):
                    [valid, valid], [dict(valid, candidate_id=0)]]
         for payload in invalid:
             with self.subTest(payload=payload):
-                result, _ = await self.run_case([evidence('m0', RIDE_SOURCE)], payload)
-                self.assertEqual(selected_ids(result), [])
+                result, plan = await self.run_case([evidence('m0', RIDE_SOURCE)], payload)
+                self.assertEqual(selected_ids(result), ['m0'])
+                self.assertFalse(plan['_cascade']['listwise']['recovery']['restored_ids'])
                 self.assertEqual(self.stages.count('search.listwise.recovery'), 1)
 
     async def test_model_failure_has_no_unverified_high_score_resurrection_or_format_retry(self):
@@ -248,7 +430,8 @@ class ListwiseRecoveryTests(unittest.IsolatedAsyncioTestCase):
             with self.subTest(failure=type(failure).__name__):
                 result, plan = await self.run_case([evidence('m0', RIDE_SOURCE)],
                     recovery_error=failure)
-                self.assertEqual(selected_ids(result), [])
+                self.assertEqual(selected_ids(result), ['m0'])
+                self.assertFalse(plan['_cascade']['listwise']['recovery']['restored_ids'])
                 self.assertEqual(self.stages.count('search.listwise.recovery'), 1)
                 self.assertTrue(plan['_rerank_errors'])
 
@@ -260,7 +443,8 @@ class ListwiseRecoveryTests(unittest.IsolatedAsyncioTestCase):
                 result, plan = await self.run_case([evidence('m0', RIDE_SOURCE)],
                     [decision('m0', RIDE_SOURCE)], calls=8 if tokens else 2,
                     after_primary=spend if tokens else None)
-                self.assertEqual(selected_ids(result), [])
+                self.assertEqual(selected_ids(result), ['m0'])
+                self.assertFalse(plan['_cascade']['listwise']['recovery']['restored_ids'])
                 self.assertNotIn('search.listwise.recovery', self.stages)
                 self.assertTrue(plan['_rerank_errors'])
 
@@ -274,7 +458,7 @@ class ListwiseRecoveryTests(unittest.IsolatedAsyncioTestCase):
         text = 'I cycled every weekend. ' + ('My route followed the river. ' * 90) + RIDE_SOURCE
         row = evidence('m0', text, summary='Cycling experience with an old injury.')
         original = copy.deepcopy(row)
-        result, _ = await self.run_case([row], [decision('m0', RIDE_SOURCE)], ce_score=-3.5)
+        result, plan = await self.run_case([row], [decision('m0', RIDE_SOURCE)], ce_score=-3.5)
         self.assertEqual(selected_ids(result), ['m0'])
         self.assertEqual(row['_rank_text'], original['_rank_text'])
         self.assertEqual(row['_packet_item'], original['_packet_item'])
@@ -311,6 +495,9 @@ class MeaningfulStatementTests(unittest.TestCase):
 
 class RecoveryBoundsTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
+        settings = patch.object(config, 'LISTWISE_SPAN_REFS', False)
+        settings.start()
+        self.addCleanup(settings.stop)
         network = patch('socket.socket.connect', side_effect=AssertionError('No network in offline regression'))
         network.start()
         self.addCleanup(network.stop)
@@ -331,7 +518,7 @@ class RecoveryBoundsTests(unittest.IsolatedAsyncioTestCase):
         with budget.scope(seconds=30, calls=8, tokens=128000) as limits, \
                 patch.object(llm, 'complete_json', side_effect=review):
             self.limits = limits
-            result, trace = await listwise_recovery.recover(
+            result, trace = await listwise_recovery._recover_batch(
                 schemas.SearchRequest(user_id='u', query=QUESTION, options=OPTIONS),
                 rows, list(selected), set(range(len(rows))), deadline=deadline)
         self.assertEqual((limits.reserved_calls, limits.reserved_tokens), (0, 0))
@@ -353,7 +540,7 @@ class RecoveryBoundsTests(unittest.IsolatedAsyncioTestCase):
         originals = copy.deepcopy(rows)
         req = schemas.SearchRequest(user_id='u', query=QUESTION, options=OPTIONS)
         small = dict(candidate_id='m1', sources=listwise_recovery.sources_for(rows[1]))
-        cap = len(listwise_recovery.request_for(req, [small])['prompt'].encode())
+        cap = len(listwise_recovery.candidate_contract(listwise_recovery.request_for(req, [small]), [small])['prompt'].encode())
         self.assertLess(cap, listwise_recovery.MAX_PROMPT_BYTES)
         with patch.object(config, 'RERANK_MAX_PROMPT_BYTES', cap):
             result, trace = await self.run_review(rows)

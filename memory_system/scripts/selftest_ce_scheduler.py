@@ -24,7 +24,7 @@ _async_client = httpx.AsyncClient
 
 class CESchedulerTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
-        settings = patch.multiple(config, FAKE=False,
+        settings = patch.multiple(config, FAKE=False, LISTWISE_KEYED_OUTPUT=False,
             CE_API_URL='https://ce-scheduler.example.test/v1/rerank',
             CE_API_KEY='scheduler-test-key', CE_MODEL='scheduler-test-model',
             CE_API_FORMAT='cohere', CE_TIMEOUT_SECONDS=2., CE_DEADLINE_SECONDS=2.,

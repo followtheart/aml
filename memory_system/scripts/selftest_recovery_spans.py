@@ -54,7 +54,7 @@ class RecoveryIntegration(unittest.IsolatedAsyncioTestCase):
    return dict(c0=dict(useful=True,target_id='question',evidence_kind='user_context',citation_parts=['s0.p0']),c1=dict(useful=True,target_id='question',evidence_kind='user_context',citation_parts=['s0.p0']))
   with patch.object(config,'LISTWISE_SPAN_REFS',True),patch.object(llm,'complete_json',model),budget.scope(seconds=30,calls=1,tokens=40000) as limits:
    selected,trace=await lr.recover(req,[a,b],[keep],{0,1})
-  self.assertEqual([x['id'] for x in selected],['keep','a']);self.assertEqual(trace['status'],'partial');self.assertEqual(trace['restored_ids'],['a']);self.assertEqual(trace['unreviewed_ids'],['b']);self.assertEqual(trace['citation_format'],'source_span_refs_v1');self.assertEqual(limits.calls,1);self.assertEqual((limits.reserved_calls,limits.reserved_tokens),(0,0));self.assertEqual(seen[0]['required'],['c0','c1'])
+  self.assertEqual([x['id'] for x in selected],['keep','a','b']);self.assertEqual(trace['provisional_ids'],['b']);self.assertEqual(trace['status'],'partial');self.assertEqual(trace['restored_ids'],['a']);self.assertEqual(trace['unreviewed_ids'],['b']);self.assertEqual(trace['citation_format'],'source_span_refs_v1');self.assertEqual(limits.calls,1);self.assertEqual((limits.reserved_calls,limits.reserved_tokens),(0,0));self.assertEqual(seen[0]['required'],['c0','c1'])
  def test_disabled_request_retains_legacy_contract(self):
   req=SimpleNamespace(query='How could I relax?',options=[])
   cards=[dict(candidate_id='a',sources=[dict(source_id='s0',role='user',text='I enjoy painting.')])]

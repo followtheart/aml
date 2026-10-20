@@ -5,7 +5,6 @@ estimated. Require exact reproduction of the archived baseline before comparing.
 """
 import argparse
 import ast
-import copy
 import csv
 import json
 from pathlib import Path
@@ -13,14 +12,15 @@ import sys
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
-from app import evidence_selection
 import audit_https_funnel as audit
+from probe_ranking_capacity import replay
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--run', type=Path, required=True)
     parser.add_argument('--output', type=Path, required=True)
+    parser.add_argument('--policy', choices=('legacy', 'bounded', 'no_window'), default='bounded')
     args = parser.parse_args()
     run = args.run
     searches = {s['search_id']: s for s in audit.records(run / 'server-search-debug.jsonl')}
@@ -36,24 +36,15 @@ def main():
     for result in results:
         search = searches[result['search_id']]
         fine = search['cascade']['fine']
-        by_id = {c['id']: copy.deepcopy(c) for c in search['ranked']}
-        rows = [by_id[mid] for mid in search['cascade']['coarse']['selected_ids']]
-        scores = {d['id']: d['score'] for d in fine['selection']['decisions']}
-        for row in rows:
-            row['_ce_score'] = scores[row['id']]
-        requirements = search['coverage_manifest']['coverage']['requirements']
-        def members(reason):
-            return {r['candidate_id'] for r in fine['selection']['reservations']
-                    if reason in r['reasons']}
-        def key(c):
-            return (c['_ce_score'] if c['_ce_score'] is not None else -1e30, c.get('_fused', 0))
-        kwargs = dict(reserve_ids=members('unscored_rescue'), fused_ids=members('fused_head'))
-        before = evidence_selection.select(rows, fine['output_count'], requirements, key, **kwargs)
-        if [c['id'] for c in before] != fine['selected_ids']:
+        by_id = {c['id']: c for c in search['ranked']}
+        settings = search['versions']['settings']
+        baseline = replay(search, settings['CASCADE_FINE_LIMIT'], settings['CASCADE_LLM_LIMIT'])
+        if baseline['fine_ids'] != fine['selected_ids']:
             raise ValueError(f"Baseline replay mismatch: qa_id={result['qa_id']}")
-        trace = {}
-        after = evidence_selection.select(rows, fine['output_count'], requirements, key, **kwargs,
-                                         bound_soft_reservations=True, trace=trace)
+        variant = replay(search, settings['CASCADE_FINE_LIMIT'], settings['CASCADE_LLM_LIMIT'], args.policy)
+        before = [by_id[mid] for mid in baseline['fine_ids']]
+        after = [by_id[mid] for mid in variant['fine_ids']]
+        trace = variant['selection']
         # Evaluation labels are read only after both selections finish.
         snippet = gold[int(result['qa_id'])]['related_conversation_snippet']
         try:
@@ -71,7 +62,7 @@ def main():
         output.append(dict(qa_id=result['qa_id'], before=coverage(before), after=coverage(after),
                            before_ids=[c['id'] for c in before], after_ids=[c['id'] for c in after],
                            selection=trace))
-    summary = dict(questions=len(output), baseline_reproduced=True,
+    summary = dict(questions=len(output), baseline_reproduced=True, policy=args.policy,
                    before_full_turns=sum(sum(r['before']) for r in output),
                    after_full_turns=sum(sum(r['after']) for r in output),
                    gained=[r['qa_id'] for r in output if any(b and not a for a, b in zip(r['before'], r['after']))],

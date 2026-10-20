@@ -235,11 +235,14 @@ RERANK_MAX_CANDIDATES = max(
 RERANK_BATCH_MAX_CANDIDATES = max(1, int(os.environ.get("AML_RERANK_BATCH_MAX_CANDIDATES", "24")))
 RERANK_MAX_PROMPT_BYTES = max(1024, int(os.environ.get("AML_RERANK_MAX_PROMPT_BYTES", "24000")))
 LISTWISE_SHARED_SOURCES = os.environ.get('AML_LISTWISE_SHARED_SOURCES', '0') == '1'
+LISTWISE_KEYED_OUTPUT = os.environ.get('AML_LISTWISE_KEYED_OUTPUT', '1') == '1'
 RERANK_CONCURRENCY = max(1, int(os.environ.get("AML_RERANK_CONCURRENCY", "2")))
 RERANK_DEADLINE_SECONDS = max(1.0, float(os.environ.get("AML_RERANK_DEADLINE_SECONDS", "45")))
-RERANK_REPAIR_MAX_CALLS = max(0, int(os.environ.get("AML_RERANK_REPAIR_MAX_CALLS", "1")))
-# Experimental exact source-part references for deletion review; opt in per run.
-LISTWISE_SPAN_REFS = os.environ.get("AML_LISTWISE_SPAN_REFS", "0") == "1"
+# At most two repairs across ranking/relevance and groups, within search budgets.
+RERANK_REPAIR_MAX_CALLS = max(0, int(os.environ.get("AML_RERANK_REPAIR_MAX_CALLS", "2")))
+# Exact source-part references avoid generated quotation mismatches.
+LISTWISE_SPAN_REFS = os.environ.get("AML_LISTWISE_SPAN_REFS", "1") == "1"
+LISTWISE_REVIEW_MAX_BATCHES = max(1, min(4, int(os.environ.get("AML_LISTWISE_REVIEW_MAX_BATCHES", "3"))))
 RERANK_CALIBRATION_ANCHORS = max(0, min(2, int(os.environ.get('AML_RERANK_CALIBRATION_ANCHORS', '2'))))
 SEARCH_FOLLOWUP_QUERIES = max(0, min(3, int(os.environ.get('AML_SEARCH_FOLLOWUP_QUERIES', '2'))))
 SEARCH_FOLLOWUP_SECONDS = max(1.0, float(os.environ.get('AML_SEARCH_FOLLOWUP_SECONDS', '8')))
@@ -345,6 +348,10 @@ PACKET_RULE_LIMIT = int(os.environ.get("AML_PACKET_RULE_LIMIT", "3"))
 # Top fused-retrieval candidates that keep a seat in the fine list even when
 # the cross-encoder scores them low.
 CASCADE_FUSED_RESERVE = int(os.environ.get("AML_CASCADE_FUSED_RESERVE", "3"))
+# Experimental evidence-gain expansion; evaluated separately from the baseline.
+FINE_EVIDENCE_ADAPTIVE = os.environ.get("AML_FINE_EVIDENCE_ADAPTIVE", "0") == "1"
+FINE_EXTRA_LIMIT = max(0, min(16, int(os.environ.get("AML_FINE_EXTRA_LIMIT", "8"))))
+LISTWISE_UNREVIEWED_LIMIT = max(0, min(4, int(os.environ.get("AML_LISTWISE_UNREVIEWED_LIMIT", "0"))))
 # Support keys (Add request ids / supporting AMU ids) needed to confirm a
 # consolidated preference and to promote it transient -> static.
 PROFILE_MIN_SUPPORT = max(1, int(os.environ.get("AML_PROFILE_MIN_SUPPORT", "2")))

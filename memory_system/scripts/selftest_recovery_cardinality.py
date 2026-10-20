@@ -39,10 +39,13 @@ class ContractBudgetFlow(unittest.IsolatedAsyncioTestCase):
    return dict(decisions=[dict(candidate_id='m0',useful=False,target_id='',target_quote='',evidence_kind='none',citations=[])])
   with patch.object(config,'LISTWISE_SPAN_REFS',False),patch.object(llm,'complete_json',provider),budget.scope(seconds=60,calls=1,tokens=base['reservation'] if limited else 64000) as b:
    result,trace=await recovery.recover(req,[row],[],[0])
-  self.assertEqual(result,[]);self.assertEqual(trace['candidate_ids'],['m0']);self.assertEqual((b.calls,b.reserved_calls,b.reserved_tokens),(1,0,0))
+  if limited:
+   self.assertEqual(result,[row]);self.assertEqual(trace['unreviewed_ids'],['m0']);self.assertEqual((b.calls,b.reserved_calls,b.reserved_tokens),(0,0,0))
+  else:
+   self.assertEqual(result,[]);self.assertEqual(trace['candidate_ids'],['m0']);self.assertEqual((b.calls,b.reserved_calls,b.reserved_tokens),(1,0,0))
   return base,seen,trace
- async def test_insufficient_contract_tokens_keeps_original_request(self):
-  base,seen,trace=await self.run_case(True);self.assertEqual(seen,[base['prompt']]);self.assertEqual(trace['output_contract']['status'],'kept_original_budget')
+ async def test_insufficient_contract_tokens_retains_candidate_without_dispatch(self):
+  base,seen,trace=await self.run_case(True);self.assertEqual(seen,[]);self.assertEqual(trace['status'],'partial')
  async def test_available_budget_applies_count_contract(self):
   _,seen,trace=await self.run_case(False);self.assertEqual(trace['output_contract']['status'],'applied');self.assertIn('Return exactly 1 decision object(s)',seen[0])
 

@@ -192,7 +192,7 @@ class VisibleSourceSelectionTests(unittest.TestCase):
 
 class CascadeCoverageSelectionTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
-        settings = patch.multiple(config, CASCADE_COARSE_LIMIT=50, CASCADE_FINE_LIMIT=12,
+        settings = patch.multiple(config, LISTWISE_KEYED_OUTPUT=False, CASCADE_COARSE_LIMIT=50, CASCADE_FINE_LIMIT=12,
             CASCADE_LLM_LIMIT=10, CE_BATCH_SIZE=24, CE_MAX_DOCUMENT_BYTES=10000,
             CE_MAX_REQUEST_BYTES=90000, RERANK_MAX_PROMPT_BYTES=24000,
             RERANK_REPAIR_MAX_CALLS=0)
@@ -268,6 +268,21 @@ class CascadeCoverageSelectionTests(unittest.IsolatedAsyncioTestCase):
         for row in result:
             self.assertEqual(row['_rank_text'], originals[row['id']]['_rank_text'])
             self.assertEqual(row['_packet_item'], originals[row['id']]['_packet_item'])
+
+    async def test_adaptive_fine_addition_reaches_listwise_without_evicting_core(self):
+        rows = [candidate(f'general{i}', 1-i*.01, [source(f's{i}', f'General context {i}.')])
+                for i in range(16)]
+        rows.append(candidate('newdetail', .01, [source('new', 'I ask about stablecoins and digital currencies.')]))
+        with patch.multiple(config, FINE_EVIDENCE_ADAPTIVE=True, FINE_EXTRA_LIMIT=2,
+                            CASCADE_FINE_LIMIT=16, CASCADE_LLM_LIMIT=16,
+                            RERANK_MAX_PROMPT_BYTES=90000):
+            _, plan, submitted = await self.run_cascade(rows,
+                [dict(id='question', text='emerging cryptocurrency markets')])
+        self.assertEqual(len(submitted), 17)
+        self.assertIn('newdetail', submitted)
+        self.assertTrue({f'general{i}' for i in range(16)} <= set(submitted))
+        self.assertEqual(plan['_cascade']['fine']['output_count'], 17)
+        self.assertTrue(plan['_cascade']['adaptive_admission']['decisions'][0]['admitted'])
 
 
 if __name__ == '__main__':

@@ -58,7 +58,7 @@ class Admission(unittest.IsolatedAsyncioTestCase):
             return dict(ranking=list(range(n)), irrelevant=[], groups=[])
 
         traces = []
-        with patch.multiple(config, CASCADE_COARSE_LIMIT=8, CASCADE_FINE_LIMIT=8,
+        with patch.multiple(config, LISTWISE_KEYED_OUTPUT=False, CASCADE_COARSE_LIMIT=8, CASCADE_FINE_LIMIT=8,
                             CASCADE_LLM_LIMIT=8, RERANK_MAX_PROMPT_BYTES=7500), \
                 patch.object(cross_encoder, 'rerank', side_effect=ce), \
                 patch.object(llm, 'complete_json', side_effect=rank):

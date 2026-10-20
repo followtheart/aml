@@ -383,8 +383,18 @@ class FakeLLM:
         if "query understanding module" in prompt:
             return json.dumps(self._fake_query(prompt))
         if "evidence listwise ranking module" in prompt:
-            count = len(re.findall(r'^\d+: ', prompt, re.M))
-            return json.dumps({'ranking': list(range(count)), 'irrelevant': [], 'groups': []})
+            count_match = re.search(r'^Candidate count: (\d+)$', prompt, re.M)
+            count = int(count_match[1]) if count_match else len(re.findall(r'^\d+: ', prompt, re.M))
+            fields = re.search(r'^Listwise output fields: (.+)$', prompt, re.M)
+            if 'Candidate output keys:' in prompt:
+                result = dict(candidates={f'c{i}': dict(priority=min(i, 100), relevance='useful')
+                                          for i in range(count)}, groups=[])
+            else:
+                result = dict(ranking=list(range(count)), irrelevant=[], groups=[])
+            requested = re.search(r'^Requested candidate keys: (.+)$', prompt, re.M)
+            if requested and 'candidates' in result:
+                result['candidates'] = {k: result['candidates'][k] for k in json.loads(requested[1])}
+            return json.dumps({k: result[k] for k in json.loads(fields[1])} if fields else result)
         if 'source-grounded deleted evidence review module' in prompt:
             candidates = json.loads(prompt.split('<candidates>\n', 1)[1].split('\n</candidates>', 1)[0])
             return json.dumps({'decisions': [dict(candidate_id=c['candidate_id'], useful=False,

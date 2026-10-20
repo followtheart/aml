@@ -16,7 +16,7 @@ from selftest_graph_cascade import documents_in, permutation
 
 class RecoveryTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
-        settings=patch.multiple(config, CASCADE_COARSE_LIMIT=50, CASCADE_FINE_LIMIT=12,
+        settings=patch.multiple(config, LISTWISE_KEYED_OUTPUT=False, CASCADE_COARSE_LIMIT=50, CASCADE_FINE_LIMIT=12,
             CASCADE_LLM_LIMIT=10, CE_BATCH_SIZE=8, RERANK_REPAIR_MAX_CALLS=1)
         settings.start()
         self.addCleanup(settings.stop)
@@ -70,7 +70,7 @@ class RecoveryTests(unittest.IsolatedAsyncioTestCase):
             if kwargs['stage']=='search.listwise':
                 return {'ranking':[0], 'irrelevant':[], 'groups':[]}
             expected.extend(re.search(r'\[id: ([^\]]+)\]', text)[1] for text in reversed(texts))
-            return permutation(len(texts),reverse=True)
+            return dict(ranking=permutation(len(texts),reverse=True)['ranking'])
         plan={}
         with patch.object(cross_encoder,'rerank',side_effect=self.ce) as ce, \
                 patch.object(llm,'complete_json',side_effect=rank):
@@ -106,7 +106,10 @@ class RecoveryTests(unittest.IsolatedAsyncioTestCase):
         with patch.object(cross_encoder,'rerank',side_effect=self.ce), \
                 patch.object(llm,'complete_json',side_effect=rank):
             ranked=await cascade.rank(self.req(),plan,self.rows(70))
-        self.assertEqual(search._select_evidence(self.req(),plan,ranked),[])
+        selected=search._select_evidence(self.req(),plan,ranked)
+        self.assertEqual({c['id'] for c in selected}, set(plan['_cascade']['listwise']['candidate_ids']))
+        self.assertEqual(len(selected),10)
+        self.assertEqual(plan['_cascade']['listwise']['recovery']['restored_ids'],[])
 
     async def test_rules_survive_when_all_ordinary_evidence_is_irrelevant(self):
         rows=self.rows(4)
@@ -121,7 +124,8 @@ class RecoveryTests(unittest.IsolatedAsyncioTestCase):
                 patch.object(llm,'complete_json',side_effect=rank):
             ranked=await cascade.rank(self.req(),plan,rows)
         result=search._select_evidence(self.req(),plan,ranked)
-        self.assertEqual([c['id'] for c in result],['rule'])
+        self.assertEqual([c['id'] for c in result],['rule','m3','m2','m1','m0'])
+        self.assertEqual(plan['_cascade']['listwise']['recovery']['restored_ids'],[])
         self.assertIsNone(result[0].get('_final'))
 
     async def test_rules_are_capped_by_topical_overlap_with_the_question(self):

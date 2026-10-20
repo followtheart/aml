@@ -258,7 +258,7 @@ class CrossEncoderTests(unittest.IsolatedAsyncioTestCase):
     async def test_listwise_format_repair_charges_usage_of_the_malformed_response(self):
         def response(arguments, tokens):
             return {'choices': [{'message': {'tool_calls': [
-                {'function': {'arguments': arguments}}]}}],
+                {'function': {'name': 'emit_json_result', 'arguments': arguments}}]}}],
                 'usage': {'prompt_tokens': tokens - 10, 'completion_tokens': 10,
                           'total_tokens': tokens}}
 
@@ -267,7 +267,8 @@ class CrossEncoderTests(unittest.IsolatedAsyncioTestCase):
         plan = {}
         with budget.scope(seconds=30, calls=4, tokens=64000) as limits, patch.object(
                 self.ce, 'rerank', AsyncMock(return_value=[.5])), patch.object(
-                config, 'RERANK_REPAIR_MAX_CALLS', 1), patch.dict(
+                config, 'RERANK_REPAIR_MAX_CALLS', 1), patch.object(
+                config, 'LISTWISE_KEYED_OUTPUT', False), patch.dict(
                 sys.modules, {'litellm': SimpleNamespace(acompletion=provider)}):
             rows = await cascade_rerank.rank(schemas.SearchRequest(user_id='u', query='Where?'),
                 plan, [dict(id='a', content='Kyoto', _fused=1.)])

@@ -146,7 +146,7 @@ class CascadeTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         self.cascade = importlib.import_module('app.cascade_rerank')
         self.ce = importlib.import_module('app.cross_encoder')
-        self.settings = patch.multiple(config, CASCADE_COARSE_LIMIT=50,
+        self.settings = patch.multiple(config, LISTWISE_KEYED_OUTPUT=False, RERANK_REPAIR_MAX_CALLS=1, CASCADE_COARSE_LIMIT=50,
             CASCADE_FINE_LIMIT=12, CASCADE_LLM_LIMIT=10, create=True)
         self.settings.start()
         self.addCleanup(self.settings.stop)
@@ -197,10 +197,10 @@ class CascadeTests(unittest.IsolatedAsyncioTestCase):
                 patch.object(llm, 'complete_json', side_effect=rank):
             result = await self.cascade.rank(self.req(), {}, self.rows())
         self.assertIn(49, {evidence_number(t) for t in seen})
-        # The fused head keeps a bounded seat; the rest of the low-CE coarse tail does not.
+        # Weak fused reservations outside the CE rank window cannot displace
+        # this fixture's high-CE tail (the bounded selection policy).
         numbers = {evidence_number(t) for t in seen}
-        self.assertTrue({0, 1, 2} <= numbers)
-        self.assertNotIn(3, numbers)
+        self.assertEqual(numbers, set(range(40, 50)))
         self.assertEqual(selected(result)[0]['id'], 'm49')
 
     async def test_listwise_permutation_changes_order_without_fabricating_scores(self):

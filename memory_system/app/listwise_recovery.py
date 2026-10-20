@@ -202,7 +202,7 @@ def validate(payload, cards, targets):
     return restored, judgments
 
 
-async def recover(req, submitted, selected, irrelevant, *, deadline=None):
+async def _recover_batch(req, submitted, selected, irrelevant, *, deadline=None):
     """Append checked original units; failed review cannot erase accepted units."""
     trace = dict(status='not_needed', reviewed_ids=[], restored_ids=[], unreviewed_ids=[],
                  represented=[], judgments=[], errors=[], candidate_limit=MAX_CANDIDATES,
@@ -230,6 +230,8 @@ async def recover(req, submitted, selected, irrelevant, *, deadline=None):
     limits = budget.current.get()
     for card in pending:
         request = request_for(req, cards + [card])
+        if not config.LISTWISE_SPAN_REFS:
+            request = candidate_contract(request, cards + [card])
         reason = ('candidate_limit' if len(cards) >= MAX_CANDIDATES else
                   'prompt_budget' if len(request['prompt'].encode()) > min(MAX_PROMPT_BYTES, config.RERANK_MAX_PROMPT_BYTES) else
                   'token_budget' if limits and request['reservation'] > limits.max_tokens - limits.tokens - limits.reserved_tokens else None)
@@ -309,3 +311,62 @@ async def recover(req, submitted, selected, irrelevant, *, deadline=None):
         trace['errors'].append(dict(error=type(exc).__name__))
         trace['unreviewed_ids'].extend(c['candidate_id'] for c in cards)
         return selected, trace
+
+
+async def recover(req, submitted, selected, irrelevant, *, deadline=None):
+    """Bounded batches; only a valid negative review authorizes hard deletion.
+
+    Unreviewed evidence stays a retrieval candidate, never factual support.
+    Retention cannot exceed the already admitted listwise input set.
+    """
+    deadline = min(deadline if deadline is not None else float('inf'),
+                   time.monotonic() + config.RERANK_DEADLINE_SECONDS)
+    remaining = set(irrelevant)
+    batches = []
+    for _ in range(config.LISTWISE_REVIEW_MAX_BATCHES):
+        if not remaining:
+            break
+        selected, trace = await _recover_batch(req, submitted, selected, remaining, deadline=deadline)
+        batches.append(trace)
+        # Do not retry malformed judgments within the same search. Spend the
+        # next bounded call on cards excluded solely by this batch's capacity.
+        deferred = {r['candidate_id'] for r in trace.get('omitted', [])
+                    if r['reason'] in ('candidate_limit', 'prompt_budget')}
+        attempted = set(trace.get('candidate_ids', []))
+        remaining = {i for i in remaining if submitted[i]['id'] in deferred}
+        if not attempted or trace['status'] in ('error', 'budget_skipped'):
+            break
+    merged = dict(status='not_needed', reviewed_ids=[], restored_ids=[], unreviewed_ids=[],
+                  represented=[], judgments=[], errors=[], omitted=[], batches=batches,
+                  deletion_policy='confirmed_negative_only', provisional_ids=[])
+    for field in ('citation_format', 'candidate_limit', 'prompt_limit_bytes', 'output_contract'):
+        if batches and field in batches[0]:
+            merged[field] = batches[0][field]
+    merged['candidate_ids'] = [mid for t in batches for mid in t.get('candidate_ids', [])]
+    merged['sources'] = [card for t in batches for card in t.get('sources', [])]
+    for trace in batches:
+        for field in ('reviewed_ids', 'restored_ids', 'represented', 'judgments'):
+            merged[field].extend(trace.get(field, []))
+        merged['errors'].extend(e for e in trace.get('errors', []) if e['error'] != 'ReviewIncomplete')
+    reviewed = set(merged['reviewed_ids'])
+    represented = {r['candidate_id'] for r in merged['represented']}
+    unresolved = {submitted[i]['id'] for i in irrelevant} - reviewed - represented
+    merged['unreviewed_ids'] = [c['id'] for c in submitted if c['id'] in unresolved]
+    # Keep the last capacity diagnostic only for candidates still unresolved.
+    omissions = {r['candidate_id']: r for t in batches for r in t.get('omitted', [])
+                 if r['candidate_id'] in unresolved}
+    merged['omitted'] = list(omissions.values())
+    kept = {c['id'] for c in selected}
+    provisional = [c for c in submitted if c['id'] in unresolved and c['id'] not in kept]
+    selected = selected + provisional
+    merged['provisional_ids'] = [c['id'] for c in provisional]
+    merged['confirmed_irrelevant_ids'] = [j['candidate_id'] for j in merged['judgments']
+                                         if j['valid'] and not j['useful']]
+    if unresolved:
+        merged['status'] = 'partial'
+        merged['errors'].append(dict(error='ReviewIncomplete'))
+    elif merged['restored_ids']:
+        merged['status'] = 'recovered'
+    elif irrelevant:
+        merged['status'] = 'ok'
+    return selected, merged

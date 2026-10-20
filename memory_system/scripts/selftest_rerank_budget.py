@@ -16,7 +16,7 @@ from selftest_graph_cascade import documents_in, permutation, selected
 
 class RerankBudgetTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
-        settings = patch.multiple(config, CASCADE_COARSE_LIMIT=50, CASCADE_FINE_LIMIT=12,
+        settings = patch.multiple(config, LISTWISE_KEYED_OUTPUT=False, CASCADE_COARSE_LIMIT=50, CASCADE_FINE_LIMIT=12,
             CASCADE_LLM_LIMIT=10, CE_BATCH_SIZE=8, CE_MAX_REQUEST_BYTES=100000,
             CE_MAX_DOCUMENT_BYTES=20000, RERANK_MAX_PROMPT_BYTES=24000,
             RERANK_REPAIR_MAX_CALLS=1, RERANK_CONCURRENCY=2)

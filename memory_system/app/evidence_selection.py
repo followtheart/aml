@@ -81,7 +81,7 @@ def represented_by(row, selected, cache=None):
 
 
 def select(rows, count, requirements, key, reserve_ids=(), *, carry_ids=(), fused_ids=(), trace=None,
-           bound_soft_reservations=False):
+           bound_soft_reservations=False, soft_rank_window=True):
     """Keep score order; defer only evidence completely represented by selected units.
 
     Strong source witnesses and bounded option-topic champions reserve slots.
@@ -118,6 +118,8 @@ def select(rows, count, requirements, key, reserve_ids=(), *, carry_ids=(), fuse
     suppressed = []
     soft_limit = max(1, count // 8) if count else 0
     rank_limit = count + max(1, count // 4) if count else 0
+    if not soft_rank_window:
+        rank_limit = len(ordered)
     if bound_soft_reservations:
         soft_used = 0
         for rank, c in enumerate(ordered, 1):

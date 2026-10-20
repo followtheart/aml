@@ -34,6 +34,48 @@ def candidate(mid, score, sources=(), *, supported=(), soft=(), fusion_ids=None)
 
 
 class VisibleSourceSelectionTests(unittest.TestCase):
+    def bounded(self, rows, count=16, requirements=(), fused_ids=(), reserve_ids=()):
+        trace = {}
+        selected = cascade.shortlist(rows, count, requirements,
+            lambda row: (row['_fixture_score'],), fused_ids=fused_ids,
+            reserve_ids=reserve_ids, trace=trace, bound_soft_reservations=True)
+        return {c['id'] for c in selected}, trace
+
+    def test_far_below_cutoff_fused_hits_do_not_displace_top_sixteen(self):
+        rows = [candidate(f'r{i}', 1-i/100, [source(str(i), f'Evidence {i}.')])
+                for i in range(50)]
+        selected, trace = self.bounded(rows, fused_ids=['r20', 'r26', 'r45'])
+        self.assertEqual(selected, {f'r{i}' for i in range(16)})
+        self.assertEqual({x['reason'] for x in trace['soft_reservation_policy']['suppressed']},
+                         {'outside_ce_window'})
+
+    def test_near_cutoff_fused_and_topic_reserves_share_one_budget(self):
+        rows = [candidate(f'r{i}', 1-i/100, [source(str(i), f'Evidence {i}.')])
+                for i in range(24)]
+        rows[17] = candidate('topic', .83, [source('topic', 'I enjoy weekend surfing.')])
+        selected, trace = self.bounded(rows,
+            requirements=[dict(id='option:0', text='weekend surfing')],
+            fused_ids=['r0', 'r1', 'r16', 'r18'])
+        self.assertIn('r16', selected)
+        self.assertIn('topic', selected)
+        self.assertNotIn('r18', selected)
+        self.assertEqual(len(selected), 16)
+        self.assertTrue(any(x['candidate_id'] == 'r18' and x['reason'] == 'soft_reservation_budget'
+                            for x in trace['soft_reservation_policy']['suppressed']))
+
+    def test_low_rank_supported_witness_and_unscored_rescue_are_exempt(self):
+        rows = [candidate(f'r{i}', 1-i/100, [source(str(i), f'Evidence {i}.')])
+                for i in range(30)]
+        rows[-1]['_supported_coverage_ids'] = ['need']
+        selected, _ = self.bounded(rows, requirements=[dict(id='need', text='Required fact')],
+                                   fused_ids=['r29'], reserve_ids=['r28'])
+        self.assertTrue({'r28', 'r29'} <= selected)
+
+    def test_zero_capacity_has_no_soft_seats(self):
+        selected, trace = self.bounded([candidate('a', 1)], count=0, fused_ids=['a'])
+        self.assertFalse(selected)
+        self.assertEqual(trace['soft_reservation_policy']['limit'], 0)
+
     def select(self, rows, count, requirements=()):
         before = copy.deepcopy(rows)
         selected = cascade.shortlist(rows, count, requirements,

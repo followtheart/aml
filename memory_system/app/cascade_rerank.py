@@ -43,9 +43,11 @@ def cap_rules(req, plan, rules):
     return kept, dropped
 
 
-def shortlist(rows, count, requirements, key, reserve_ids=(), *, trace=None, carry_ids=(), fused_ids=()):
+def shortlist(rows, count, requirements, key, reserve_ids=(), *, trace=None, carry_ids=(), fused_ids=(),
+              bound_soft_reservations=False):
     return evidence_selection.select(rows, count, requirements, key, reserve_ids,
-                                     trace=trace, carry_ids=carry_ids, fused_ids=fused_ids)
+                                     trace=trace, carry_ids=carry_ids, fused_ids=fused_ids,
+                                     bound_soft_reservations=bound_soft_reservations)
 
 
 def query_text(req, plan):
@@ -291,14 +293,14 @@ async def rank(req, plan, candidates):
     reserve_count = min(max(1, min(config.CASCADE_FINE_LIMIT, config.CASCADE_LLM_LIMIT) // 4), len(failed)) if scores else 0
     failed_ids = {c['id'] for c in evidence_selection.rescue(failed, reserve_count, req.query,
                                                            plan.get('_query_specs', []))}
-    # The cross-encoder is a single opinion; the top fused retrieval hits keep a
-    # bounded seat in the fine list so one bad CE score cannot discard them.
+    # Retrieval hits may reserve a seat only within the bounded CE rank window.
     fused_head = sorted(coarse, key=lambda c: -(c.get('_fused') or 0))[:max(0, config.CASCADE_FUSED_RESERVE)]
     fused_ids = {c['id'] for c in fused_head} - failed_ids if scores else set()
     fine_selection = {}
     fine = shortlist(coarse, min(config.CASCADE_FINE_LIMIT, len(coarse)), requirements,
         lambda c: (c['_ce_score'] if c.get('_ce_score') is not None else -1e30, c.get('_fused', 0)),
-        reserve_ids=failed_ids, fused_ids=fused_ids, trace=fine_selection) if scores else shortlist(coarse, config.CASCADE_FINE_LIMIT,
+        reserve_ids=failed_ids, fused_ids=fused_ids, trace=fine_selection,
+        bound_soft_reservations=True) if scores else shortlist(coarse, config.CASCADE_FINE_LIMIT,
             requirements, lambda c: (c.get('_fused', 0),), trace=fine_selection)
     fine_ids = {c['id'] for c in fine}
     reservations = [r for r in fine_selection['reservations'] if r['selected']]

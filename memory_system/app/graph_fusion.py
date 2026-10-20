@@ -6,12 +6,40 @@ never creates an independent vote. No reciprocal-rank fusion is used here.
 from collections import Counter, defaultdict, deque
 import json
 import math
+import numpy as np
 from . import budget, config, graph, personal_evidence as pe
+
+
+def _query_vectors(plan):
+    """Reuse successful query embeddings; never make an embedding request."""
+    values = np.asarray(plan.get('_fusion_query_vectors', []), dtype=np.float32)
+    if values.ndim != 2:
+        return None
+    norms = np.linalg.norm(values, axis=1)
+    valid = np.isfinite(values).all(axis=1) & np.isfinite(norms) & (norms > 0)
+    return values[valid] / norms[valid, None] if valid.any() else None
+
+
+def _candidate_similarity(item, queries):
+    if queries is None or item.get('embedding_space') != config.EMBEDDING_SPACE:
+        return None
+    vector = item.get('embedding')
+    if vector is None:
+        return None
+    vector = np.asarray(vector, dtype=np.float32)
+    if vector.ndim != 1 or vector.shape[0] != queries.shape[1] or not np.isfinite(vector).all():
+        return None
+    norm = np.linalg.norm(vector)
+    if not np.isfinite(norm) or norm <= 0:
+        return None
+    return max(0., min(1., float(np.max(queries @ (vector / norm)))))
 
 
 def fuse(routes, plan, *, triples=(), sources=None, dependencies=None):
     sources, dependencies = sources or {}, dependencies or {}
     by_id, semantics, channels = {}, {}, defaultdict(set)
+    candidate_semantics = {}
+    queries = _query_vectors(plan)
     descriptors = plan.get('_routes', [])
     for i, route in enumerate(routes):
         name = descriptors[i]['channel'] if i < len(descriptors) else 'unknown'
@@ -28,6 +56,10 @@ def fuse(routes, plan, *, triples=(), sources=None, dependencies=None):
                 score = original.get('_score', 0)
                 if isinstance(score, (float, int)) and math.isfinite(score):
                     semantics[mid] = max(semantics.get(mid, 0), max(0.0, min(1.0, score)))
+            elif mid not in candidate_semantics:
+                score = _candidate_similarity(original, queries)
+                if score is not None:
+                    candidate_semantics[mid] = score
     if not by_id:
         plan['_graph_fusion'] = dict(method='typed_graph_propagation', nodes=0, edges=0, graph_weight=0, truncated_ids=[])
         plan['_fusion_edges'], plan['_fusion_triples'] = [], []
@@ -42,11 +74,13 @@ def fuse(routes, plan, *, triples=(), sources=None, dependencies=None):
     for mid, item in by_id.items():
         terms = pe.terms(item.get('_rank_text', item['content']))
         lexical = max((len(terms & q) / len(q) for q in needles if q), default=0)
-        semantic = semantics.get(mid, 0)
+        semantic = semantics.get(mid, candidate_semantics.get(mid, 0))
         overlap = max((source_frequency[key] for key in source_sets[mid]), default=1)
         prior = max(.01, .55 * semantic + .45 * lexical) / math.sqrt(overlap)
         priors[mid] = prior
-        features[mid] = dict(semantic=semantic, lexical=lexical, source_multiplicity=overlap)
+        features[mid] = dict(semantic=semantic, lexical=lexical, source_multiplicity=overlap,
+            semantic_basis=('vector_route' if mid in semantics else
+                            'candidate_embedding' if mid in candidate_semantics else 'unavailable'))
         item['_fusion_source_ids'] = sorted(source_sets[mid])
 
     # The caller also bounds metadata reads. Keep query/option representatives

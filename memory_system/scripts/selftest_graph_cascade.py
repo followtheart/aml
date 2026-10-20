@@ -56,6 +56,59 @@ class GraphFusionTests(unittest.TestCase):
                 '_routes': [dict(channel='vector', family='vector', weight=1., candidates=route)
                             for route in routes]}
 
+    def graph_candidate(self, vector=(3., 4.), **overrides):
+        return dict(dict(id='graph-only', content='Unrelated wording',
+                         embedding=list(vector), embedding_space=config.EMBEDDING_SPACE),
+                    **overrides)
+
+    def graph_score(self, item, queries=((1., 0.),)):
+        plan = dict(query='Alpha', _fusion_query_vectors=list(queries),
+                    _routes=[dict(channel='graph')])
+        return self.fusion.fuse([[item]], plan)[0]
+
+    def test_graph_only_candidate_gets_cosine_without_lexical_match(self):
+        row = self.graph_score(self.graph_candidate())
+        self.assertAlmostEqual(row['_fusion']['semantic'], .6, places=6)
+        self.assertEqual(row['_fusion']['lexical'], 0)
+        self.assertEqual(row['_fusion']['semantic_basis'], 'candidate_embedding')
+        self.assertGreater(row['_fused'], .01)
+
+    def test_vector_route_score_keeps_precedence_over_embedding_fallback(self):
+        item = self.graph_candidate()
+        plan = dict(query='Alpha', _fusion_query_vectors=[[1., 0.]],
+                    _routes=[dict(channel='graph'), dict(channel='vector')])
+        row = self.fusion.fuse([[item], [dict(item, _score=.2)]], plan)[0]
+        self.assertEqual(row['_fusion']['semantic'], .2)
+        self.assertEqual(row['_fusion']['semantic_basis'], 'vector_route')
+
+    def test_missing_or_invalid_embeddings_do_not_invent_similarity(self):
+        for overrides in (dict(embedding=None), dict(embedding_space='different-space'),
+                          dict(embedding=[1., 0., 0.]), dict(embedding=[0., 0.]),
+                          dict(embedding=[float('nan'), 1.])):
+            with self.subTest(overrides=overrides):
+                row = self.graph_score(self.graph_candidate(**overrides))
+                self.assertEqual(row['_fusion']['semantic'], 0)
+                self.assertEqual(row['_fusion']['semantic_basis'], 'unavailable')
+        self.assertEqual(self.graph_score(self.graph_candidate(), queries=())['_fusion']['semantic'], 0)
+
+    def test_followup_vectors_take_maximum_not_sum(self):
+        item = self.graph_candidate(vector=(0., 1.))
+        once = self.graph_score(item, queries=((1., 0.), (0., 1.)))
+        twice = self.graph_score(item, queries=((1., 0.), (0., 1.), (0., 1.)))
+        self.assertEqual(once['_fusion']['semantic'], 1)
+        self.assertEqual(once['_fused'], twice['_fused'])
+        self.assertEqual(self.graph_score(self.graph_candidate(vector=(-1., 0.)))['_fusion']['semantic'], 0)
+
+    def test_graph_candidate_can_enter_unchanged_coarse_selection(self):
+        from app import cascade_rerank
+        item = self.graph_candidate(vector=(1., 0.))
+        plan = dict(query='Alpha', _fusion_query_vectors=[[1., 0.]],
+                    _routes=[dict(channel='vector'), dict(channel='graph')])
+        routes = [[dict(id='vector-hit', content='Other words', _score=.4)], [item]]
+        ranked = self.fusion.fuse(routes, plan)
+        chosen = cascade_rerank.shortlist(ranked, 1, [], lambda c: (c['_fused'],))
+        self.assertEqual([c['id'] for c in chosen], ['graph-only'])
+
     def test_repeating_routes_cannot_amplify_the_same_observation(self):
         route = [dict(id='a', content='Alpha fact'), dict(id='b', content='Beta fact')]
         once = self.fusion.fuse([copy.deepcopy(route)], self.plan([route]))

@@ -156,7 +156,7 @@ class RecoveryTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len([c for c in result if c.get('type')=='rule']),6)
         self.assertEqual(plan['_cascade']['rule_cap']['dropped'],[])
 
-    async def test_top_fused_candidates_keep_a_seat_when_ce_scores_them_low(self):
+    async def test_top_fused_candidate_outside_ce_window_cannot_displace_evidence(self):
         rows=self.rows(20)
         async def ce(query,documents,**kwargs):
             # The best fused hit gets the worst CE score; everything else follows the fused order.
@@ -169,11 +169,12 @@ class RecoveryTests(unittest.IsolatedAsyncioTestCase):
                 patch.object(llm,'complete_json',side_effect=self.identity):
             ranked=await cascade.rank(self.req(),plan,rows)
         fine=plan['_cascade']['fine']
-        self.assertIn('m0',fine['selected_ids'])
-        self.assertEqual(fine['fused_reserved_ids'],['m0'])
-        self.assertIn('m0',plan['_cascade']['listwise']['candidate_ids'])
-        reasons={r['candidate_id']:r['reasons'] for r in fine['selection']['reservations']}
-        self.assertEqual(reasons['m0'],['fused_head'])
+        self.assertNotIn('m0',fine['selected_ids'])
+        self.assertEqual(fine['fused_reserved_ids'],[])
+        self.assertNotIn('m0',plan['_cascade']['listwise']['candidate_ids'])
+        suppressed=fine['selection']['soft_reservation_policy']['suppressed']
+        self.assertTrue(any(r['candidate_id']=='m0' and r['reason']=='outside_ce_window'
+                            for r in suppressed))
         with patch.object(config,'CASCADE_FINE_LIMIT',5), patch.object(config,'CASCADE_LLM_LIMIT',5), \
                 patch.object(config,'CASCADE_FUSED_RESERVE',0), \
                 patch.object(cross_encoder,'rerank',side_effect=ce), \

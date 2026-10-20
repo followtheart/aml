@@ -327,6 +327,9 @@ async def _recall(st: store.Store, req: schemas.SearchRequest, plan: Dict) -> Li
     routes = []
     dense = []
     if vecs is not None:
+        # Non-vector routes can contain relevant memories outside vector top-k.
+        # Retain queries for local fusion scoring, including grounded follow-up.
+        plan.setdefault('_fusion_query_vectors', []).extend(vecs.tolist())
         dense = await local_work.run(st.nearest_many_by_embedding,
             req.user_id, vecs, config.RECALL_VECTOR_LIMIT, include_history=history,
             include_sensitive=sensitive, include_cold=True)

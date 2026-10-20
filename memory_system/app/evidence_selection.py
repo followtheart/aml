@@ -80,7 +80,8 @@ def represented_by(row, selected, cache=None):
     return sorted(owners)
 
 
-def select(rows, count, requirements, key, reserve_ids=(), *, carry_ids=(), fused_ids=(), trace=None):
+def select(rows, count, requirements, key, reserve_ids=(), *, carry_ids=(), fused_ids=(), trace=None,
+           bound_soft_reservations=False):
     """Keep score order; defer only evidence completely represented by selected units.
 
     Strong source witnesses and bounded option-topic champions reserve slots.
@@ -111,6 +112,28 @@ def select(rows, count, requirements, key, reserve_ids=(), *, carry_ids=(), fuse
             if mid in by_id:
                 entry = reservations.setdefault(mid, dict(requirement_ids=[], reasons=[]))
                 entry['reasons'].append(reason)
+    # At the CE boundary, retrieval/topic matches are only weak insurance.
+    # Share a small promotion budget and admit only candidates near the CE cutoff. Strong
+    # witnesses and failed-provider rescue retain their independent guarantees.
+    suppressed = []
+    soft_limit = max(1, count // 8) if count else 0
+    rank_limit = count + max(1, count // 4) if count else 0
+    if bound_soft_reservations:
+        soft_used = 0
+        for rank, c in enumerate(ordered, 1):
+            entry = reservations.get(c['id'])
+            if not entry or not set(entry['reasons']) <= {'option_topic_coverage', 'fused_head'}:
+                continue
+            # Candidates already inside the score cutoff need no promotion.
+            if rank <= count:
+                continue
+            reason = ('outside_ce_window' if rank > rank_limit else
+                      'soft_reservation_budget' if soft_used >= soft_limit else None)
+            if reason:
+                suppressed.append(dict(candidate_id=c['id'], rank=rank, **entry, reason=reason))
+                del reservations[c['id']]
+            else:
+                soft_used += 1
     reserved = [c for c in ordered if c['id'] in reservations]
     # Soft fused-head reserves must not crowd out option or carried witnesses.
     reserved.sort(key=lambda c: reservations[c['id']]['reasons'] == ['fused_head'])
@@ -142,6 +165,10 @@ def select(rows, count, requirements, key, reserve_ids=(), *, carry_ids=(), fuse
         selected.append(c)
     chosen_ids = {c['id'] for c in selected}
     if trace is not None:
+        if bound_soft_reservations:
+            trace['soft_reservation_policy'] = dict(limit=soft_limit, budget_scope='outside_score_cutoff',
+                                                   max_ce_rank=rank_limit,
+                                                   suppressed=suppressed)
         trace.update(policy='score_order_visible_evidence', reservations=[
             dict(candidate_id=mid, **entry, selected=mid in chosen_ids)
             for mid, entry in reservations.items()], decisions=[])

@@ -940,6 +940,12 @@ def _memory_prefix(c: Dict, full: Optional[Dict], anchor: str) -> str:
         prefix += "[user rule] "
     if item.get("epistemic_status") == "inferred":
         prefix += "[inferred; not stated by the user] "
+    lesson = (item.get('state') or {}).get('experience')
+    if lesson:
+        prefix += (f"[experience: {lesson['status']}; {lesson['scope']['execution_kind']}; "
+                   "valid only within recorded conditions] ")
+        if lesson['status'] in ('rejected', 'stale'):
+            prefix += '[do not apply this lesson as a recommendation] '
     if item.get('resolution_status') == 'disputed':
         prefix += '[disputed; conflicting statements exist] '
     if profile.is_forget_rule(item):

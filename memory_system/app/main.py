@@ -75,7 +75,35 @@ async def purge_memory(user_id: str):
 async def feedback(req: schemas.FeedbackRequest):
     try:
         ids = await experience.run_feedback(_store, req)
-        return schemas.FeedbackResponse(memory_ids=ids)
+        return schemas.FeedbackResponse(memory_ids=ids, feedback_event_id=experience.feedback_identity(req)[2])
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e)) from e
     except Exception as e:
         raise HTTPException(status_code=500,
                             detail={"reason": f"feedback failed: {e}"})
+
+
+@app.get('/feedback/{user_id}/{event_id}', dependencies=[Depends(auth)])
+async def feedback_observation(user_id: str, event_id: str):
+    with _store.snapshot(user_id) as view:
+        event = view.get_feedback(user_id, event_id)
+        if event is None:
+            raise HTTPException(status_code=404, detail='Feedback event not found')
+        kind = event['payload'].get('execution_kind', 'observed')
+        return dict(kind='observation' if kind == 'observed' else kind, **event)
+
+
+@app.get('/experience/{user_id}/{memory_id}', dependencies=[Depends(auth)])
+async def get_experience(user_id: str, memory_id: str):
+    try:
+        return experience.inspect(_store, user_id, memory_id)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e)) from e
+
+
+@app.post('/experience/review', dependencies=[Depends(auth)])
+async def review_experience(req: schemas.ExperienceReviewRequest):
+    try:
+        return experience.review(_store, req)
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e)) from e

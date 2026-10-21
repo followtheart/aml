@@ -131,6 +131,10 @@ STRUCTURED_SCHEMAS["experience"] = _object({
         "description": _TEXT,
         "content": _TEXT,
         "keywords": {"type": "array", "items": _TEXT},
+        "applicability": {"type": "array", "items": _TEXT},
+        "exclusions": {"type": "array", "items": _TEXT},
+        "validation_plan": _TEXT,
+        "evidence_quotes": {"type": "array", "minItems": 1, "items": _TEXT},
     })}
 })
 STRUCTURED_SCHEMAS["profile_consolidation"] = _object({
@@ -414,7 +418,9 @@ class FakeLLM:
             return json.dumps({"items": [{"type": "strategy", "title": "Task lesson",
                 "description": "Reusable lesson from explicit task feedback",
                 "content": "Review the observed outcome before repeating this task.",
-                "keywords": ["task", "feedback"]}]})
+                "keywords": ["task", "feedback"], "applicability": ["Same task and environment"],
+                "exclusions": ["Changed environment"], "validation_plan": "Replay the same inputs with a control.",
+                "evidence_quotes": [prompt.split('\nTrace:\n', 1)[1].split('\n', 1)[0]]}]})
         if "profile consolidation module" in prompt:
             return json.dumps({"items": []})
         if "choice alignment module" in prompt:

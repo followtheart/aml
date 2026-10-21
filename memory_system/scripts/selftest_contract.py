@@ -173,6 +173,21 @@ r = client.post("/feedback", headers=H, json={
     "environment_verified": False})
 check("feedback creates experience memory",
     r.status_code == 200 and len(r.json().get("memory_ids", [])) == 1)
+feedback_id = r.json()['feedback_event_id']
+experience_id = r.json()['memory_ids'][0]
+experience_url = f"/experience/{add_body['user_id']}/{experience_id}"
+feedback_url = f"/feedback/{add_body['user_id']}/{feedback_id}"
+check('experience inspection requires authentication', client.get(experience_url).status_code == 401)
+observation = client.get(feedback_url, headers=H)
+check('feedback observation is retrievable', observation.status_code == 200 and observation.json()['kind'] == 'observation')
+lesson = client.get(experience_url, headers=H)
+check('experience starts as hypothesis', lesson.status_code == 200 and lesson.json()['experience']['status'] == 'hypothesis')
+review = dict(user_id=add_body['user_id'], memory_id=experience_id, expected_version=1,
+              status='rejected', reviewer='test', rationale='Needs a more specific lesson',
+              evidence=[dict(event_id=feedback_id, quote='Retrieved memories and produced a supported summary.')])
+r = client.post('/experience/review', headers=H, json=review)
+check('explicit experience review is versioned', r.status_code == 200 and r.json()['version'] == 2)
+check('stale review version rejected', client.post('/experience/review', headers=H, json=review).status_code == 422)
 
 # 11. authenticated hard purge removes all user content
 r = client.delete(f"/memory/{add_body['user_id']}", headers=H)
@@ -180,6 +195,8 @@ check("purge returns content-free receipt",
     r.status_code == 200 and r.json().get("receipt_id", "").startswith("purge_"))
 r = client.post("/search", json=sbody, headers=H)
 check("purged user has no memories", r.status_code == 200 and r.json()["data"] == [])
+check('purge removes feedback and experience', client.get(feedback_url, headers=H).status_code == 404
+      and client.get(experience_url, headers=H).status_code == 404)
 
 failed = [n for n, ok in results if not ok]
 print(f"\n{len(results) - len(failed)}/{len(results)} passed")

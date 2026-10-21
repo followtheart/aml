@@ -960,3 +960,70 @@ AML_FAKE=0 .venv/bin/python scripts/evaluate_listwise_staged.py run \
 ```
 
 比较初判时统一使用 `proposed_deleted`；旧协议的 `selected_ids` 是初判输出，新协议则是复核和排序后的输出，不能直接混算。`context_incomplete`、`deletion_blocked`、`judgment_checks`、`context_supplements` 和 `ranking_status` 分别记录上下文缺失、未授权删除、判断校验、补读及排序回退。降级不等于证据被删除；最终打包还需单独做漏斗审计。
+
+### 结构化任务轨迹与经验复核
+
+`POST /feedback` 保留原有 `task/outcome/trace` 调用方式，原有请求的幂等哈希不变。
+`outcome` 现在支持 `success/failure/partial/unknown`；可选 `trajectory` 保存任务类型、目标、
+约束、验收标准、模型/数据版本/配置、步骤输入输出、指标及基线、错误和产物路径。
+步骤 ID、指标名必须唯一，数值不接受 NaN/Infinity。环境签名、代码及依赖版本仍使用原有顶层字段。
+`distill=false` 只记录反馈和轨迹，不调用模型；默认仍蒸馏。响应返回 `feedback_event_id`，
+`GET /feedback/{user_id}/{event_id}` 可读取原始记录。新接口沿用现有认证和用户作用域。
+
+```json
+{
+  "user_id": "u", "session_id": "experiment-1", "feedback_event_id": "trial-1",
+  "task": "修复 listwise 请求超限", "outcome": "partial",
+  "trace": "扩大预算后请求超限消失，但正确率未提高。",
+  "execution_kind": "replay", "distill": false,
+  "environment_signature": "local-test", "code_version": "commit-sha",
+  "dependency_versions": {"python": "3.14"},
+  "trajectory": {
+    "task_type": "search-optimization", "goal": "降低超限且保持准确率",
+    "constraints": ["同一候选池"], "acceptance_criteria": ["准确率不得下降"],
+    "dataset_version": "dataset-sha", "settings": {"prompt_bytes": 48000},
+    "steps": [{"step_id": "rerank", "action": "冻结候选后重放", "status": "partial"}],
+    "metrics": [{"name": "correct", "value": 14, "baseline": 15, "unit": "questions", "direction": "higher"}]
+  }
+}
+```
+
+反馈记录是观察/回放/模拟记录；其蒸馏出的经验一律先记为 `hypothesis`，模型不能自动升级。
+经验附带适用条件、排除条件、验证计划，以及可定位到事件和 payload hash 的原始 trace 引文。
+引用不存在就拒绝写入。`GET /experience/{user_id}/{memory_id}` 返回状态、版本、证据链接和去重案例数。
+相同任务/trace/环境的重复蒸馏追加事件链接，但不增加独立案例数；近似语义匹配不足以合并不同条件或结果。
+`execution_kind=replay/simulation` 以及 `partial/unknown` 不增加真实 helpful/harmful 计数。
+这些计数表示调用方归因的任务反馈，不表示因果效应或独立实验样本数。
+
+`POST /experience/review` 接收 `user_id, memory_id, expected_version, status, reviewer, rationale, evidence`。
+其中 `evidence` 是 `{event_id, quote, relation}` 列表，relation 为 `support/counterexample/context`。
+允许 `hypothesis → validated → adopted`，也可转为 `rejected/stale`；后两者需先回到 hypothesis 才能重新验证。
+升级必须引用当前用户已有事件中的准确引文，且至少一项支持记录具有匹配的任务、环境、代码、依赖、
+模型、数据版本、约束和配置，以及 `environment_verified=true` 和 `verification_result=passed`。
+这些是调用方提交、复核者确认的执行记录，不是服务自行执行工具后提供的证明；模拟记录不能授权升级。
+不允许跳过验证或使用旧版本复核；每次变更写入已有 claim history。状态、证据和反馈随用户 purge 一起删除。
+搜索正文显示经验状态和执行类别，拒绝/过期经验明确标记为不可直接采用的建议。
+
+### 冻结快照对照回放
+
+`experience_replay.py` 为已完成且通过审计的本地 PersonaMem-v2 HTTPS 实验创建 SQLite backup
+（包含 WAL 中已提交的数据）、候选/CE/查询/题目快照及文件哈希。它固定的是候选与 CE 阶段输入，
+不会重新抽取记忆或检索数据库；数据库副本作为来源记录保存。两组使用生产 cascade、复核和打包实现，
+只切换 `LISTWISE_STAGED`，其余搜索设置沿用原始 trace。默认三轮，交替执行组别；可选运行回答评分。
+两组 coarse/fine/listwise 准入不一致或任一组失败时，该对记为不可比较，不计入有效得分差。
+不评分时得分字段为 null，不把候选保留率当作准确率。数据不写入线上反馈，也不自动升级任何经验。
+
+在 `memory_system` 目录运行：
+
+```bash
+.venv/bin/python scripts/experience_replay.py freeze \
+  --run runs/https-staged-off-20261021/legacy --output runs/experience-snapshot
+.venv/bin/python scripts/experience_replay.py verify --snapshot runs/experience-snapshot
+AML_FAKE=0 .venv/bin/python scripts/experience_replay.py compare \
+  --snapshot runs/experience-snapshot --output runs/experience-paired \
+  --execute --repeats 3 --answer
+```
+
+快照和输出目录拒绝覆盖；读取及运行结束均校验快照完整性。`--cases` 可指定以逗号分隔的
+`conversation_id:qa_id`。结果含每组调用、预算、trace、证据包和可选评分，便于按失败阶段复核。
+这是冻结上游的局部对照，不包括真实检索/入库耗时，不等价于端到端 HTTPS 效果或因果证明。

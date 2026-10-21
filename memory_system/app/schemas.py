@@ -1,6 +1,6 @@
 """Pydantic schemas for the AML Add/Search synchronous contract."""
 from typing import List, Literal, Optional
-from pydantic import BaseModel, Field, model_serializer
+from pydantic import BaseModel, Field, model_serializer, model_validator
 
 
 class Message(BaseModel):
@@ -109,11 +109,51 @@ class PurgeResponse(BaseModel):
     row_counts: dict
 
 
+class TaskMetric(BaseModel):
+    name: str = Field(min_length=1)
+    value: float = Field(allow_inf_nan=False)
+    baseline: Optional[float] = Field(default=None, allow_inf_nan=False)
+    unit: str = ''
+    direction: Literal['higher', 'lower', 'neutral'] = 'neutral'
+
+
+class TaskStep(BaseModel):
+    step_id: str = Field(min_length=1)
+    action: str = Field(min_length=1)
+    tool: Optional[str] = None
+    input: str = ''
+    output: str = ''
+    status: Literal['success', 'failure', 'partial', 'unknown'] = 'unknown'
+    used_memory_ids: List[str] = Field(default_factory=list)
+
+
+class TaskTrajectory(BaseModel):
+    schema_version: Literal[1] = 1
+    task_type: str = Field(min_length=1)
+    goal: str = Field(min_length=1)
+    constraints: List[str] = Field(default_factory=list)
+    acceptance_criteria: List[str] = Field(default_factory=list)
+    model: Optional[str] = None
+    dataset_version: Optional[str] = None
+    settings: dict = Field(default_factory=dict)
+    steps: List[TaskStep] = Field(default_factory=list)
+    metrics: List[TaskMetric] = Field(default_factory=list)
+    errors: List[str] = Field(default_factory=list)
+    artifacts: List[str] = Field(default_factory=list)
+
+    @model_validator(mode='after')
+    def unique_ids(self):
+        for values in ([s.step_id for s in self.steps], [m.name for m in self.metrics]):
+            if len(values) != len(set(values)):
+                raise ValueError('Step IDs and metric names must be unique')
+        return self
+
+
 class FeedbackRequest(BaseModel):
     user_id: str = Field(min_length=1)
     session_id: str = Field(min_length=1)
     task: str = Field(min_length=1)
-    outcome: str = Field(pattern="^(success|failure)$")
+    outcome: Literal['success', 'failure', 'partial', 'unknown']
     trace: str = Field(min_length=1)
     task_signature: Optional[str] = None
     environment_verified: bool = False
@@ -125,8 +165,28 @@ class FeedbackRequest(BaseModel):
     code_version: Optional[str] = None
     dependency_versions: dict = Field(default_factory=dict)
     verification_result: Optional[str] = Field(default=None, pattern='^(passed|failed)$')
+    execution_kind: Literal['observed', 'replay', 'simulation'] = 'observed'
+    trajectory: Optional[TaskTrajectory] = None
+    distill: bool = True
+
+
+class ExperienceEvidenceRef(BaseModel):
+    event_id: str = Field(min_length=1)
+    quote: str = Field(min_length=1)
+    relation: Literal['support', 'counterexample', 'context'] = 'context'
+
+
+class ExperienceReviewRequest(BaseModel):
+    user_id: str = Field(min_length=1)
+    memory_id: str = Field(min_length=1)
+    expected_version: int = Field(ge=1)
+    status: Literal['validated', 'adopted', 'rejected', 'stale', 'hypothesis']
+    reviewer: str = Field(min_length=1)
+    rationale: str = Field(min_length=1)
+    evidence: List[ExperienceEvidenceRef] = Field(min_length=1)
 
 
 class FeedbackResponse(BaseModel):
     success: bool = True
     memory_ids: List[str] = Field(default_factory=list)
+    feedback_event_id: Optional[str] = None

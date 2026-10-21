@@ -4,7 +4,7 @@ from functools import lru_cache
 from pathlib import Path
 from . import answer_choice, config, direct_catalog_reader
 
-SEARCH_POLICY = 'graph_cascade_v14-incremental-listwise-repair'
+SEARCH_POLICY = 'graph_cascade_v15-fine-capacity-backfill'
 
 
 @lru_cache(maxsize=1)

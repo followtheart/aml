@@ -3,6 +3,8 @@
 No gold labels, provider calls, inferred personal facts or blended CE/graph scores.
 The caller must admit additions against the actual whole-request budget.
 """
+from collections import Counter
+
 from . import evidence_selection as selection
 
 
@@ -28,6 +30,35 @@ def relevance(row, requirements, visible=None):
                 value = (role == 'user', family, ratio)
                 matches[requirement['id']] = max(matches.get(requirement['id'], (False, False, 0)), value)
     return matches
+
+
+def sparse_matches(rows, requirements, visible):
+    """Rare, requirement-specific source terms can earn inspection, not support.
+
+    Count independent source identities rather than repeated memory projections.
+    A single shared generic term must not unlock every spare seat.
+    """
+    corpus = {}
+    for pieces in visible.values():
+        for source, text in pieces:
+            corpus.setdefault(source, set()).update(selection._topic_concepts(text))
+    frequency = Counter(term for terms in corpus.values() for term in terms)
+    wanted = {r['id']: selection._topic_concepts(r['text']) for r in requirements}
+    requirement_frequency = Counter(term for terms in wanted.values() for term in terms)
+    rare_limit = max(1, len(corpus) // 10)
+    out = {}
+    for row in rows:
+        matches = {}
+        for rid, terms in wanted.items():
+            for (_, role), text in visible[row['id']]:
+                hits = terms & selection._topic_concepts(text)
+                distinctive = {t for t in hits if len(t) >= 4 and not t.startswith('topic_family:')
+                               and requirement_frequency[t] == 1 and frequency[t] <= rare_limit}
+                if distinctive and len(hits) / len(terms) >= .3:
+                    value = (role == 'user', False, len(hits) / len(terms))
+                    matches[rid] = max(matches.get(rid, (False, False, 0)), value)
+        out[row['id']] = matches
+    return out
 
 
 def dependencies(row):
@@ -60,6 +91,11 @@ def propose(rows, count, requirements, *, rescue_ids=(), fused_ids=(), extra_lim
     by_id = {c['id']: c for c in ordered}
     visible = {c['id']: selection.fragments(c) for c in ordered}
     matches = {c['id']: relevance(c, requirements, visible[c['id']]) for c in ordered}
+    sparse = sparse_matches(ordered, requirements, visible)
+    sparse_ids = {mid for mid in matches if not matches[mid] and sparse[mid]}
+    for mid in matches:
+        for rid, value in sparse[mid].items():
+            matches[mid][rid] = max(matches[mid].get(rid, (False, False, 0)), value)
     trace = {}
     core = selection.select(ordered, count, requirements, key, reserve_ids=rescue_ids,
                             fused_ids=fused_ids, bound_soft_reservations=True, trace=trace)
@@ -101,10 +137,31 @@ def propose(rows, count, requirements, *, rescue_ids=(), fused_ids=(), extra_lim
         chunk = [r for r in ordered if r['id'] in new_ids]
         additions.append(dict(candidate_id=c['id'], ids=[r['id'] for r in chunk],
             group_ids=sorted(group), requirement_ids=sorted(matches[c['id']]),
-            reason='path_completion' if c['id'] in chosen_ids else 'novel_visible_evidence',
+            reason=('path_completion' if c['id'] in chosen_ids else
+                    'sparse_topic_evidence' if c['id'] in sparse_ids else 'novel_visible_evidence'),
             unscored=c.get('_ce_score') is None))
         chosen.extend(chunk)
         pending = [r for r in pending if r['id'] != c['id']]
+    # A lexical gate must not strand spare seats when CE found a nearby,
+    # source-backed semantic match. Bound this insurance to the effective CE
+    # cutoff, never unscored items or arbitrary low-ranked unique sources.
+    for c in ordered[:capacity]:
+        if len(chosen) >= capacity:
+            break
+        chosen_ids = {r['id'] for r in chosen}
+        if c['id'] in chosen_ids or c.get('_ce_score') is None or not visible[c['id']]:
+            continue
+        if selection.represented_by(c, chosen, visible):
+            continue
+        group, missing = closure(c, by_id)
+        new_ids = group - chosen_ids
+        if missing or len(chosen) + len(new_ids) > capacity:
+            continue
+        chunk = [r for r in ordered if r['id'] in new_ids]
+        chosen.extend(chunk)
+        additions.append(dict(candidate_id=c['id'], ids=[r['id'] for r in chunk],
+            group_ids=sorted(group), requirement_ids=sorted(matches[c['id']]),
+            reason='ce_boundary_backfill', unscored=False))
     chosen_ids = {c['id'] for c in chosen}
     path_groups = set()
     for c in chosen:
@@ -114,12 +171,16 @@ def propose(rows, count, requirements, *, rescue_ids=(), fused_ids=(), extra_lim
     trace['adaptive'] = dict(core_ids=[c['id'] for c in core], extra_limit=extra_limit,
                              additions=additions, rejected=rejected,
                              path_groups=[list(g) for g in sorted(path_groups)],
-                             proposed_ids=[c['id'] for c in chosen],
+                             proposed_ids=[c['id'] for c in chosen], capacity=capacity, unused_capacity=capacity-len(chosen),
                              support_labels_unchanged=True)
     extra_ids = {c['id'] for c in chosen} - {c['id'] for c in core}
     for decision in trace['decisions']:
         if decision['id'] in extra_ids:
-            decision.update(selected=True, reason='novel_visible_evidence', represented_by=[])
+            reason = next(a['reason'] for a in additions if decision['id'] in a['ids'])
+            decision.update(selected=True, reason=reason, represented_by=[])
+        elif not decision['selected'] and not decision['represented_by']:
+            decision['reason'] = ('missing_dependency' if closure(by_id[decision['id']], by_id)[1] else
+                                  'capacity' if matches[decision['id']] else 'no_visible_relevance')
     return chosen, trace
 
 
@@ -145,7 +206,7 @@ def admit_additions(submitted, candidates, additions, *, count_limit, byte_limit
             elif token_headroom is not None and request['reservation'] > token_headroom:
                 reason = 'token_budget'
         decisions.append(dict(candidate_id=addition['candidate_id'], group_ids=addition['group_ids'],
-                              admitted=reason is None, reason=reason or 'novel_visible_evidence'))
+                              admitted=reason is None, reason=reason or addition.get('reason', 'novel_visible_evidence')))
         if reason is None:
             admitted.extend(chunk)
     return admitted, decisions

@@ -928,3 +928,35 @@ AML_EVAL_CONVS=2 AML_EVAL_LIMIT=2 AML_EVAL_RESULT_NAME=perma.jsonl \
 `--convs` 在此表示独立检查点快照。完整干净版本含6325个入库批次；不建议把114题默认当作低成本冒烟测试。下载其他用户可使用 `--users user109` 等官方用户ID。当前尚未运行真实付费模型的 PERMA 成绩实验，离线 fake 流程的分数没有质量意义。
 
 `audit_temporal_https.py --dataset perma` 验证原文入库、问题全集及顺序、时间界限、结果标签评分和搜索日志，并按领域/检查点汇总。原 PersonaMem-v3 审计入口保留兼容性。PERMA 使用确切标签匹配的0/1分数，但本地检索、前提验证和选择策略不同于官方基线，因此协议标为 `perma-mcq-local-v1`，不声称是官方排行榜结果；它也不能直接和 PersonaMem-v3 的双维度开放回答评分比较。
+
+### Listwise 用途判断、删除复核与排序实验
+
+`AML_LISTWISE_STAGED=1` 启用分阶段协议：先分批识别支持、反证、限定、桥接、背景、重复、未知或无关，再复核拟删除项，最后对包括恢复项在内的候选只排序。初判依据包含目标 ID、候选自有来源引用和重复项的替代候选；非法引用、上下文不完整、未验证替代项不能授权删除。用途标签不构成事实支持。排序失败保留候选并沿用 CE 顺序。groups 只携带存活候选中已记录的完整、不重叠依赖组，不再占用主判修复次数。
+
+该协议默认关闭，保留旧协议用于对照；2026-10-21 扩大预算后的完整 HTTPS 实验得分 14/26，未超过历史旧协议基线 16/26，因此暂不默认启用。`AML_LISTWISE_PURPOSE_BATCH_SIZE=10` 是单次用途判断的软上限，不降低候选总量，已记录依赖组不会被拆开。`AML_LISTWISE_CONTEXT_REVIEW_LIMIT=2` 限制一次补读请求的候选数；补读使用原始来源的完整文本或相邻句窗口，不改写最终证据包。窗口仍不完整时继续保留。所有调用共享原有 deadline、调用和 token 预算。默认已有的 listwise 提示词也明确区分检索用途与选项充分支持，候选摘录诊断会进入 trace。
+
+staged 各次用途判断、补读和最终排序使用 `AML_LISTWISE_STAGED_MAX_PROMPT_BYTES=48000`，独立于旧协议及候选 admission 的 24000 字节上限。`AML_LISTWISE_CONTEXT_MAX_BYTES=12000` 控制每个候选补读来源的累计 UTF-8 字节数（原为 6000）；补读候选数仍默认 2。启用 staged 时，搜索总 token 预算默认 128000（旧协议仍为 64000），显式的 `AML_SEARCH_MAX_TOKENS` 始终优先。增大字节上限不会绕过总 token、调用数或 deadline 检查；扩大预算后的 HTTPS 实验中，26 次最终排序均通过预算检查，20 次排序成功、6 次输出校验失败回退；搜索降级为 7/26，最终完整来源覆盖为 32/36。平均搜索耗时 17.36 秒、搜索 token 1041973，较历史旧协议基线分别增加 22.4% 和 14.2%。该实验使用相同原始消息重新入库，候选抽取存在随机性；来源覆盖不等于事实正确性，结果不构成严格因果验证。详见 `runs/https-staged-budget-20261021/comparison.json` 和 `default-decision.json`。
+
+以下命令在 `memory_system` 目录运行，产物位于忽略的 `runs/`，可能包含原文：
+
+```bash
+# 导出盲审表及独立的历史模型判决；不会生成或伪造人工标签。
+.venv/bin/python scripts/evaluate_listwise_staged.py export \
+  --run runs/https-fine-capacity-20261021 --output runs/listwise-benchmark
+
+# 冻结同一候选集和 CE 分数，比较表示、排列和批大小；真实调用需要 --execute。
+AML_FAKE=0 .venv/bin/python scripts/evaluate_listwise_staged.py run \
+  --run runs/https-fine-capacity-20261021 --output runs/listwise-ablation \
+  --qa 20,22 --variants legacy_shared,staged_shared,staged_reverse,staged_batch8,staged_batch12 \
+  --tokens 128000 --execute
+
+# 人工填写 review.jsonl 的 annotation 后计分；未审核项不进入误删率分母。
+.venv/bin/python scripts/evaluate_listwise_staged.py score \
+  --labels runs/listwise-benchmark/review.jsonl \
+  --predictions runs/listwise-ablation/predictions.jsonl \
+  --output runs/listwise-ablation/human-metrics.json
+
+.venv/bin/python scripts/selftest_listwise_staged.py
+```
+
+比较初判时统一使用 `proposed_deleted`；旧协议的 `selected_ids` 是初判输出，新协议则是复核和排序后的输出，不能直接混算。`context_incomplete`、`deletion_blocked`、`judgment_checks`、`context_supplements` 和 `ranking_status` 分别记录上下文缺失、未授权删除、判断校验、补读及排序回退。降级不等于证据被删除；最终打包还需单独做漏斗审计。

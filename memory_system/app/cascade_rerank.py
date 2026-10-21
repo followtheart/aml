@@ -60,6 +60,10 @@ def listwise_prompt(req, plan, rows):
     edges = [e for e in plan.get('_fusion_edges', []) if e['source'] in ids and e['target'] in ids]
     metadata = dict(triples=[{k: t.get(k) for k in ('amu_id', 'subject', 'relation', 'object', 'valid_from', 'valid_to')}
                             for t in triples[:40]], associations=edges[:40])
+    incomplete = {c['id']: c['_rank_context']['reasons'] for c in rows
+                  if c.get('_rank_context', {}).get('context_incomplete')}
+    if incomplete:
+        metadata['incomplete_candidate_context'] = incomplete
     if plan.get('_fine_path_groups'):
         metadata['recorded_paths_for_joint_review'] = [
             g for g in plan['_fine_path_groups'] if set(g) <= ids]
@@ -457,132 +461,142 @@ async def rank(req, plan, candidates):
                 reason = 'capacity'
             trace['reservation_missing'].extend(dict(requirement_id=rid,candidate_id=r['candidate_id'],
                 stage='listwise',reason=reason) for rid in r['requirement_ids'] or [None])
-    selected, irrelevant, status, errors = list(submitted), set(), 'not_run', []
-    attempts = []
-    feedback, retry_kind, retained_ranking = None, None, None
-    keyed = config.LISTWISE_KEYED_OUTPUT
-    contract = listwise_contract.State(len(submitted), keyed=keyed,
-        tie_order=sorted(range(len(submitted)),
-                         key=lambda i: fine_evidence.key(submitted[i]), reverse=True))
-    repair_field, repairs, transport_retries = None, 0, 0
-    repair_limit = min(2, config.RERANK_REPAIR_MAX_CALLS)
-    listwise_deadline = None
-    if submitted:
+    if config.LISTWISE_STAGED and submitted:
+        from . import listwise_staged
         seconds = min(config.RERANK_DEADLINE_SECONDS, max(.01, limits.deadline - time.monotonic() - 2)) if limits else config.RERANK_DEADLINE_SECONDS
-        listwise_deadline = time.monotonic() + seconds
-        try:
-            async with asyncio.timeout(seconds):
-                for attempt in range(1 + repair_limit + int(repair_limit > 0)):
-                    stage = 'search.listwise' + (('.retry' if retry_kind == 'transport' else '.repair') if attempt else '')
-                    dispatched = False
-                    try:
-                        remaining = listwise_deadline - time.monotonic()
-                        if remaining <= 0:
-                            raise TimeoutError('Listwise deadline exhausted')
-                        if limits and limits.calls + limits.reserved_calls >= limits.max_calls:
-                            raise budget.BudgetExceeded('No listwise call slot remaining')
-                        request = listwise_request(req, plan, submitted,
-                            repair=repair_field is not None or bool(attempt and retry_kind == 'structure'),
-                            feedback=feedback, repair_field=repair_field, keyed=keyed,
-                            candidate_keys=contract.pending_candidate_keys() if keyed and repair_field == 'candidates' else None,
-                            locked=dict({k: v for k, v in contract.payload.items()
-                                         if k != repair_field and k not in contract.errors},
-                                        **({'candidates': contract.accepted_candidates} if keyed else {})))
-                        reservation = request.pop('reservation')
-                        prompt = request.pop('prompt')
-                        if len(prompt.encode('utf-8')) > config.RERANK_MAX_PROMPT_BYTES:
-                            raise budget.BudgetExceeded('Listwise prompt exceeds byte budget')
-                        if limits:
-                            limits.reserve_tokens(reservation)
+        selected, irrelevant, staged = await listwise_staged.select(
+            req, plan, submitted, deadline=time.monotonic() + seconds)
+        trace['listwise'] = staged
+        trace['listwise'].update(baseline_candidate_ids=sorted(baseline_ids),
+                                 selection=admission_selection, carried_ids=sorted(carried_ids))
+        status, errors, recovery = staged['status'], staged['errors'], staged['recovery']
+    else:
+        selected, irrelevant, status, errors = list(submitted), set(), 'not_run', []
+        attempts = []
+        feedback, retry_kind, retained_ranking = None, None, None
+        keyed = config.LISTWISE_KEYED_OUTPUT
+        contract = listwise_contract.State(len(submitted), keyed=keyed,
+            tie_order=sorted(range(len(submitted)),
+                             key=lambda i: fine_evidence.key(submitted[i]), reverse=True))
+        repair_field, repairs, transport_retries = None, 0, 0
+        repair_limit = min(2, config.RERANK_REPAIR_MAX_CALLS)
+        listwise_deadline = None
+        if submitted:
+            seconds = min(config.RERANK_DEADLINE_SECONDS, max(.01, limits.deadline - time.monotonic() - 2)) if limits else config.RERANK_DEADLINE_SECONDS
+            listwise_deadline = time.monotonic() + seconds
+            try:
+                async with asyncio.timeout(seconds):
+                    for attempt in range(1 + repair_limit + int(repair_limit > 0)):
+                        stage = 'search.listwise' + (('.retry' if retry_kind == 'transport' else '.repair') if attempt else '')
+                        dispatched = False
                         try:
-                            dispatched = True
-                            result = await llm.complete_json(prompt, **request,
-                                stage=stage, attempts=1, timeout=min(20, remaining))
-                        finally:
+                            remaining = listwise_deadline - time.monotonic()
+                            if remaining <= 0:
+                                raise TimeoutError('Listwise deadline exhausted')
+                            if limits and limits.calls + limits.reserved_calls >= limits.max_calls:
+                                raise budget.BudgetExceeded('No listwise call slot remaining')
+                            request = listwise_request(req, plan, submitted,
+                                repair=repair_field is not None or bool(attempt and retry_kind == 'structure'),
+                                feedback=feedback, repair_field=repair_field, keyed=keyed,
+                                candidate_keys=contract.pending_candidate_keys() if keyed and repair_field == 'candidates' else None,
+                                locked=dict({k: v for k, v in contract.payload.items()
+                                             if k != repair_field and k not in contract.errors},
+                                            **({'candidates': contract.accepted_candidates} if keyed else {})))
+                            reservation = request.pop('reservation')
+                            prompt = request.pop('prompt')
+                            if len(prompt.encode('utf-8')) > config.RERANK_MAX_PROMPT_BYTES:
+                                raise budget.BudgetExceeded('Listwise prompt exceeds byte budget')
                             if limits:
-                                limits.release_tokens(reservation)
-                        contract.accept(result, repair_field)
-                        permutation, irrelevant, groups = contract.require_valid()
-                        selected = [submitted[i] for i in permutation if i not in irrelevant]
-                        plan['_evidence_groups'] = [[submitted[i]['id'] for i in group] for group in groups]
-                        attempts.append(dict(stage=stage, status='ok', repair_field=repair_field, dispatched=dispatched))
-                        status = 'recovered' if attempt else 'ok'
-                        break
-                    except Exception as exc:
-                        attempts.append(dict(stage=stage, status='error', error=type(exc).__name__, dispatched=dispatched))
-                        attempts[-1]['repair_field'] = repair_field
-                        if getattr(exc, 'validation_code', None):
-                            attempts[-1]['validation_code'] = exc.validation_code
-                            feedback = dict(getattr(exc, 'validation_details', {}))
-                            feedback['code'] = exc.validation_code
-                            attempts[-1]['validation_details'] = feedback
-                        if getattr(exc, 'valid_ranking', None) is not None:
-                            retained_ranking = exc.valid_ranking
-                        if contract.ranking is not None:
-                            retained_ranking = list(contract.ranking)
-                        retry_kind = listwise_retry_kind(exc)
-                        if retry_kind is None:
-                            raise
-                        if retry_kind == 'transport':
-                            if transport_retries >= 1 or repair_limit == 0:
+                                limits.reserve_tokens(reservation)
+                            try:
+                                dispatched = True
+                                result = await llm.complete_json(prompt, **request,
+                                    stage=stage, attempts=1, timeout=min(20, remaining))
+                            finally:
+                                if limits:
+                                    limits.release_tokens(reservation)
+                            contract.accept(result, repair_field)
+                            permutation, irrelevant, groups = contract.require_valid()
+                            selected = [submitted[i] for i in permutation if i not in irrelevant]
+                            plan['_evidence_groups'] = [[submitted[i]['id'] for i in group] for group in groups]
+                            attempts.append(dict(stage=stage, status='ok', repair_field=repair_field, dispatched=dispatched))
+                            status = 'recovered' if attempt else 'ok'
+                            break
+                        except Exception as exc:
+                            attempts.append(dict(stage=stage, status='error', error=type(exc).__name__, dispatched=dispatched))
+                            attempts[-1]['repair_field'] = repair_field
+                            if getattr(exc, 'validation_code', None):
+                                attempts[-1]['validation_code'] = exc.validation_code
+                                feedback = dict(getattr(exc, 'validation_details', {}))
+                                feedback['code'] = exc.validation_code
+                                attempts[-1]['validation_details'] = feedback
+                            if getattr(exc, 'valid_ranking', None) is not None:
+                                retained_ranking = exc.valid_ranking
+                            if contract.ranking is not None:
+                                retained_ranking = list(contract.ranking)
+                            retry_kind = listwise_retry_kind(exc)
+                            if retry_kind is None:
                                 raise
-                            transport_retries += 1
-                            await asyncio.sleep(.1)
-                        else:
-                            if repairs >= repair_limit:
-                                raise
-                            repairs += 1
-                            repair_field = contract.next_field()
-        except Exception as exc:
-            groups_only = (contract.ranking is not None and contract.irrelevant is not None
-                           and set(contract.errors) == {'groups'})
-            status = 'groups_partial' if groups_only else 'ranking_only' if retained_ranking is not None else 'fallback'
-            if groups_only:
-                # Group metadata is optional. Keep validated ranking/relevance and
-                # still send every proposed deletion through source-grounded review.
-                irrelevant = set(contract.irrelevant)
-                selected = [submitted[i] for i in contract.ranking if i not in irrelevant]
-                plan['_evidence_groups'] = []
-            elif retained_ranking is not None:
-                selected = [submitted[i] for i in retained_ranking]
-                irrelevant = set()
-                plan['_evidence_groups'] = []
-            errors.append(dict(stage='listwise_groups' if groups_only else 'listwise', error=type(exc).__name__))
-    elif fine:
-        status = 'fallback'
-        errors.append(dict(stage='listwise', error='BudgetExceeded' if token_limited else 'prompt_budget'))
-        if token_limited:
-            # The budget cannot fund even one complete listwise input. Preserve
-            # CE's ordering and the existing bounded fallback, rather than lose
-            # all successfully scored evidence solely on LLM admission.
-            selected = list(ordered)
-    primary_selected_ids = [c['id'] for c in selected]
-    recovery = dict(status='not_needed', reviewed_ids=[], restored_ids=[], unreviewed_ids=[], judgments=[], errors=[])
-    if status in ('ok', 'recovered', 'groups_partial') and irrelevant:
-        selected, recovery = await listwise_recovery.recover(req, submitted, selected, irrelevant,
-                                                            deadline=listwise_deadline)
-        errors.extend(dict(stage='listwise_recovery', **error) for error in recovery['errors'])
-        if recovery['status'] == 'recovered' and status != 'groups_partial':
-            status = 'recovered'
-        # Review owns deletion authorization. Unresolved candidates are retained
-        # below accepted useful evidence, bounded by the admitted input set.
-        # Final packet capacity is enforced separately and is not irrelevance.
-    trace['listwise'] = dict(status=status, input_count=len(submitted), output_count=len(selected),
-        output_protocol='keyed_candidates_v1' if keyed else 'permutation_v1',
-        candidate_contract_status='valid' if contract.ranking is not None and contract.irrelevant is not None else 'invalid',
-        groups_status='valid' if contract.groups is not None else 'invalid',
-        accepted_candidate_keys=sorted(contract.accepted_candidates),
-        ignored_candidate_keys=sorted(contract.ignored_candidate_keys),
-        repair_calls=sum(a['dispatched'] and a['stage'] == 'search.listwise.repair' for a in attempts),
-        transport_retries=sum(a['dispatched'] and a['stage'] == 'search.listwise.retry' for a in attempts),
-        candidate_key_map={f'c{i}': c['id'] for i, c in enumerate(submitted)} if keyed else {},
-        candidate_ids=[c['id'] for c in submitted], selected_ids=[c['id'] for c in selected],
-        input_bytes=len(listwise_request(req, plan, submitted)['prompt'].encode('utf-8')) if submitted else 0,
-        shared_sources=config.LISTWISE_SHARED_SOURCES,
-        baseline_candidate_ids=sorted(baseline_ids),
-        attempts=attempts, errors=errors, selection=admission_selection, carried_ids=sorted(carried_ids),
-        primary_selected_ids=primary_selected_ids, primary_irrelevant_ids=[submitted[i]['id'] for i in sorted(irrelevant)],
-        recovery=recovery)
+                            if retry_kind == 'transport':
+                                if transport_retries >= 1 or repair_limit == 0:
+                                    raise
+                                transport_retries += 1
+                                await asyncio.sleep(.1)
+                            else:
+                                if repairs >= repair_limit:
+                                    raise
+                                repairs += 1
+                                repair_field = contract.next_field()
+            except Exception as exc:
+                groups_only = (contract.ranking is not None and contract.irrelevant is not None
+                               and set(contract.errors) == {'groups'})
+                status = 'groups_partial' if groups_only else 'ranking_only' if retained_ranking is not None else 'fallback'
+                if groups_only:
+                    # Group metadata is optional. Keep validated ranking/relevance and
+                    # still send every proposed deletion through source-grounded review.
+                    irrelevant = set(contract.irrelevant)
+                    selected = [submitted[i] for i in contract.ranking if i not in irrelevant]
+                    plan['_evidence_groups'] = []
+                elif retained_ranking is not None:
+                    selected = [submitted[i] for i in retained_ranking]
+                    irrelevant = set()
+                    plan['_evidence_groups'] = []
+                errors.append(dict(stage='listwise_groups' if groups_only else 'listwise', error=type(exc).__name__))
+        elif fine:
+            status = 'fallback'
+            errors.append(dict(stage='listwise', error='BudgetExceeded' if token_limited else 'prompt_budget'))
+            if token_limited:
+                # The budget cannot fund even one complete listwise input. Preserve
+                # CE's ordering and the existing bounded fallback, rather than lose
+                # all successfully scored evidence solely on LLM admission.
+                selected = list(ordered)
+        primary_selected_ids = [c['id'] for c in selected]
+        recovery = dict(status='not_needed', reviewed_ids=[], restored_ids=[], unreviewed_ids=[], judgments=[], errors=[])
+        if status in ('ok', 'recovered', 'groups_partial') and irrelevant:
+            selected, recovery = await listwise_recovery.recover(req, submitted, selected, irrelevant,
+                                                                deadline=listwise_deadline)
+            errors.extend(dict(stage='listwise_recovery', **error) for error in recovery['errors'])
+            if recovery['status'] == 'recovered' and status != 'groups_partial':
+                status = 'recovered'
+            # Review owns deletion authorization. Unresolved candidates are retained
+            # below accepted useful evidence, bounded by the admitted input set.
+            # Final packet capacity is enforced separately and is not irrelevance.
+        trace['listwise'] = dict(status=status, input_count=len(submitted), output_count=len(selected),
+            output_protocol='keyed_candidates_v1' if keyed else 'permutation_v1',
+            candidate_contract_status='valid' if contract.ranking is not None and contract.irrelevant is not None else 'invalid',
+            groups_status='valid' if contract.groups is not None else 'invalid',
+            accepted_candidate_keys=sorted(contract.accepted_candidates),
+            ignored_candidate_keys=sorted(contract.ignored_candidate_keys),
+            repair_calls=sum(a['dispatched'] and a['stage'] == 'search.listwise.repair' for a in attempts),
+            transport_retries=sum(a['dispatched'] and a['stage'] == 'search.listwise.retry' for a in attempts),
+            candidate_key_map={f'c{i}': c['id'] for i, c in enumerate(submitted)} if keyed else {},
+            candidate_ids=[c['id'] for c in submitted], selected_ids=[c['id'] for c in selected],
+            input_bytes=len(listwise_request(req, plan, submitted)['prompt'].encode('utf-8')) if submitted else 0,
+            shared_sources=config.LISTWISE_SHARED_SOURCES,
+            baseline_candidate_ids=sorted(baseline_ids),
+            attempts=attempts, errors=errors, selection=admission_selection, carried_ids=sorted(carried_ids),
+            primary_selected_ids=primary_selected_ids, primary_irrelevant_ids=[submitted[i]['id'] for i in sorted(irrelevant)],
+            recovery=recovery)
     for i in irrelevant:
         if submitted[i]['id'] not in {c['id'] for c in selected}:
             reason = ('represented' if any(r['candidate_id'] == submitted[i]['id']
@@ -603,7 +617,8 @@ async def rank(req, plan, candidates):
             c.pop('_final', None)
             c['_score_kind'] = 'constraint'
         elif c.get('_final') is None:
-            c['_score_kind'] = 'listwise' if status in ('ok', 'recovered', 'ranking_only', 'groups_partial') else 'graph_fallback'
+            c['_score_kind'] = 'listwise' if status in ('ok', 'recovered', 'ranking_only', 'groups_partial') or (
+                config.LISTWISE_STAGED and trace['listwise'].get('ranking_status') == 'ok') else 'graph_fallback'
         plan['_rerank'].append(dict(id=c['id'], reason='kept', score=c.get('_final'), keep=True))
     for c in candidates:
         if c['id'] not in selected_ids:

@@ -67,6 +67,8 @@ class Retention(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(trace['confirmed_irrelevant_ids'], [])
         self.assertEqual(trace['restored_ids'], [])
         self.assertEqual(len(trace['unreviewed_ids']), 5)
+        # Earlier capacity deferrals are not final causes after later attempts.
+        self.assertEqual(trace['omitted'], [])
 
     async def test_no_source_retained_without_factual_support(self):
         candidate = dict(id='m0', content='A summary without sources')

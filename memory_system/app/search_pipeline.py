@@ -11,7 +11,7 @@ import re
 import time
 import uuid
 from datetime import datetime, timezone
-from . import search_debug
+from . import search_debug, listwise_context
 from typing import Dict, List, Optional
 
 from . import answer_context, budget, cascade_rerank, config, document_units, graph_fusion, evidence_packet, evidence_units, graph, integrity, llm, local_work, personal_evidence, profile, prompts, retrieval_queries, run_metadata, scenes, schemas, search_coverage, store
@@ -677,6 +677,7 @@ def _prepare_candidates(st, req, plan, fused):
                 chunks = evidence_units.passages(dict(content=c['content']), queries, [], max(128, cap // 2 - 160))
                 if chunks:
                     body = _memory_prefix(c, c, anchor) + 'Excerpt: ' + '\n'.join(x['content'] for x in chunks)
+                    c['_body_excerpted'] = True
             primary_body = body
         is_document = _document_episode(c, sources)
         # A pasted document is packed whole (up to the document cap) so the
@@ -714,6 +715,7 @@ def _prepare_candidates(st, req, plan, fused):
             personal_evidence=personal_evidence.personal(c, visible), source_count=len(unit['sources']),
             coverage_ids=c.get('_coverage_ids', []), supported_coverage_ids=c.get('_supported_coverage_ids', []),
             coverage_witnesses=c.get('_coverage_witnesses', {}), temporal=c.get('temporal'), created_at=c.get('created_at'))
+        c['_rank_context'], c['_review_sources'] = listwise_context.prepare(c, sources)
         prepared.append(c)
     return _coalesce_episodes(prepared, plan)
 

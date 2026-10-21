@@ -230,17 +230,19 @@ class CascadeTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual([row['id'] for row in result], ['m3', 'm2', 'm1', 'm0'])
                 self.assertTrue(all(row.get('_final') is not None for row in result))
 
-    async def test_explicit_irrelevant_item_is_not_refilled_from_the_tail(self):
-        rejected = []
+    async def test_unsourced_irrelevant_item_is_retained_pending_review(self):
+        rejected, plan = [], {}
         async def rank(prompt, *args, **kwargs):
             texts = documents_in(prompt)
             rejected.append(f'm{evidence_number(texts[0])}')
             return permutation(len(texts), irrelevant=[0])
         with patch.object(self.ce, 'rerank', side_effect=self.ce_scores), \
                 patch.object(llm, 'complete_json', side_effect=rank):
-            result = selected(await self.cascade.rank(self.req(), {}, self.rows(20)))
-        self.assertNotIn(rejected[0], {row['id'] for row in result})
-        self.assertEqual(len(result), 9)
+            result = selected(await self.cascade.rank(self.req(), plan, self.rows(20)))
+        self.assertIn(rejected[0], {row['id'] for row in result})
+        self.assertEqual(len(result), 10)
+        self.assertEqual(plan['_cascade']['listwise']['recovery']['provisional_ids'], rejected)
+        self.assertEqual(plan['_cascade']['listwise']['recovery']['confirmed_irrelevant_ids'], [])
 
     async def test_evidence_groups_map_input_indices_to_original_ids(self):
         expected, plan = [], {}

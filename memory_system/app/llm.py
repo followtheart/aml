@@ -382,6 +382,12 @@ class FakeLLM:
             return "fake summary"
         if "query understanding module" in prompt:
             return json.dumps(self._fake_query(prompt))
+        if prompt.startswith('STAGED_LISTWISE_'):
+            payload = json.loads(prompt[prompt.index('\n{') + 1:])
+            keys = [c['key'] for c in payload['candidates']]
+            if prompt.startswith('STAGED_LISTWISE_RANKING'):
+                return json.dumps(dict(ranking=keys))
+            return json.dumps({k: dict(purpose='unknown', target_ids=[], source_refs=[], represented_by='') for k in keys})
         if "evidence listwise ranking module" in prompt:
             count_match = re.search(r'^Candidate count: (\d+)$', prompt, re.M)
             count = int(count_match[1]) if count_match else len(re.findall(r'^\d+: ', prompt, re.M))

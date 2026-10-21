@@ -24,6 +24,15 @@ useful; do not suppress a contradiction just because it disagrees with another i
 Relation direction matters. A shared entity or retrieval_bridge is an association,
 not proof of causation, identity, authority or logical entailment.
 
+Retrieval usefulness is different from proving an entire answer option. Evaluate
+support, counterevidence, qualifications, time changes, necessary bridges and
+relevant background against ALL options without choosing a correct answer.
+A user question can show topical interest without proving ownership, diagnosis,
+expertise or habit. Do not reject that interest merely because a stronger option
+claim is unsupported. Low relative rank is not irrelevance. If an excerpt lacks
+the context needed to judge its role, retain it as uncertain. Preserve distinct
+claims and qualifiers even when their source is shared with another candidate.
+
 Return ONLY JSON with these three fields:
 - "ranking": every candidate index exactly once, best first. This is a comparison
   across the whole list, not independent per-document scores.

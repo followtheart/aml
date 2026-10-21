@@ -236,6 +236,14 @@ RERANK_BATCH_MAX_CANDIDATES = max(1, int(os.environ.get("AML_RERANK_BATCH_MAX_CA
 RERANK_MAX_PROMPT_BYTES = max(1024, int(os.environ.get("AML_RERANK_MAX_PROMPT_BYTES", "24000")))
 LISTWISE_SHARED_SOURCES = os.environ.get('AML_LISTWISE_SHARED_SOURCES', '0') == '1'
 LISTWISE_KEYED_OUTPUT = os.environ.get('AML_LISTWISE_KEYED_OUTPUT', '1') == '1'
+# Separate usefulness, deletion review and ordering; legacy remains an ablation.
+LISTWISE_STAGED = os.environ.get('AML_LISTWISE_STAGED', '0') == '1'
+# Supplemented cards also enter final ordering; leave room beyond admission.
+LISTWISE_STAGED_MAX_PROMPT_BYTES = max(1024, int(os.environ.get('AML_LISTWISE_STAGED_MAX_PROMPT_BYTES', '48000')))
+LISTWISE_CONTEXT_MAX_BYTES = max(1024, int(os.environ.get('AML_LISTWISE_CONTEXT_MAX_BYTES', '12000')))
+LISTWISE_PURPOSE_BATCH_SIZE = max(1, min(24, int(os.environ.get('AML_LISTWISE_PURPOSE_BATCH_SIZE', '10'))))
+LISTWISE_CONTEXT_REVIEW_LIMIT = max(0, min(4, int(os.environ.get('AML_LISTWISE_CONTEXT_REVIEW_LIMIT', '2'))))
+
 RERANK_CONCURRENCY = max(1, int(os.environ.get("AML_RERANK_CONCURRENCY", "2")))
 RERANK_DEADLINE_SECONDS = max(1.0, float(os.environ.get("AML_RERANK_DEADLINE_SECONDS", "45")))
 # At most two repairs across ranking/relevance and groups, within search budgets.
@@ -329,7 +337,7 @@ SEARCH_DEADLINE_SECONDS = max(1.0, float(os.environ.get("AML_SEARCH_DEADLINE_SEC
 # still bounded by the search's remaining wall-clock time.
 SEARCH_EMBED_TIMEOUT_SECONDS = max(1.0, float(os.environ.get("AML_SEARCH_EMBED_TIMEOUT_SECONDS", "120")))
 SEARCH_MAX_CALLS = max(1, int(os.environ.get("AML_SEARCH_MAX_CALLS", "12")))
-SEARCH_MAX_TOKENS = max(1024, int(os.environ.get("AML_SEARCH_MAX_TOKENS", "64000")))
+SEARCH_MAX_TOKENS = max(1024, int(os.environ.get("AML_SEARCH_MAX_TOKENS", "128000" if LISTWISE_STAGED else "64000")))
 # §3.1 the rolling session summary is extraction context only (ACE collapse);
 # the legacy summary recall route stays available for ablation.
 SUMMARY_ROUTE = os.environ.get("AML_SUMMARY_ROUTE", "0") == "1"

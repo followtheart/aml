@@ -353,8 +353,9 @@ async def recover(req, submitted, selected, irrelevant, *, deadline=None):
     unresolved = {submitted[i]['id'] for i in irrelevant} - reviewed - represented
     merged['unreviewed_ids'] = [c['id'] for c in submitted if c['id'] in unresolved]
     # Keep the last capacity diagnostic only for candidates still unresolved.
+    attempted = set(merged['candidate_ids'])
     omissions = {r['candidate_id']: r for t in batches for r in t.get('omitted', [])
-                 if r['candidate_id'] in unresolved}
+                 if r['candidate_id'] in unresolved and r['candidate_id'] not in attempted}
     merged['omitted'] = list(omissions.values())
     kept = {c['id'] for c in selected}
     provisional = [c for c in submitted if c['id'] in unresolved and c['id'] not in kept]

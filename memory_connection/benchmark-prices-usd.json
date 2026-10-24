@@ -1,0 +1,5 @@
+{
+  "gpt-4o-mini": {"input_per_million": 0.15, "output_per_million": 0.60},
+  "text-embedding-v4": {"input_per_million": 0.072, "output_per_million": 0},
+  "qwen3-rerank": {"input_per_million": 0.069, "output_per_million": 0}
+}

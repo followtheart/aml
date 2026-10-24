@@ -114,8 +114,8 @@ class HTTPProvider:
 
     async def verify(self, query, originals):
         packet, aliases, refs = reference_packet(originals)
-        raw = await self.complete("verify_original_pair_v5", {"query": query, **packet}, ReferenceVerdicts)
-        return decode_references(raw, aliases, refs)
+        raw = await self.complete("verify_original_pair_v6", {"query": query, **packet}, ReferenceVerdicts)
+        return decode_references(raw, aliases, refs, originals)
 
     def verification_size(self, query, originals):
         packet, _, _ = reference_packet(originals)

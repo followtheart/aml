@@ -34,7 +34,9 @@ class Settings(BaseModel):
     exclusive_bridge_slots: int = Field(default=0, ge=0, le=1)
     complementary_slots: int = Field(default=2, ge=0, le=2)
     batch_size: int = Field(default=8, ge=1, le=8)
-    max_batches: int = Field(default=2, ge=1, le=2)
+    # Byte-bounded batches may contain fewer than batch_size events. Allow all
+    # 16 verification candidates to be considered without enlarging a prompt.
+    max_batches: int = Field(default=8, ge=1, le=16)
     batch_bytes: int = Field(default=24000, ge=256)
     evidence_bytes: int = Field(default=32000, ge=256)
     search_seconds: float = Field(default=12, gt=0)

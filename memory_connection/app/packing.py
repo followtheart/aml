@@ -22,6 +22,9 @@ def pack(candidates, decisions, top_k, budget):
                 "verdict": decision["verdict"], "relation_type": decision["relation_type"],
                 "evidence_spans": decision["evidence_spans"], "version": event["version"],
                 "valid_from": event["valid_from"], "valid_to": event["valid_to"]}
+        if event.get("memory_type"):
+            item["memory_type"] = event["memory_type"]
+            item["experience_status"] = event.get("experience_status")
         size = byte_size(item)
         if len(data) >= top_k or used + size > budget:
             omitted.append({"event_id": event["event_id"], "reason": "top_k" if len(data) >= top_k else "evidence_bytes"})

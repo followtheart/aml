@@ -1,0 +1,20 @@
+[Unit]
+Description=memory_connection compatible HTTPS API
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/root/aml
+EnvironmentFile=/root/memory-connection-runtime/service.env
+Environment=PYTHONDONTWRITEBYTECODE=1
+ExecStart=/root/aml/memory_connection/scripts/start_https.sh
+Restart=on-failure
+RestartSec=3
+TimeoutStopSec=45
+UMask=0077
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

@@ -41,6 +41,11 @@ class MemoryService:
         if replay:
             return replay
         epoch = self.store.state(req.user_id)[1]
+        events, degraded = await self.prepare_add(req)
+        return self.store.commit(req, events, epoch, degraded)
+
+    async def prepare_add(self, req):
+        """Prepare indexed originals without publishing, for atomic feedback writes too."""
         deadline = time.monotonic() + self.settings.add_seconds
         events, degraded = build_events(req), []
         if byte_size(req.model_dump()) > 512000:
@@ -67,7 +72,7 @@ class MemoryService:
         vectors = normalize_vectors(vectors, len(pending_views), self.provider.dimension)
         for view, vector in zip(pending_views, vectors):
             view["vector"] = vector
-        return self.store.commit(req, events, epoch, degraded)
+        return events, degraded
 
     async def search(self, req: SearchRequest):
         started = time.monotonic()
@@ -79,6 +84,13 @@ class MemoryService:
         query = {"query": req.query, "options": req.options,
                  "reference_time": req.reference_time or reference, "as_of": req.as_of}
         qviews = [View(kind="original", text=req.query)]
+        # Options are unverified hypotheses, but their premises are explicit
+        # retrieval needs. Give every option a route even when expansion fails.
+        # They never enter stored events or the verifier's evidence sources.
+        for index, option in enumerate((req.options or [])[:20]):
+            qviews.append(View(kind="applicability", derivation="associative",
+                text=f"{req.query}\nCandidate answer to check (not a fact): {option}",
+                facet=f"option:{index}"))
         degraded, metrics = [], {"query_expansion_calls": 0, "verification_calls": 0}
         expansion_started = time.monotonic()
         if self.settings.query_expansion and self.settings.query_views:
@@ -135,6 +147,8 @@ class MemoryService:
         metrics["verification_calls"] = calls
         metrics["verification_ms"] = round((time.monotonic()-verification_started)*1000, 3)
         metrics["verify_truncated"] = max(0, len(candidates)-self.settings.verify_limit)
+        metrics["candidate_count"] = len(candidates)
+        metrics["verified_count"] = len(decisions)
         data, omitted, conflicting = pack(candidates[:self.settings.verify_limit], decisions, req.top_k, self.settings.evidence_bytes)
         metrics["elapsed_ms"] = round((time.monotonic()-started)*1000, 3)
         incomplete = bool(degraded or errors or metrics["verify_truncated"] or omitted or

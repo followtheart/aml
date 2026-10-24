@@ -1,3 +1,4 @@
+# Evaluation records contain source conversations and model outputs.
 runs/
 *.log
 data/

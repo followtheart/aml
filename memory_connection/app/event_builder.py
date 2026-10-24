@@ -19,7 +19,7 @@ def build_events(req):
         events.append({"event_id": event_id, "logical_id": logical_id,
                        "session_id": req.session_id, "sources": context,
                        "primary_source_id": source["source_id"], "text": message.content,
-                       "valid_from": message.valid_from or datetime.now(timezone.utc).isoformat(),
+                       "valid_from": getattr(message, "valid_from", None) or datetime.now(timezone.utc).isoformat(),
                        "valid_to": None, "version": 1})
     return events
 

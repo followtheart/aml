@@ -6,6 +6,7 @@ import time
 import re
 from .recall import recall
 from .temporal import source_time
+from .rerank_documents import documents as rerank_documents
 
 
 def source_keys(candidate):
@@ -43,14 +44,21 @@ async def rank_candidates(provider, query, candidates, settings, deadline):
     errors = []
     if not candidates or not settings.rerank_model:
         return diverse_order(candidates), metrics, errors
-    documents = [json.dumps({"primary": c["event"]["text"], "sources": [
-        {"speaker": s.get("speaker_id"), "role": s.get("role"), "text": s["content"],
-         **source_time(s)} for s in c["event"]["sources"]]}, ensure_ascii=False) for c in candidates]
-    # No source clipping. Oversized input degrades explicitly to a complete coarse list.
-    if any(len(d.encode()) > settings.rerank_document_bytes for d in documents):
-        return diverse_order(candidates), metrics, [{"stage": "rerank", "error_type": "DocumentOverflow"}]
     # A global query date is not the event date. Rank against the actual need.
     text = query.get('query','') if isinstance(query,dict) else str(query)
+    if isinstance(query, dict) and query.get('options'):
+        text += '\nCandidate answers to check against memories (not established facts):\n' + '\n'.join(query['options'])
+    documents, owners = [], []
+    try:
+        limit = min(settings.rerank_document_bytes, settings.rerank_request_bytes-len(text.encode()))
+        for index, candidate in enumerate(candidates):
+            fragments = rerank_documents(candidate['event'], limit)
+            documents.extend(fragments)
+            owners.extend([index] * len(fragments))
+    except ValueError as exc:
+        return diverse_order(candidates), metrics, [{'stage': 'rerank', 'error_type': type(exc).__name__}]
+    metrics['rerank_documents'] = len(documents)
+    metrics['rerank_fragmented_candidates'] = sum(owners.count(i) > 1 for i in range(len(candidates)))
     batches, current, size = [], [], 0
     for document in documents:
         needed = len(document.encode())+len(text.encode())
@@ -69,6 +77,12 @@ async def rank_candidates(provider, query, candidates, settings, deadline):
             if len(values) != len(batch) or any(type(s) not in (float,int) or not math.isfinite(s) for s in values):
                 raise ValueError("rerank alignment failure")
             scores.extend(values)
+        # A relevant fragment promotes its original event; it does not become
+        # evidence. Keep score ownership even across API batch boundaries.
+        aggregate = [float('-inf')] * len(candidates)
+        for index, value in zip(owners, scores):
+            aggregate[index] = max(aggregate[index], value)
+        scores = aggregate
         metrics["ranking_mode"] = "original_cross_encoder_source_diversity"
     except Exception as exc:
         scores = None

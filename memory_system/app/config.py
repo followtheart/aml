@@ -142,6 +142,11 @@ CE_RETRY_BATCHES = max(0, min(2, int(os.environ.get('AML_CE_RETRY_BATCHES', '2')
 CE_RETRY_BATCH_SIZE = max(1, min(8, int(os.environ.get('AML_CE_RETRY_BATCH_SIZE', '4'))))
 CE_MAX_DOCUMENT_BYTES = max(512, int(os.environ.get('AML_CE_MAX_DOCUMENT_BYTES', '4000')))
 CE_MAX_REQUEST_BYTES = max(1024, int(os.environ.get('AML_CE_MAX_REQUEST_BYTES', '90000')))
+FINE_COARSE_CORE_QUOTA = os.environ.get('AML_FINE_COARSE_CORE_QUOTA', '1') == '1'
+FINE_WEAK_PROMOTION_ONE = os.environ.get('AML_FINE_WEAK_PROMOTION_ONE', '0') == '1'
+# One existing extra seat for a displaced candidate inside the core CE cutoff.
+FINE_SEMANTIC_RESERVE = os.environ.get('AML_FINE_SEMANTIC_RESERVE', '0') == '1'
+COARSE_EVIDENCE_EXTEND = os.environ.get('AML_COARSE_EVIDENCE_EXTEND', '1') == '1'
 CASCADE_COARSE_LIMIT = max(1, int(os.environ.get('AML_CASCADE_COARSE_LIMIT', '50')))
 CASCADE_FINE_LIMIT = max(1, int(os.environ.get('AML_CASCADE_FINE_LIMIT', '16')))
 CASCADE_LLM_LIMIT = max(1, int(os.environ.get('AML_CASCADE_LLM_LIMIT', '16')))
@@ -161,6 +166,8 @@ CHOICE_ADAPTIVE_INTEREST_RETRY = os.environ.get('AML_CHOICE_ADAPTIVE_INTEREST_RE
 CHOICE_ENTAILMENT_REVIEW = os.environ.get('AML_CHOICE_ENTAILMENT_REVIEW', '0') == '1'
 CHOICE_SEMANTIC_WITNESSES = os.environ.get('AML_CHOICE_SEMANTIC_WITNESSES', '1') == '1'
 CHOICE_WITNESS_SPAN_REFS = os.environ.get('AML_CHOICE_WITNESS_SPAN_REFS', '0') == '1'
+CHOICE_WITNESS_KEYED_OUTPUT = os.environ.get('AML_CHOICE_WITNESS_KEYED_OUTPUT', '0') == '1'
+CHOICE_WITNESS_LEXICAL_FILL = os.environ.get('AML_CHOICE_WITNESS_LEXICAL_FILL', '0') == '1'
 CHOICE_INDEPENDENT_SELECTION_REVIEW = os.environ.get('AML_CHOICE_INDEPENDENT_SELECTION_REVIEW', '0') == '1'
 CHOICE_TYPED_SCOPE_CONSISTENCY = os.environ.get('AML_CHOICE_TYPED_SCOPE_CONSISTENCY', '0') == '1'
 CHOICE_SCOPE_ROLES = os.environ.get('AML_CHOICE_SCOPE_ROLES', '0') == '1'
@@ -212,16 +219,22 @@ EMBED_DIM = max(32, int(os.environ.get("AML_EMBED_DIM", "256")))
 EMBEDDING_SPACE = os.environ.get(
     "AML_EMBEDDING_SPACE",
     f"{'fake-hash' if FAKE else EMBED_MODEL}:float32:{EMBED_DIM}")
-# Sensitive memories are excluded from every retrieval/index route unless both
-# the deployment policy and an individual request explicitly opt in.
-SENSITIVE_RECALL_ENABLED = os.environ.get("AML_SENSITIVE_RECALL_ENABLED", "0") == "1"
+# Sensitive recall follows the selected control baseline; each request must
+# still allow it. AML_SENSITIVE_RECALL_ENABLED=0 disables it for the deployment.
+SENSITIVE_RECALL_ENABLED = os.environ.get("AML_SENSITIVE_RECALL_ENABLED", "1") == "1"
 GOVERNANCE_NEIGHBORS = 5
 RECALL_PER_ROUTE = 100
 # Retrieval budgets are independent of the final answer's top_k.
 RECALL_VECTOR_LIMIT = max(1, int(os.environ.get("AML_RECALL_VECTOR_LIMIT", "40")))
 RECALL_SOURCE_LIMIT = max(1, int(os.environ.get("AML_RECALL_SOURCE_LIMIT", "40")))
-# Experimental source-route allocation by original user-message sets.
-SOURCE_RECALL_DIVERSITY = os.environ.get("AML_SOURCE_RECALL_DIVERSITY", "0") == "1"
+# Allocate source-route slots by original user-message sets.
+SOURCE_RECALL_DIVERSITY = os.environ.get("AML_SOURCE_RECALL_DIVERSITY", "1") == "1"
+# Defer source sets already represented by earlier candidates across queries.
+SOURCE_RECALL_NOVELTY = os.environ.get('AML_SOURCE_RECALL_NOVELTY', '0') == '1'
+# Literal query views and context labels follow the selected control baseline.
+RECALL_TOPIC_ANCHORS = os.environ.get('AML_RECALL_TOPIC_ANCHORS', '1') == '1'
+RECALL_TOPIC_ANCHOR_LIMIT = max(0, min(4, int(os.environ.get('AML_RECALL_TOPIC_ANCHOR_LIMIT', '4'))))
+LISTWISE_CONTEXT_LABEL = os.environ.get('AML_LISTWISE_CONTEXT_LABEL', '1') == '1'
 RECALL_FTS_LIMIT = max(1, int(os.environ.get("AML_RECALL_FTS_LIMIT", "20")))
 RECALL_PROFILE_LIMIT = max(1, int(os.environ.get("AML_RECALL_PROFILE_LIMIT", "8")))
 # Rules recalled per search besides forget constraints; 0 keeps every rule.
@@ -234,7 +247,10 @@ RERANK_MAX_CANDIDATES = max(
 # Bound each provider request independently of the total candidate pool.
 RERANK_BATCH_MAX_CANDIDATES = max(1, int(os.environ.get("AML_RERANK_BATCH_MAX_CANDIDATES", "24")))
 RERANK_MAX_PROMPT_BYTES = max(1024, int(os.environ.get("AML_RERANK_MAX_PROMPT_BYTES", "24000")))
-LISTWISE_SHARED_SOURCES = os.environ.get('AML_LISTWISE_SHARED_SOURCES', '0') == '1'
+LISTWISE_SHARED_SOURCES = os.environ.get('AML_LISTWISE_SHARED_SOURCES', '1') == '1'
+# Preserve the original overflow proposal, then append at most two complete units.
+LISTWISE_OVERFLOW_EXTEND = os.environ.get('AML_LISTWISE_OVERFLOW_EXTEND', '0') == '1'
+LISTWISE_OVERFLOW_REVIEW = os.environ.get('AML_LISTWISE_OVERFLOW_REVIEW', '1') == '1'
 LISTWISE_KEYED_OUTPUT = os.environ.get('AML_LISTWISE_KEYED_OUTPUT', '1') == '1'
 # Separate usefulness, deletion review and ordering; legacy remains an ablation.
 LISTWISE_STAGED = os.environ.get('AML_LISTWISE_STAGED', '0') == '1'
@@ -250,6 +266,29 @@ RERANK_DEADLINE_SECONDS = max(1.0, float(os.environ.get("AML_RERANK_DEADLINE_SEC
 RERANK_REPAIR_MAX_CALLS = max(0, int(os.environ.get("AML_RERANK_REPAIR_MAX_CALLS", "2")))
 # Exact source-part references avoid generated quotation mismatches.
 LISTWISE_SPAN_REFS = os.environ.get("AML_LISTWISE_SPAN_REFS", "1") == "1"
+LISTWISE_ROLE_BOUND_REFS = os.environ.get('AML_LISTWISE_ROLE_BOUND_REFS', '0') == '1'
+PACKET_ADJACENT_CONTEXT = os.environ.get('AML_PACKET_ADJACENT_CONTEXT', '0') == '1'
+PACKET_FINE_CONTEXT_RESERVE = os.environ.get('AML_PACKET_FINE_CONTEXT_RESERVE', '1') == '1'
+PACKET_FINE_CONTEXT_5K = os.environ.get('AML_PACKET_FINE_CONTEXT_5K', '1') == '1'
+PACKET_FINE_CONTEXT_LEXICAL = os.environ.get('AML_PACKET_FINE_CONTEXT_LEXICAL', '1') == '1'
+PACKET_QUERY_CONTEXT_COMBINED = os.environ.get('AML_PACKET_QUERY_CONTEXT_COMBINED', '0') == '1'
+PACKET_FINE_CONTEXT_FILL = os.environ.get('AML_PACKET_FINE_CONTEXT_FILL', '0') == '1'
+# One source-query first hit inside the existing fine CE window; shares 5 KiB.
+PACKET_SOURCE_QUERY_CONTEXT = os.environ.get('AML_PACKET_SOURCE_QUERY_CONTEXT', '0') == '1'
+# One complete source after the lexical prefix, ranked by original-question CE.
+PACKET_QUESTION_CONTEXT_CE = os.environ.get('AML_PACKET_QUESTION_CONTEXT_CE', '0') == '1'
+# Original-question source first hit after the immutable three-seat prefix.
+PACKET_SOURCE_FIRST_RESIDUAL = os.environ.get('AML_PACKET_SOURCE_FIRST_RESIDUAL', '0') == '1'
+# One residual source improving literal question/topic query coverage.
+PACKET_MARGINAL_QUERY_CONTEXT = os.environ.get('AML_PACKET_MARGINAL_QUERY_CONTEXT', '0') == '1'
+# One complete CE-core outsider after the lexical prefix; separate 4 KiB cap.
+PACKET_CORE_GAP_CONTEXT = os.environ.get('AML_PACKET_CORE_GAP_CONTEXT', '0') == '1'
+PACKET_SPARSE_SOURCE_CONTEXT = os.environ.get('AML_PACKET_SPARSE_SOURCE_CONTEXT', '0') == '1'
+PACKET_EXCLUSIVE_SHARED_CONTEXT = os.environ.get('AML_PACKET_EXCLUSIVE_SHARED_CONTEXT', '0') == '1'
+PACKET_UNMATCHED_NOUN_CONTEXT = os.environ.get('AML_PACKET_UNMATCHED_NOUN_CONTEXT', '0') == '1'
+LISTWISE_TOPIC_INTEREST = os.environ.get('AML_LISTWISE_TOPIC_INTEREST', '0') == '1'
+LISTWISE_TRANSFORM_CONTEXT = os.environ.get('AML_LISTWISE_TRANSFORM_CONTEXT', '0') == '1'
+LISTWISE_ABBREVIATION_PARTS = os.environ.get('AML_LISTWISE_ABBREVIATION_PARTS', '0') == '1'
 LISTWISE_REVIEW_MAX_BATCHES = max(1, min(4, int(os.environ.get("AML_LISTWISE_REVIEW_MAX_BATCHES", "3"))))
 RERANK_CALIBRATION_ANCHORS = max(0, min(2, int(os.environ.get('AML_RERANK_CALIBRATION_ANCHORS', '2'))))
 SEARCH_FOLLOWUP_QUERIES = max(0, min(3, int(os.environ.get('AML_SEARCH_FOLLOWUP_QUERIES', '2'))))
@@ -356,8 +395,10 @@ PACKET_RULE_LIMIT = int(os.environ.get("AML_PACKET_RULE_LIMIT", "3"))
 # Top fused-retrieval candidates that keep a seat in the fine list even when
 # the cross-encoder scores them low.
 CASCADE_FUSED_RESERVE = int(os.environ.get("AML_CASCADE_FUSED_RESERVE", "3"))
-# Experimental evidence-gain expansion; evaluated separately from the baseline.
-FINE_EVIDENCE_ADAPTIVE = os.environ.get("AML_FINE_EVIDENCE_ADAPTIVE", "0") == "1"
+# Evidence-gain expansion from the selected control baseline.
+FINE_EVIDENCE_ADAPTIVE = os.environ.get("AML_FINE_EVIDENCE_ADAPTIVE", "1") == "1"
+# Optional retrieval topics can earn adaptive inspection, never core reservations.
+FINE_TOPIC_CONTEXT = os.environ.get("AML_FINE_TOPIC_CONTEXT", "0") == "1"
 FINE_EXTRA_LIMIT = max(0, min(16, int(os.environ.get("AML_FINE_EXTRA_LIMIT", "8"))))
 LISTWISE_UNREVIEWED_LIMIT = max(0, min(4, int(os.environ.get("AML_LISTWISE_UNREVIEWED_LIMIT", "0"))))
 # Support keys (Add request ids / supporting AMU ids) needed to confirm a

@@ -1,0 +1,8 @@
+{
+  "name": "Princeton WordNet 3.0",
+  "source_url": "https://raw.githubusercontent.com/nltk/nltk_data/gh-pages/packages/corpora/wordnet.zip",
+  "sha256": "cbda5ea6eef7f36a97a43d4a75f85e07fccbb4f23657d27b4ccbc93e2646ab59",
+  "bytes": 10775600,
+  "use": "Offline retrieval diagnostic only; not facts or preference validation",
+  "license_in_archive": "wordnet/LICENSE"
+}

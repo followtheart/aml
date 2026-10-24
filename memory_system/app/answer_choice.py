@@ -16,7 +16,7 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from . import choice_selection_notes, entailment_groups, mixed_advice, answer_context, budget, choice_context, choice_premises, choice_witness, citation_text, config, constraint_term_forms, integrity, llm, metrics, persona_source, personal_evidence, profile, prompts, repair_context
 
-VERSION = 'verified-source-choice-v26-repair-span-contract'
+VERSION = 'verified-source-choice-v27-lexical-witness-fill'
 ABSTAIN = 'ABSTAIN'
 _inference_override = ContextVar('choice_inference_override', default=None)
 
@@ -2418,6 +2418,9 @@ async def _answer(qa, memories, diagnostics, *, witness_prefill=None):
         witnesses = await choice_witness.select(qa['question'], options, sources, diagnostics)
         if config.CHOICE_COVERAGE_WITNESSES:
             witnesses = choice_witness.supplement_from_coverage(options, sources, witnesses, memories)
+        if config.CHOICE_WITNESS_LEXICAL_FILL:
+            witnesses, diagnostics['answer_witness_lexical_fill'] = choice_witness.fill_unused(
+                options, sources, witnesses)
     else:
         witnesses = copy.deepcopy(witness_prefill)
         for items in witnesses.values():

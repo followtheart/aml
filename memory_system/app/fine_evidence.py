@@ -4,6 +4,7 @@ No gold labels, provider calls, inferred personal facts or blended CE/graph scor
 The caller must admit additions against the actual whole-request budget.
 """
 from collections import Counter
+import math
 
 from . import evidence_selection as selection
 
@@ -81,7 +82,9 @@ def closure(row, by_id):
     return found, missing
 
 
-def propose(rows, count, requirements, *, rescue_ids=(), fused_ids=(), extra_limit=8):
+def propose(rows, count, requirements, *, rescue_ids=(), fused_ids=(), extra_limit=8,
+            context_queries=(), core_pool_ids=None, soft_promotion_limit=None,
+            semantic_reserve=False):
     """Keep the existing bounded selection core; add novel relevant groups.
 
     Extra capacity is earned by visible evidence gain, not requirement count.
@@ -90,18 +93,55 @@ def propose(rows, count, requirements, *, rescue_ids=(), fused_ids=(), extra_lim
     ordered = sorted(rows, key=key, reverse=True)
     by_id = {c['id']: c for c in ordered}
     visible = {c['id']: selection.fragments(c) for c in ordered}
-    matches = {c['id']: relevance(c, requirements, visible[c['id']]) for c in ordered}
-    sparse = sparse_matches(ordered, requirements, visible)
+    # Supplemental query topics are useful retrieval facets, not assertions or
+    # obligations. Only the optional extra seats see them; keep the original
+    # requirements for core selection and its supported-coverage reservations.
+    context = []
+    seen = {r['text'].casefold() for r in requirements}
+    for spec in context_queries:
+        text = spec.get('text')
+        if (spec.get('origin') != 'option_topic' or not isinstance(text, str)
+                or not text.strip() or len(text) > 240 or text.casefold() in seen):
+            continue
+        seen.add(text.casefold())
+        context.append(dict(id=f'context:{len(context)}', text=text, origin='option_topic'))
+        if len(context) == 4:
+            break
+    facets = list(requirements) + context
+    matches = {c['id']: relevance(c, facets, visible[c['id']]) for c in ordered}
+    sparse = sparse_matches(ordered, facets, visible)
     sparse_ids = {mid for mid in matches if not matches[mid] and sparse[mid]}
     for mid in matches:
         for rid, value in sparse[mid].items():
             matches[mid][rid] = max(matches[mid].get(rid, (False, False, 0)), value)
     trace = {}
-    core = selection.select(ordered, count, requirements, key, reserve_ids=rescue_ids,
-                            fused_ids=fused_ids, bound_soft_reservations=True, trace=trace)
+    core_pool = ordered
+    if core_pool_ids is not None:
+        allowed = set(core_pool_ids)
+        if not allowed <= set(by_id):
+            raise ValueError('Fine core pool must be drawn from the current coarse candidates')
+        core_pool = [c for c in ordered if c['id'] in allowed]
+    core = selection.select(core_pool, count, requirements, key, reserve_ids=rescue_ids,
+                            fused_ids=fused_ids, bound_soft_reservations=True, trace=trace,
+                            soft_promotion_limit=soft_promotion_limit)
+    if core_pool_ids is not None:
+        # Keep every candidate visible in the decision trace. Core ranks remain
+        # relative to the restricted pool; extra candidates have no core rank.
+        for c in ordered:
+            if c['id'] not in allowed:
+                trace['decisions'].append(dict(id=c['id'], rank=None, selected=False,
+                    reason='outside_core_pool', score=c.get('_ce_score'), represented_by=[],
+                    visible_sources=sorted({s[0] for s, _ in visible[c['id']]})))
     chosen = list(core)
     additions, rejected = [], []
     capacity = min(len(rows), len(core) + max(0, extra_limit))
+    # A bounded semantic second chance for a score-core candidate displaced by
+    # reservations. Lexical overlap is not required for cross-language recall.
+    # Spend one existing extra seat, never alter the core or split dependencies.
+    semantic_ids = {c['id'] for c in core_pool[:max(0, count)]
+                    if type(c.get('_ce_score')) in (int, float)
+                    and math.isfinite(c['_ce_score']) and visible[c['id']]}
+    semantic_used = False
     # Complete recorded dependencies of the core before optional topical gains.
     pending = [c for c in ordered if c not in core or dependencies(c)]
     while pending and len(chosen) < capacity:
@@ -117,7 +157,9 @@ def propose(rows, count, requirements, *, rescue_ids=(), fused_ids=(), extra_lim
             if not new_ids:
                 continue
             required = c['id'] in chosen_ids and bool(dependencies(c))
-            if not required and (not matches[c['id']] or
+            semantic = (semantic_reserve and not semantic_used and not required
+                        and c['id'] in semantic_ids and len(new_ids) == 1)
+            if not required and ((not semantic and not matches[c['id']]) or
                                  selection.represented_by(c, chosen, visible)):
                 continue
             if len(chosen) + len(new_ids) > capacity:
@@ -127,17 +169,20 @@ def propose(rows, count, requirements, *, rescue_ids=(), fused_ids=(), extra_lim
             # CE decides ties after evidence gain. Source count is not a score.
             # A retrieval-head disagreement gets one bounded second chance only
             # after visible relevance and novelty checks; never displace the core.
-            utility = (required, c['id'] in fused_ids, len(new_facets),
+            utility = (required, semantic, key(c) if semantic else (-1e30, 0),
+                       c['id'] in fused_ids, len(new_facets),
                        max(matches[c['id']].values(), default=(False, False, 0)),
                        key(c))
-            proposals.append((utility, c, group, new_ids))
+            proposals.append((utility, c, group, new_ids, semantic))
         if not proposals:
             break
-        _, c, group, new_ids = max(proposals, key=lambda p: p[0])
+        _, c, group, new_ids, semantic = max(proposals, key=lambda p: p[0])
+        semantic_used = semantic_used or semantic
         chunk = [r for r in ordered if r['id'] in new_ids]
         additions.append(dict(candidate_id=c['id'], ids=[r['id'] for r in chunk],
             group_ids=sorted(group), requirement_ids=sorted(matches[c['id']]),
             reason=('path_completion' if c['id'] in chosen_ids else
+                    'ce_core_insurance' if semantic else
                     'sparse_topic_evidence' if c['id'] in sparse_ids else 'novel_visible_evidence'),
             unscored=c.get('_ce_score') is None))
         chosen.extend(chunk)
@@ -169,10 +214,18 @@ def propose(rows, count, requirements, *, rescue_ids=(), fused_ids=(), extra_lim
         if len(group) > 1 and not missing and group <= chosen_ids:
             path_groups.add(tuple(sorted(group)))
     trace['adaptive'] = dict(core_ids=[c['id'] for c in core], extra_limit=extra_limit,
+                             context_facets=context,
                              additions=additions, rejected=rejected,
                              path_groups=[list(g) for g in sorted(path_groups)],
                              proposed_ids=[c['id'] for c in chosen], capacity=capacity, unused_capacity=capacity-len(chosen),
                              support_labels_unchanged=True)
+    if semantic_reserve:
+        trace['adaptive']['semantic_reserve'] = dict(limit=1, max_ce_rank=count,
+            rank_scope='core_pool', used=semantic_used,
+            eligible_ids=[c['id'] for c in core_pool if c['id'] in semantic_ids])
+    if core_pool_ids is not None:
+        trace['adaptive'].update(core_policy='restricted_core_pool_v1',
+                                 core_pool_ids=[c['id'] for c in core_pool])
     extra_ids = {c['id'] for c in chosen} - {c['id'] for c in core}
     for decision in trace['decisions']:
         if decision['id'] in extra_ids:

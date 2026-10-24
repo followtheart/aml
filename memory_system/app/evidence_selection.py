@@ -81,7 +81,7 @@ def represented_by(row, selected, cache=None):
 
 
 def select(rows, count, requirements, key, reserve_ids=(), *, carry_ids=(), fused_ids=(), trace=None,
-           bound_soft_reservations=False, soft_rank_window=True):
+           bound_soft_reservations=False, soft_rank_window=True, soft_promotion_limit=None):
     """Keep score order; defer only evidence completely represented by selected units.
 
     Strong source witnesses and bounded option-topic champions reserve slots.
@@ -117,6 +117,10 @@ def select(rows, count, requirements, key, reserve_ids=(), *, carry_ids=(), fuse
     # witnesses and failed-provider rescue retain their independent guarantees.
     suppressed = []
     soft_limit = max(1, count // 8) if count else 0
+    if soft_promotion_limit is not None:
+        if type(soft_promotion_limit) is not int or soft_promotion_limit < 0:
+            raise ValueError('Soft promotion limit must be a nonnegative integer')
+        soft_limit = min(count, soft_promotion_limit)
     rank_limit = count + max(1, count // 4) if count else 0
     if not soft_rank_window:
         rank_limit = len(ordered)

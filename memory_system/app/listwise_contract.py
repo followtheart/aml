@@ -4,13 +4,17 @@ Candidate relevance is a retrieval judgment, never a factual support label.
 """
 import copy
 
+RELEVANCE = ('useful', 'context', 'uncertain', 'irrelevant')
 
-def schema(count, *, keyed=False, field=None, candidate_keys=None, group_keys=None):
+
+def schema(count, *, keyed=False, field=None, candidate_keys=None, group_keys=None,
+           context_label=False):
     index = dict(type='integer', minimum=0, maximum=count - 1)
     keys = [f'c{i}' for i in range(count)]
     item = dict(type='object', additionalProperties=False, required=['priority', 'relevance'],
                 properties=dict(priority=dict(type='integer', minimum=0, maximum=100),
-                                relevance=dict(type='string', enum=['useful', 'uncertain', 'irrelevant'])))
+                                relevance=dict(type='string', enum=list(RELEVANCE) if context_label else
+                                               ['useful', 'uncertain', 'irrelevant'])))
     properties = (dict(candidates=dict(type='object', additionalProperties=False,
                                       required=keys if candidate_keys is None else candidate_keys,
                                       properties={k: copy.deepcopy(item) for k in (keys if candidate_keys is None else candidate_keys)}))
@@ -73,7 +77,7 @@ class State:
     def valid_card(value):
         return (isinstance(value, dict) and set(value) == {'priority', 'relevance'}
                 and type(value['priority']) is int and 0 <= value['priority'] <= 100
-                and value['relevance'] in ('useful', 'uncertain', 'irrelevant'))
+                and value['relevance'] in RELEVANCE)
 
     def pending_candidate_keys(self):
         return [f'c{i}' for i in range(self.count) if f'c{i}' not in self.accepted_candidates]
@@ -92,7 +96,7 @@ class State:
                 bad = [k for k, v in cards.items() if not isinstance(v, dict)
                        or set(v) != {'priority', 'relevance'}
                        or type(v['priority']) is not int or not 0 <= v['priority'] <= 100
-                       or v['relevance'] not in ('useful', 'uncertain', 'irrelevant')]
+                       or v['relevance'] not in RELEVANCE]
                 if bad:
                     self.errors['candidates'] = dict(code='candidate_record_invalid', invalid_keys=sorted(bad))
                 else:

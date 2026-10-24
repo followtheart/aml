@@ -20,9 +20,11 @@ import urllib.request
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 from app import config  # Load the existing provider environment without copying secrets.
+from evaluation_model_guard import check_runtime
 
 
 def main():
+    check_runtime()
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--run-dir', type=Path, required=True)
     parser.add_argument('--port', type=int, default=18443)
@@ -47,6 +49,11 @@ def main():
         shutil.copytree(ROOT / directory, project / directory,
                         ignore=shutil.ignore_patterns('__pycache__', '*.pyc'))
     shutil.copytree(ROOT.parent / 'prompts', snapshot / 'prompts')
+    lexicon = ROOT / 'data/lexicons/wordnet.zip'
+    if lexicon.is_file():
+        target = project / 'data/lexicons/wordnet.zip'
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(lexicon, target)
     (project / '.venv').symlink_to(ROOT / '.venv', target_is_directory=True)
     cert, key = run / 'localhost.crt', run / 'localhost.key'
     subprocess.run(['openssl', 'req', '-x509', '-newkey', 'rsa:2048', '-nodes',
@@ -65,7 +72,9 @@ def main():
                                          ROOT / 'data/prepared/personamem-v2-32k.jsonl')).resolve())
     env.pop('AML_HTTPS_TOKEN_FILE', None)
     env.pop('PYTHONPATH', None)
-    files = sorted((project / 'app').glob('*.py')) + sorted((snapshot / 'prompts').glob('*.txt'))
+    files = sorted(p for directory in (project / 'app', project / 'scripts',
+        snapshot / 'prompts', project / 'data/lexicons') if directory.exists()
+        for p in directory.rglob('*') if p.is_file())
     manifest = dict(url=env['AML_HTTPS_URL'], source='frozen current worktree',
                     data=env['AML_EVAL_DATA'], fake=config.FAKE,
                     data_sha256=hashlib.sha256(Path(env['AML_EVAL_DATA']).read_bytes()).hexdigest(),

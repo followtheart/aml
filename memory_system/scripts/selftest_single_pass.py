@@ -37,6 +37,10 @@ class SinglePassTests(unittest.IsolatedAsyncioTestCase):
 
     async def rank(self, prompt, *args, **kwargs):
         self.assertEqual(kwargs.get('stage'), 'search.listwise')
+        properties = kwargs['schema']['properties']
+        if 'candidates' in properties:
+            return dict(candidates={key: dict(priority=90, relevance='useful')
+                                    for key in properties['candidates']['properties']}, groups=[])
         ids = re.findall(r'^\d+:', prompt, re.M)
         # Deliberately unhelpful ranking must not become another deletion gate.
         return from_scores([0.1 for _ in ids])
@@ -90,11 +94,11 @@ class SinglePassTests(unittest.IsolatedAsyncioTestCase):
         rows = [by_id[fact], by_id[rule]]
         packet, _, manifest = search._pack_evidence(self.st, schemas.SearchRequest(
             user_id='u', query='event ideas', top_k=1), {}, rows, '2026-09-17T00:00:00Z')
-        self.assertEqual([x['id'] for x in packet], [rule, fact])
-        self.assertIn('do NOT use or recommend', packet[0]['content'])
+        self.assertEqual([x['id'] for x in packet], [rule])
+        self.assertIn('do not use or recommend', packet[0]['content'].lower())
         self.assertEqual(manifest['constraint_count'], 1)
-        self.assertEqual(manifest['evidence_count'], 1)
-        self.assertEqual(manifest['omitted'], [])
+        self.assertEqual(manifest['evidence_count'], 0)
+        self.assertTrue(any(o['id'] == fact and o['reason'] == 'top_k' for o in manifest['omitted']))
 
     async def test_core_does_not_reinject_unranked_assistant_advice(self):
         noise = await self.memory('The assistant suggested playing fetch with a dog.',
@@ -121,7 +125,12 @@ class SinglePassTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(queries[1:3], ['Since you collect rare vinyl', 'Since you own a spaceship'])
         self.assertLessEqual(len(queries), 6)
         profile_route = next(r for r in plan['_routes'] if r['channel'] == 'profile_rule')
-        self.assertNotIn(target, [c['id'] for c in profile_route['candidates']])
+        # Literal topic views may retrieve an existing preference via "record";
+        # this must not create the hypothesized spaceship or vinyl ownership.
+        if search.config.RECALL_TOPIC_ANCHORS:
+            self.assertIn(target, [c['id'] for c in profile_route['candidates']])
+        else:
+            self.assertNotIn(target, [c['id'] for c in profile_route['candidates']])
         self.assertIn(target, [x.id for x in response.data])
         self.assertNotIn('spaceship', answer_context.build([x.model_dump() for x in response.data]))
 

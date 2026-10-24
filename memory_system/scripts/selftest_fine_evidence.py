@@ -84,6 +84,45 @@ class FineEvidenceTests(unittest.TestCase):
         self.assertEqual([r['id'] for r in selected], trace['adaptive']['core_ids'])
         self.assertFalse(trace['adaptive']['additions'])
 
+    def test_optional_topic_survives_fine_without_becoming_a_core_obligation(self):
+        rows = self.rows()
+        # Put the topic below the semantic backfill window: only a visible
+        # topical match should let it compete for an extra inspection seat.
+        for i in range(4):
+            row = candidate(f'dup{i}', .4-i*.01, [source('s0', 'I read market analysis report 0.')])
+            row['_ce_score'] = .4-i*.01
+            rows.append(row)
+        low = candidate('low', .01, [source('new', 'I asked about coastal kayaking routes.')])
+        low['_ce_score'] = .01
+        rows.append(low)
+        requirements = [dict(id='option:0', text='consumer advocacy')]
+        topics = [dict(origin='option_topic', text='Try coastal kayaking routes.', coverage_ids=[])]
+        before = copy.deepcopy((rows, requirements, topics))
+        baseline, old = fine_evidence.propose(rows, 16, requirements, extra_limit=1)
+        changed, new = fine_evidence.propose(rows, 16, requirements, extra_limit=1, context_queries=topics)
+        self.assertNotIn('low', {r['id'] for r in baseline})
+        self.assertIn('low', {r['id'] for r in changed})
+        self.assertEqual(old['adaptive']['core_ids'], new['adaptive']['core_ids'])
+        self.assertEqual(old['reservations'], new['reservations'])
+        self.assertEqual((rows, requirements, topics), before)
+        self.assertFalse(low.get('_supported_coverage_ids'))
+        self.assertLessEqual(len(changed), 17)
+
+    def test_context_facets_are_bounded_and_cannot_use_hidden_source_text(self):
+        rows = self.rows()
+        hidden = candidate('hidden', .01, [source('secret', 'coastal kayaking routes')])
+        hidden['_rank_text'] = 'Unrelated visible text.'
+        hidden['_ce_score'] = None
+        rows.append(hidden)
+        topics = [dict(origin='option_topic', text=f'coastal kayaking routes {i}') for i in range(10)]
+        topics[:0] = [dict(origin='question', text='coastal kayaking routes'),
+                      dict(origin='option_topic', text='x'*241), dict(origin='option_topic', text=None)]
+        selected, trace = fine_evidence.propose(rows, 16, [], extra_limit=1, context_queries=topics)
+        self.assertEqual(len(trace['adaptive']['context_facets']), 4)
+        self.assertNotIn('hidden', {r['id'] for r in selected})
+        selected, trace = fine_evidence.propose(rows, 16, [], extra_limit=0, context_queries=topics)
+        self.assertEqual([r['id'] for r in selected], trace['adaptive']['core_ids'])
+
     def test_explicit_path_added_as_whole_group(self):
         rows = self.rows()
         rows[0]['_relation_path_ids'] = ['bridge1', 'base0']

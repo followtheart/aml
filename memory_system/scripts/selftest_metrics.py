@@ -6,7 +6,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from app import metrics
+from app import budget, metrics
 
 
 class RateLimitError(Exception):
@@ -15,6 +15,43 @@ class RateLimitError(Exception):
 
 
 class RetryTests(unittest.IsolatedAsyncioTestCase):
+    async def test_dispatched_cancellation_logs_once_and_propagates(self):
+        started=metrics.asyncio.Event()
+        async def provider(attempt):
+            started.set()
+            await metrics.asyncio.Event().wait()
+        call=AsyncMock(side_effect=provider)
+        with budget.scope(seconds=10,calls=3,tokens=100) as limits, \
+                self.assertLogs('aml.metrics',level='WARNING') as logs:
+            task=metrics.asyncio.create_task(self.run_call(call,attempts=3,input_count=4))
+            await started.wait()
+            task.cancel()
+            with self.assertRaises(metrics.asyncio.CancelledError):await task
+        self.assertEqual(call.await_count,1)
+        self.assertEqual((limits.calls,limits.tokens),(1,0))
+        self.assertEqual(len(logs.output),1)
+        self.assertIn('status=cancelled',logs.output[0])
+        self.assertIn('usage_known=false',logs.output[0])
+        self.assertIn('input_count=4',logs.output[0])
+        self.assertIn('will_retry=false',logs.output[0])
+
+    async def test_cancellation_before_dispatch_does_not_invent_call(self):
+        waiting=metrics.asyncio.Event()
+        async def pace(*args):
+            waiting.set()
+            await metrics.asyncio.Event().wait()
+        pacer=SimpleNamespace(wait=pace,record=lambda tokens:None)
+        call=AsyncMock(return_value={})
+        with budget.scope(seconds=10,calls=3,tokens=100) as limits, \
+                self.assertNoLogs('aml.metrics',level='INFO'):
+            task=metrics.asyncio.create_task(metrics._measured_call(
+                kind='llm',stage='test',model='offline',call=call,pacer=pacer))
+            await waiting.wait()
+            task.cancel()
+            with self.assertRaises(metrics.asyncio.CancelledError):await task
+        call.assert_not_awaited()
+        self.assertEqual((limits.calls,limits.tokens),(0,0))
+
     async def test_large_answer_paces_judge_before_provider_call(self):
         now = [100.0]
         async def advance(seconds):

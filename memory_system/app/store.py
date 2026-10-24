@@ -852,8 +852,14 @@ class Store(ProvenanceStore):
             match_args = [' OR '.join('"' + t.replace('"', '""') + '"' for t in tokens[:40])]
             rank_sql = 'bm25(source_fts)'
         scores = {}
+        # Allocate the first pass to distinct original observations, before the
+        # per-query cap. Multiple AMUs extracted from one message used to fill
+        # the cap before the cross-query diversity policy could see other sources.
+        diverse = config.SOURCE_RECALL_DIVERSITY
+        seen_sources, deferred = set(), {}
         with self._lock:
-            cursor = self.conn.execute(f"""SELECT a.id, {rank_sql} AS rank
+            cursor = self.conn.execute(f"""SELECT a.id, s.request_id, s.message_index,
+                  s.source_event_id, {rank_sql} AS rank
                 FROM source_fts
                 JOIN source_messages s ON s.request_id=source_fts.request_id
                   AND s.message_index=source_fts.message_index
@@ -868,13 +874,27 @@ class Store(ProvenanceStore):
                 ORDER BY rank, a.id""",
                 (*rank_args, *match_args, user_id, user_id, user_id, include_history, include_sensitive,
                  include_cold))
-            # Apply the limit to distinct AMUs, not source joins. A memory with
-            # hundreds of supporting messages must not crowd out other hits.
+            # Keep the original eligibility joins for every source and claim.
+            # A source already represented by a selected AMU consumes no extra
+            # slot. Only fill duplicate-source seats if independent hits run out.
             for row in cursor:
+                budget.check()
+                if diverse:
+                    source = row['source_event_id'] or (row['request_id'], row['message_index'])
+                    if source in seen_sources:
+                        if len(deferred) < k:
+                            deferred.setdefault(row['id'], -float(row['rank']))
+                        continue
+                    seen_sources.add(source)
                 scores.setdefault(row['id'], -float(row['rank']))
                 if len(scores) >= k:
                     break
             cursor.close()
+        if diverse:
+            for mid, score in deferred.items():
+                if len(scores) >= k:
+                    break
+                scores.setdefault(mid, score)
         ids = list(scores)[:k]
         found = {m['id']: m for m in self.get_amus_by_ids(ids, include_history, include_sensitive)}
         return [dict(found[mid], _score=scores[mid]) for mid in ids if mid in found]

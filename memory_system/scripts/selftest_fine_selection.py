@@ -195,11 +195,11 @@ class CascadeCoverageSelectionTests(unittest.IsolatedAsyncioTestCase):
         settings = patch.multiple(config, LISTWISE_KEYED_OUTPUT=False, CASCADE_COARSE_LIMIT=50, CASCADE_FINE_LIMIT=12,
             CASCADE_LLM_LIMIT=10, CE_BATCH_SIZE=24, CE_MAX_DOCUMENT_BYTES=10000,
             CE_MAX_REQUEST_BYTES=90000, RERANK_MAX_PROMPT_BYTES=24000,
-            RERANK_REPAIR_MAX_CALLS=0)
+            RERANK_REPAIR_MAX_CALLS=0, FINE_EVIDENCE_ADAPTIVE=False)
         settings.start()
         self.addCleanup(settings.stop)
 
-    async def run_cascade(self, rows, requirements):
+    async def run_cascade(self, rows, requirements, specs=()):
         score_by_id = {row['id']: row['_fixture_score'] for row in rows}
         prompts = []
         async def ce(query, documents, **kwargs):
@@ -208,7 +208,7 @@ class CascadeCoverageSelectionTests(unittest.IsolatedAsyncioTestCase):
             documents = documents_in(prompt)
             prompts.append(documents)
             return permutation(len(documents))
-        plan = {'_coverage_requirements': copy.deepcopy(requirements)}
+        plan = {'_coverage_requirements': copy.deepcopy(requirements), '_query_specs': list(specs)}
         with patch.object(cross_encoder, 'rerank', side_effect=ce), \
                 patch.object(llm, 'complete_json', side_effect=listwise):
             result = await cascade.rank(schemas.SearchRequest(user_id='u', query='q', top_k=50),
@@ -283,6 +283,47 @@ class CascadeCoverageSelectionTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue({f'general{i}' for i in range(16)} <= set(submitted))
         self.assertEqual(plan['_cascade']['fine']['output_count'], 17)
         self.assertTrue(plan['_cascade']['adaptive_admission']['decisions'][0]['admitted'])
+
+    async def test_overflow_is_separate_from_primary_prompt_and_failure_keeps_primary(self):
+        from app import listwise_overflow
+        rows = [candidate(f'long{i}', 1-i*.1, [source(f'long{i}', f'Original {i} ' + str(i)*2990)])
+                for i in range(2)]
+        async def review(req, fine, submitted, selected, omissions, **kwargs):
+            self.assertEqual(len(submitted), 1)
+            extra = [c for c in fine if c['id'] not in {s['id'] for s in submitted}]
+            self.assertEqual(len(extra), 1)
+            self.assertTrue(any(o['id'] == extra[0]['id'] and o['reason'] == 'prompt_budget' for o in omissions))
+            return selected + extra, dict(status='recovered', groups=[],
+                appended_ids=[c['id'] for c in extra], review=dict(errors=[]))
+        with patch.multiple(config, RERANK_MAX_PROMPT_BYTES=6500, LISTWISE_OVERFLOW_REVIEW=True), \
+                patch.object(listwise_overflow, 'review', side_effect=review):
+            result, plan, submitted = await self.run_cascade(rows, [])
+        trace = plan['_cascade']
+        self.assertEqual(trace['listwise']['candidate_ids'], submitted)
+        self.assertEqual(trace['listwise']['selected_ids'], submitted)
+        self.assertEqual(len(trace['overflow']['selected_ids']), 2)
+        self.assertEqual(len([c for c in result if c.get('_cascade_selected')]), 2)
+        self.assertFalse(any(o['stage'] == 'listwise' and o['reason'] == 'prompt_budget' for o in trace['omitted']))
+        with patch.multiple(config, RERANK_MAX_PROMPT_BYTES=6500, LISTWISE_OVERFLOW_REVIEW=False), \
+                patch.object(listwise_overflow, 'review', side_effect=AssertionError('Disabled')):
+            result, plan, submitted = await self.run_cascade(rows, [])
+        self.assertNotIn('overflow', plan['_cascade'])
+        self.assertEqual(len([c for c in result if c.get('_cascade_selected')]), 1)
+
+    async def test_topic_context_flag_reaches_production_adaptive_admission(self):
+        rows = [candidate(f'general{i}', 1-i*.01, [source(f's{i}', f'General context {i}.')])
+                for i in range(20)]
+        rows.append(candidate('topic', .01, [source('new', 'I asked about coastal kayaking routes.')]))
+        specs = [dict(origin='option_topic', text='Try coastal kayaking routes.', coverage_ids=[])]
+        for enabled in (False, True):
+            with self.subTest(enabled=enabled), patch.multiple(config,
+                    FINE_EVIDENCE_ADAPTIVE=True, FINE_TOPIC_CONTEXT=enabled, FINE_EXTRA_LIMIT=1,
+                    CASCADE_FINE_LIMIT=16, CASCADE_LLM_LIMIT=16, RERANK_MAX_PROMPT_BYTES=90000):
+                _, plan, submitted = await self.run_cascade(rows, [], specs)
+            self.assertEqual('topic' in submitted, enabled)
+            self.assertLessEqual(len(submitted), 17)
+            self.assertTrue({f'general{i}' for i in range(16)} <= set(submitted))
+            self.assertEqual(plan['_coverage_requirements'], [])
 
 
 if __name__ == '__main__':

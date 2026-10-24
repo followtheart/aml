@@ -50,6 +50,32 @@ def shortlist(rows, count, requirements, key, reserve_ids=(), *, trace=None, car
                                      bound_soft_reservations=bound_soft_reservations)
 
 
+COARSE_EXTRA_LIMIT = 8
+FINE_NEW_COARSE_CORE_LIMIT = 1
+
+
+def coarse_shortlist(ordinary, requirements):
+    """Keep the original proposal intact; extra units still need CE/fine admission."""
+    selection = {}
+    limit = config.CASCADE_COARSE_LIMIT
+    key = lambda c: (c.get('_fused', 0),)
+    baseline = shortlist(ordinary, limit, requirements, key, trace=selection)
+    baseline_ids = {c['id'] for c in baseline}
+    extra, extension_selection = [], {}
+    if config.COARSE_EVIDENCE_EXTEND:
+        wider = shortlist(ordinary, limit + COARSE_EXTRA_LIMIT, requirements, key,
+                          trace=extension_selection)
+        extra = [c for c in wider if c['id'] not in baseline_ids][:COARSE_EXTRA_LIMIT]
+    selected = baseline + extra
+    trace = dict(input_count=len(ordinary), output_count=len(selected),
+                 limit=limit + (COARSE_EXTRA_LIMIT if config.COARSE_EVIDENCE_EXTEND else 0),
+                 baseline_limit=limit, baseline_ids=[c['id'] for c in baseline],
+                 extra_limit=COARSE_EXTRA_LIMIT if config.COARSE_EVIDENCE_EXTEND else 0,
+                 extra_ids=[c['id'] for c in extra], selected_ids=[c['id'] for c in selected],
+                 selection=selection, extension_selection=extension_selection)
+    return selected, trace
+
+
 def query_text(req, plan):
     return rerank_query.build(req, plan)
 
@@ -134,7 +160,8 @@ def listwise_request(req, plan, rows, *, repair=False, shared_sources=None, feed
     group_keys = ([k for k, v in (locked or {}).get('candidates', {}).items()
                    if v.get('relevance') != 'irrelevant'] if keyed and repair_field == 'groups' else None)
     output_schema = (listwise_contract.schema(len(rows), keyed=keyed, field=repair_field,
-                                            candidate_keys=candidate_keys, group_keys=group_keys)
+                                            candidate_keys=candidate_keys, group_keys=group_keys,
+                                            context_label=config.LISTWISE_CONTEXT_LABEL)
                      if keyed or repair_field else schema(len(rows)))
     system = ('Rank the supplied evidence for the question and call emit_json_result. '
               'Return every input index once in ranking. Mark unrelated items in irrelevant. '
@@ -154,8 +181,18 @@ def listwise_request(req, plan, rows, *, repair=False, shared_sources=None, feed
             if 'candidates' in fields:
                 prompt += (' Compare ALL candidates together. For each requested candidate key return priority '
                            '(integer 0..100, lower is better; ties allowed) and relevance '
-                           '("useful", "uncertain", or "irrelevant"). Use uncertain when unsure; '
+                           + ('("useful", "context", "uncertain", or "irrelevant"). '
+                              if config.LISTWISE_CONTEXT_LABEL else
+                              '("useful", "uncertain", or "irrelevant"). ') + 'Use uncertain when unsure; '
                            'do not label potentially useful evidence irrelevant.')
+                if config.LISTWISE_CONTEXT_LABEL:
+                    prompt += (' Use context for relevant topical questions, interests, quoted material or '
+                               'background that helps tailor or qualify a response but does not establish '
+                               'the personal premise of an option. Context remains eligible for retrieval; '
+                               'it never certifies ownership, diagnosis, habit or attribution. '
+                               'Use useful for direct evidence, counterevidence or necessary bridges. '
+                               'A context label does not increase priority automatically; rank by relevance '
+                               'and complementary information, keeping speaker and scope intact.')
         if candidate_keys is not None:
             prompt += '\nRequested candidate keys: ' + json.dumps(candidate_keys)
         prompt += ('\nReturn ONLY the requested JSON fields, no others. '
@@ -202,12 +239,8 @@ async def rank(req, plan, candidates):
     trace['omitted'].extend(dict(id=c['id'], stage='rules', reason='rule_limit') for c in dropped_rules)
     ordinary = [c for c in candidates if not protected(c)]
     requirements = plan.get('_coverage_requirements', [])
-    coarse_selection = {}
-    coarse = shortlist(ordinary, config.CASCADE_COARSE_LIMIT, requirements,
-                       lambda c: (c.get('_fused', 0),), trace=coarse_selection)
-    trace['coarse'] = dict(input_count=len(ordinary), output_count=len(coarse),
-                          limit=config.CASCADE_COARSE_LIMIT, selected_ids=[c['id'] for c in coarse],
-                          selection=coarse_selection)
+    coarse, trace['coarse'] = coarse_shortlist(ordinary, requirements)
+    coarse_selection = trace['coarse']['selection']
     coarse_ids = {c['id'] for c in coarse}
     trace['omitted'].extend(dict(id=c['id'], stage='coarse', reason='coarse_limit')
                             for c in ordinary if c['id'] not in coarse_ids)
@@ -375,8 +408,28 @@ async def rank(req, plan, candidates):
         bound_soft_reservations=True) if scores else shortlist(coarse, config.CASCADE_FINE_LIMIT,
             requirements, lambda c: (c.get('_fused', 0),), trace=fine_selection)
     if config.FINE_EVIDENCE_ADAPTIVE and scores:
+        core_pool_ids = None
+        core_failed_ids, core_fused_ids = failed_ids, fused_ids
+        if config.COARSE_EVIDENCE_EXTEND and config.FINE_COARSE_CORE_QUOTA:
+            baseline_pool_ids = set(trace['coarse']['baseline_ids'])
+            original_pool = [c for c in coarse if c['id'] in baseline_pool_ids]
+            new_scored = sorted([c for c in coarse if c['id'] not in baseline_pool_ids
+                                 and c.get('_ce_score') is not None], key=fine_evidence.key, reverse=True)
+            core_pool_ids = list(baseline_pool_ids | {c['id'] for c in new_scored[:FINE_NEW_COARSE_CORE_LIMIT]})
+            original_failed = [c for c in original_pool if c['id'] not in scores]
+            original_reserve = min(max(1, min(config.CASCADE_FINE_LIMIT, config.CASCADE_LLM_LIMIT) // 4),
+                                   len(original_failed))
+            core_failed_ids = {c['id'] for c in evidence_selection.rescue(
+                original_failed, original_reserve, req.query, plan.get('_query_specs', []))}
+            core_fused_ids = {c['id'] for c in sorted(original_pool,
+                key=lambda c: -(c.get('_fused') or 0))[:max(0, config.CASCADE_FUSED_RESERVE)]} - core_failed_ids
         fine, fine_selection = fine_evidence.propose(coarse, min(config.CASCADE_FINE_LIMIT, len(coarse)),
-            requirements, rescue_ids=failed_ids, fused_ids=fused_ids, extra_limit=config.FINE_EXTRA_LIMIT)
+            requirements, rescue_ids=core_failed_ids, fused_ids=core_fused_ids, extra_limit=config.FINE_EXTRA_LIMIT,
+            core_pool_ids=core_pool_ids, context_queries=plan.get('_query_specs', ()) if config.FINE_TOPIC_CONTEXT else (),
+            soft_promotion_limit=1 if config.FINE_WEAK_PROMOTION_ONE else None,
+            semantic_reserve=config.FINE_SEMANTIC_RESERVE)
+        if core_pool_ids is not None:
+            fine_selection['adaptive']['new_coarse_core_limit'] = FINE_NEW_COARSE_CORE_LIMIT
         plan['_fine_path_groups'] = fine_selection['adaptive']['path_groups']
     fine_ids = {c['id'] for c in fine}
     reservations = [r for r in fine_selection['reservations'] if r['selected']]
@@ -461,6 +514,7 @@ async def rank(req, plan, candidates):
                 reason = 'capacity'
             trace['reservation_missing'].extend(dict(requirement_id=rid,candidate_id=r['candidate_id'],
                 stage='listwise',reason=reason) for rid in r['requirement_ids'] or [None])
+    overflow_deadline = time.monotonic() + config.RERANK_DEADLINE_SECONDS
     if config.LISTWISE_STAGED and submitted:
         from . import listwise_staged
         seconds = min(config.RERANK_DEADLINE_SECONDS, max(.01, limits.deadline - time.monotonic() - 2)) if limits else config.RERANK_DEADLINE_SECONDS
@@ -582,7 +636,10 @@ async def rank(req, plan, candidates):
             # below accepted useful evidence, bounded by the admitted input set.
             # Final packet capacity is enforced separately and is not irrelevance.
         trace['listwise'] = dict(status=status, input_count=len(submitted), output_count=len(selected),
-            output_protocol='keyed_candidates_v1' if keyed else 'permutation_v1',
+            output_protocol=('keyed_candidates_v2_context' if config.LISTWISE_CONTEXT_LABEL else
+                             'keyed_candidates_v1') if keyed else 'permutation_v1',
+            candidate_relevance={submitted[int(k[1:])]['id']: v['relevance']
+                                 for k, v in contract.accepted_candidates.items()},
             candidate_contract_status='valid' if contract.ranking is not None and contract.irrelevant is not None else 'invalid',
             groups_status='valid' if contract.groups is not None else 'invalid',
             accepted_candidate_keys=sorted(contract.accepted_candidates),
@@ -609,6 +666,26 @@ async def rank(req, plan, candidates):
         trace['omitted'].extend(dict(id=mid, stage='fallback', reason='fallback_limit') for mid in sorted(excess))
         trace['listwise']['output_count'] = len(selected)
         trace['listwise']['selected_ids'] = [c['id'] for c in selected]
+    if config.LISTWISE_OVERFLOW_REVIEW:
+        from . import listwise_overflow
+        selected, overflow = await listwise_overflow.review(
+            req, fine, submitted, selected, trace['omitted'], deadline=overflow_deadline)
+        trace['overflow'] = overflow
+        trace['overflow']['selected_ids'] = [c['id'] for c in selected]
+        errors.extend(dict(stage='listwise_overflow', **e)
+                      for e in overflow.get('review', {}).get('errors', []))
+        # Main prompt and its decisions keep their original stage identities.
+        # Successful overflow additions resolve only their admission omission.
+        appended = set(overflow['appended_ids'])
+        trace['omitted'] = [o for o in trace['omitted'] if not (
+            o['stage'] == 'listwise' and o['reason'] == 'prompt_budget' and o['id'] in appended)]
+        added_groups = []
+        for group in overflow['groups']:
+            if len(group) > 1 and set(group) <= {c['id'] for c in selected} and set(group) & appended:
+                added_groups.append(group)
+        if added_groups:
+            plan['_evidence_groups'] = listwise_overflow.merge_groups(
+                plan.get('_evidence_groups', []) + added_groups, selected)
     selected = rules + selected
     selected_ids = {c['id'] for c in selected}
     for index, c in enumerate(selected):

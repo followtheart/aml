@@ -26,6 +26,12 @@ async def score_all(prompt, *args, **kwargs):
 
 class SearchTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
+        # These fixtures emit legacy ranking lists and parse inline source text.
+        # Keep that protocol explicit as deployment defaults evolve.
+        protocol = patch.multiple(config, LISTWISE_KEYED_OUTPUT=False,
+                                  LISTWISE_SHARED_SOURCES=False)
+        protocol.start()
+        self.addCleanup(protocol.stop)
         self.st = store.Store(':memory:')
         self.tmp = tempfile.TemporaryDirectory()
         self.path = Path(self.tmp.name) / 'search.jsonl'
@@ -174,7 +180,10 @@ class SearchTests(unittest.IsolatedAsyncioTestCase):
         for i in range(145):
             await self.memory(f'Alice work record {i}')
         # A broad recall request cannot expand the bounded model stages.
-        with patch.multiple(config, RECALL_VECTOR_LIMIT=145, RECALL_FTS_LIMIT=145):
+        with patch.multiple(config, RECALL_VECTOR_LIMIT=145, RECALL_FTS_LIMIT=145,
+                            CASCADE_COARSE_LIMIT=50, CASCADE_FINE_LIMIT=12,
+                            CASCADE_LLM_LIMIT=10, COARSE_EVIDENCE_EXTEND=False,
+                            FINE_EVIDENCE_ADAPTIVE=False):
             result = await self.run_search(self.req(top_k=100))
         self.assertEqual(len(result.data), 10)
         trace = json.loads(self.path.read_text().splitlines()[-1])
@@ -188,7 +197,7 @@ class SearchTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(set(returned_ids)), 10)
         self.assertEqual(trace['rounds'][0]['verification_status'], 'not_run')
 
-    async def test_noise_selection_and_topk_are_logged_separately(self):
+    async def test_unreviewed_selection_and_topk_are_logged_separately(self):
         ids = [await self.memory(f'Alice work {i}') for i in range(3)]
         async def reject_one(prompt, *args, **kwargs):
             rows = re.findall(r'^\d+: (.*)$', prompt, re.M)
@@ -199,9 +208,13 @@ class SearchTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(response.data), 1)
         trace = json.loads(self.path.read_text())
         self.assertNotEqual(response.data[0].id, ids[0])
-        self.assertEqual(len(trace['top_k_excluded']), 1)
-        self.assertEqual(trace['selection']['omitted'], [
-            {'id': ids[0], 'stage': 'listwise', 'reason': 'irrelevant'}])
+        # A primary negative without a source-backed review is provisional,
+        # so top_k, rather than a confirmed deletion, excludes this candidate.
+        self.assertEqual(len(trace['top_k_excluded']), 2)
+        self.assertEqual(trace['selection']['omitted'], [])
+        recovery = trace['coverage_manifest']['cascade']['listwise']['recovery']
+        self.assertEqual(recovery['provisional_ids'], [ids[0]])
+        self.assertEqual(recovery['confirmed_irrelevant_ids'], [])
         self.assertTrue(all('content' in c for r in trace['routes'] for c in r['candidates']))
 
     async def test_rerank_error_retains_candidates_and_logs_fallback(self):
@@ -232,7 +245,8 @@ class SearchTests(unittest.IsolatedAsyncioTestCase):
         ids = [await self.memory(f'Alice work {i}') for i in range(2)]
         async def incomplete(prompt, *args, **kwargs):
             return from_scores([0.1])
-        with patch.object(search, '_understand', AsyncMock(return_value={
+        with patch.object(config, 'RERANK_REPAIR_MAX_CALLS', 1), \
+                patch.object(search, '_understand', AsyncMock(return_value={
                 'intent': 'fact'})), patch.object(
                 search.llm, 'complete_json', side_effect=incomplete):
             result = await search.run_search(self.st, self.req())
@@ -375,8 +389,11 @@ class SearchTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_sensitive_memory_requires_server_and_request_opt_in(self):
         aid = await self.memory('Alice bank account 1234', sensitivity='sensitive')
-        self.assertEqual((await self.run_search(self.req('Alice bank account'))).data, [])
+        with patch.object(config, 'SENSITIVE_RECALL_ENABLED', False):
+            self.assertEqual((await self.run_search(self.req('Alice bank account'))).data, [])
         with patch.object(config, 'SENSITIVE_RECALL_ENABLED', True):
+            self.assertEqual((await self.run_search(self.req(
+                'Alice bank account', include_sensitive=False))).data, [])
             result = await self.run_search(self.req(
                 'Alice bank account', include_sensitive=True))
         self.assertEqual([item.id for item in result.data], [aid])

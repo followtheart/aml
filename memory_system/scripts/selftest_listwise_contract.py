@@ -132,7 +132,19 @@ class Runtime(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(list(self.requests[1]['schema']['properties']),['candidates'])
         self.assertEqual(plan['_rerank_status'],'recovered')
         self.assertEqual(len([r for r in result if r['_cascade_selected']]),3)
-        self.assertEqual(plan['_cascade']['listwise']['output_protocol'],'keyed_candidates_v1')
+        self.assertEqual(plan['_cascade']['listwise']['output_protocol'],
+            'keyed_candidates_v2_context' if config.LISTWISE_CONTEXT_LABEL else 'keyed_candidates_v1')
+
+    async def test_context_survives_without_recovery_or_fact_promotion(self):
+        values = cards()
+        values['c1']['relevance'] = 'context'
+        with patch.object(config, 'LISTWISE_CONTEXT_LABEL', True):
+            result, plan = await self.run_case([dict(candidates=values, groups=[])])
+        self.assertEqual([r['id'] for r in result if r['_cascade_selected']], ['m0', 'm1', 'm2'])
+        self.assertEqual(len(self.requests), 1)
+        self.assertEqual(plan['_cascade']['listwise']['candidate_relevance']['m1'], 'context')
+        self.assertEqual(plan['_cascade']['listwise']['recovery']['status'], 'not_needed')
+        self.assertFalse(any(r.get('_supported_coverage_ids') for r in result))
 
     async def test_repairs_request_only_unresolved_keys(self):
         value=cards();value['c0']['priority']=90

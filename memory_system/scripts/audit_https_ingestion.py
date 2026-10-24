@@ -1,4 +1,4 @@
-"""Read-only, transaction-consistent fidelity check for one HTTPS conversation."""
+"""Read-only, transaction-consistent fidelity check for complete HTTPS histories."""
 import argparse
 import datetime
 import hashlib
@@ -20,29 +20,38 @@ def audit(run, plan_path):
     if data.resolve() != Path(plan['input']).resolve() or digest != plan['sha256']:
         raise ValueError('Input differs from plan')
     conversations = [json.loads(l) for l in data.read_text().splitlines() if l.strip()]
-    if len(conversations) != 1:
-        raise ValueError('Only single-conversation plans supported')
-    conv = conversations[0]
-    if len(conv['qa']) != plan['expected_qa']:
+    if not conversations or len(conversations) != plan.get('expected_conversations', 1):
+        raise ValueError('Conversation count differs from plan')
+    if sum(len(conv['qa']) for conv in conversations) != plan['expected_qa']:
         raise ValueError('Question count differs from plan')
+    if 'qa_ids' in plan and [str(q['id']) for conv in conversations for q in conv['qa']] != [str(q) for q in plan['qa_ids']]:
+        raise ValueError('Question identities differ from plan')
     ids = re.findall(r'^run_id=([0-9a-f]{32}) ', (run / 'output.log').read_text(), re.M)
     if len(ids) != 1:
         raise ValueError('Ambiguous run identity')
-    uid = f"https:{ids[0]}:1:{conv.get('dataset', 'normalized')}:{conv['conversation_id']}"
-    chunks = list(ingestion_chunks(conv, plan.get('chunk_messages', 20), plan.get('chunk_words', 2000)))
-    expected = [(f'{uid}:session:{sid}:chunk:{ci}', batch) for sid, ci, batch in chunks]
-    if len(expected) != plan['expected_add_chunks'] or sum(len(m) for _, m in expected) != plan['source_messages']:
+    expected, histories = [], []
+    for index, conv in enumerate(conversations, 1):
+        uid = f"https:{ids[0]}:{index}:{conv.get('dataset', 'normalized')}:{conv['conversation_id']}"
+        chunks = list(ingestion_chunks(conv, plan.get('chunk_messages', 20), plan.get('chunk_words', 2000)))
+        expected.extend((f'{uid}:session:{sid}:chunk:{ci}', uid, f'{uid}:session:{sid}', batch)
+                        for sid, ci, batch in chunks)
+        histories.append(dict(conversation_id=conv['conversation_id'], user_id=uid,
+                              expected_chunks=len(chunks), committed_chunks=0,
+                              original_messages=sum(len(s) for s in conv['sessions']),
+                              expected_source_fragments=sum(len(b) for _, _, b in chunks),
+                              committed_source_fragments=0))
+    if len(expected) != plan['expected_add_chunks'] or sum(len(m) for _, _, _, m in expected) != plan['source_messages']:
         raise ValueError('Chunk/message counts differ from plan')
+    by_user = {h['user_id']: h for h in histories}
     conn = sqlite3.connect(f'file:{(run / "memory.db").resolve()}?mode=ro', uri=True)
     conn.row_factory = sqlite3.Row
     try:
         conn.execute('BEGIN')
         requests = list(conn.execute('SELECT * FROM requests ORDER BY rowid'))
-        if [r['request_id'] for r in requests] != [key for key, _ in expected[:len(requests)]]:
+        if [r['request_id'] for r in requests] != [key for key, _, _, _ in expected[:len(requests)]]:
             raise ValueError('Committed requests are not an input prefix')
         count = 0
-        for request, (key, wanted) in zip(requests, expected):
-            sid = key.rsplit(':chunk:', 1)[0]
+        for request, (key, uid, sid, wanted) in zip(requests, expected):
             if request['user_id'] != uid or request['session_id'] != sid:
                 raise ValueError('Request ownership mismatch')
             actual = list(conn.execute('SELECT * FROM source_messages WHERE request_id=? ORDER BY message_index', (key,)))
@@ -53,6 +62,8 @@ def audit(run, plan_path):
                         or any(row[k] != message.get(k) for k in ('role', 'content', 'timestamp'))):
                     raise ValueError(f'Original source mismatch: {key}, message {i}')
             count += len(actual)
+            by_user[uid]['committed_chunks'] += 1
+            by_user[uid]['committed_source_fragments'] += len(actual)
         if count != conn.execute('SELECT count(*) FROM source_messages').fetchone()[0]:
             raise ValueError('Orphan source messages')
     finally:
@@ -61,6 +72,8 @@ def audit(run, plan_path):
                 committed_chunks=len(requests), expected_chunks=len(expected),
                 source_messages=count, expected_messages=plan['source_messages'],
                 original_messages_exact=True, orphan_sources=False, input_sha256=digest,
+                histories=histories,
+                message_count_semantics='source fragments after lossless ingestion chunking',
                 checked_at=datetime.datetime.now(datetime.timezone.utc).isoformat())
 
 

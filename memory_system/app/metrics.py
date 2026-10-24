@@ -167,6 +167,21 @@ async def _measured_call(
                 parts.append(f"input_count={input_count}")
             log.info(" ".join(parts))
             return result
+        except asyncio.CancelledError:
+            # A dispatched call already consumed a call-budget slot. Preserve
+            # its terminal event when wait_for/request cancellation interrupts
+            # the provider; cancellation supplies no trustworthy usage data.
+            parts = [
+                "provider_call", f"kind={kind}", f"stage={stage}", f"model={model}",
+                "status=cancelled", f"attempt={attempt}", f"retries={attempt - 1}",
+                f"duration_s={time.perf_counter() - started:.3f}", "will_retry=false",
+                "error_type=CancelledError", "usage_known=false",
+                "prompt_tokens=0", "completion_tokens=0", "total_tokens=0",
+            ]
+            if input_count is not None:
+                parts.append(f"input_count={input_count}")
+            log.warning(" ".join(parts))
+            raise
         except Exception as exc:
             duration = time.perf_counter() - started
             failed_usage = exc.usage if isinstance(exc, ResponseParseError) else (0, 0, 0)

@@ -1,7 +1,7 @@
 """Bounded evidence queries; option text is a hypothesis, never a user fact."""
 import re
 
-from . import choice_premises, personal_evidence, rerank_query
+from . import choice_premises, config, personal_evidence, rerank_query
 
 MAX_QUERY_CHARS = 240
 
@@ -60,6 +60,22 @@ def compact_option(text):
     return text
 
 
+def topic_anchor(option):
+    """A bounded literal topic view, never a claim about the user.
+
+    Unlike compact_option, keep the advice/topic following a personal premise.
+    An embedded profession must not replace the activity being discussed.
+    """
+    text = re.sub(r'^\s*[A-Z0-9]+[.)、]\s*', '', option).strip()
+    text = ' '.join(text.split())
+    text = re.split(r'(?<=[.!?。！？])\s+', text, maxsplit=1)[0]
+    if len(text) > MAX_QUERY_CHARS:
+        text = text[:MAX_QUERY_CHARS]
+        if ' ' in text:
+            text = text.rsplit(' ', 1)[0]
+    return text
+
+
 def build(query, options, plan, limit=6):
     """Reserve one query per option before expansions; validate positional output.
 
@@ -115,6 +131,20 @@ def build(query, options, plan, limit=6):
             add(value, 'option_premise', index, f'option:{index}', True)
         else:
             add(compact_option(option), 'option_fallback', index, f'option:{index}', True)
+    # Additional literal views have a separate, bounded allowance. They are
+    # retrieval hypotheses, NOT extra coverage obligations. Do not displace
+    # the original question, premises or decompositions with these views.
+    anchors = []
+    if config.RECALL_TOPIC_ANCHORS:
+        for index, option in enumerate(options):
+            if not any(s['option_index'] == index for s in specs):
+                continue  # Preserve deliberately empty generic-advice slots.
+            text = topic_anchor(option)
+            words = personal_evidence.terms(text)
+            existing = set().union(*(personal_evidence.terms(s['text']) for s in specs
+                if s['origin'] == 'question' or s['option_index'] == index))
+            if words and len(words - existing) >= 2:
+                anchors.append((text, index))
     allowed = personal_evidence.terms(query + ' ' + ' '.join(options))
     for field in ('sub_queries', 'expanded_queries'):
         values = plan.get(field)
@@ -128,5 +158,7 @@ def build(query, options, plan, limit=6):
             # A planner is asked for at most three steps; report excess explicitly.
             required = field == 'sub_queries' and index < 3
             add(value, field, target=f'sub:{index}' if required else None, required=required)
+    for text, index in anchors[:config.RECALL_TOPIC_ANCHOR_LIMIT]:
+        add(text, 'option_topic', index, required=True)
     plan['_coverage_requirements'] = requirements
     return specs

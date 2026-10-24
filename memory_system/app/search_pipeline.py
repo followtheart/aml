@@ -216,12 +216,14 @@ def _merge_query_results(routes: List[List[Dict]], limit: int) -> List[Dict]:
             for iid in sorted(best, key=lambda iid: positions[iid])[:limit]]
 
 
-def _merge_source_query_results(routes, limit, source_keys):
+def _merge_source_query_results(routes, limit, source_keys, *, novel_first=False, trace=None):
     """Allocate slots across complete original-message sets before repeats.
 
     Inputs have already passed source-search eligibility filters. Grouping
     changes allocation only; it neither validates facts nor adds new hits.
-    Overlapping but different sets remain separate, as do unlinked memories.
+    By default overlapping but different sets remain separate. The optional
+    novelty pass defers fully represented sets, then fills spare seats from
+    those candidates. No source text, score, or factual support is changed.
     """
     ordered = _merge_query_results(routes, sum(map(len, routes)))
     groups = {}
@@ -241,6 +243,22 @@ def _merge_source_query_results(routes, limit, source_keys):
         if not added:
             break
         depth += 1
+    baseline = result
+    if novel_first:
+        novel, deferred, seen = [], [], set()
+        for item in ordered:
+            keys = set(source_keys.get(item['id'], ()))
+            if not keys or keys - seen:
+                novel.append(item)
+                seen.update(keys)
+            else:
+                deferred.append(item)
+        result = (novel + deferred)[:max(0, limit)]
+    if trace is not None:
+        trace.update(policy='novel_sources_first_v1' if novel_first else 'distinct_source_sets_v1',
+            limit=limit, ordered_ids=[c['id'] for c in ordered],
+            source_keys={c['id']: sorted(source_keys.get(c['id'], ())) for c in ordered},
+            baseline_ids=[c['id'] for c in baseline], selected_ids=[c['id'] for c in result])
     return result
 
 
@@ -260,6 +278,8 @@ def _route(plan, routes, name, items, query=None):
     plan.setdefault('_routes', []).append(dict(channel=name, family=family,
         round=plan.get('_round', 1), query=query, weight=_route_weight(name, plan.get('intent')),
         candidates=_snapshot(items)))
+    if name == 'source_text' and plan.get('_source_merge') is not None:
+        plan['_routes'][-1]['source_merge'] = plan['_source_merge']
 
 
 def _lexical_recall(st, req, plan, specs):
@@ -281,9 +301,13 @@ def _lexical_recall(st, req, plan, specs):
             observations = [s for s in raw if s.get('role') == 'user'] or raw
             source_keys[candidate['id']] = {
                 (s['request_id'], s['message_index']) for s in observations}
-        source_merged = _merge_source_query_results(sources, config.RECALL_SOURCE_LIMIT, source_keys)
+        merge_trace = {}
+        source_merged = _merge_source_query_results(sources, config.RECALL_SOURCE_LIMIT, source_keys,
+            novel_first=config.SOURCE_RECALL_NOVELTY, trace=merge_trace)
+        plan['_source_merge'] = merge_trace
     else:
         source_merged = _merge_query_results(sources, config.RECALL_SOURCE_LIMIT)
+        plan.pop('_source_merge', None)
     merged = [_merge_query_results(fts, config.RECALL_FTS_LIMIT), source_merged]
     # Count independent original observations per query, never AMUs from one source.
     coverage = []
@@ -957,7 +981,7 @@ def _memory_prefix(c: Dict, full: Optional[Dict], anchor: str) -> str:
     return prefix
 
 
-def _pack_evidence(st, req, plan, ranked, anchor):
+def _pack_evidence(st, req, plan, ranked, anchor, context_candidates=()):
     plan['_anchor'] = anchor
     # Legacy callers may supply raw rows; production prepares units before rerank.
     if any('_packet_item' not in c for c in ranked):
@@ -993,8 +1017,129 @@ def _pack_evidence(st, req, plan, ranked, anchor):
     else:
         packed, packet_hash, manifest = evidence_packet.pack(items, req.top_k, token_budget,
             required_coverage=requirements, fallback_limit=config.EVIDENCE_FALLBACK_ITEMS)
+    if '_cascade' in plan:
+        from . import conversation_context
+        context_fine = []
+        source_champions, source_nomination = [], None
+        if config.PACKET_ADJACENT_CONTEXT or config.PACKET_FINE_CONTEXT_RESERVE:
+            # Use only this request's already-filtered fine pool. Never reload
+            # forgotten/private/stale sources to complete conversation context.
+            fine_ids = plan['_cascade'].get('fine', {}).get('selected_ids', [])
+            selected_ids = set(plan.get('_selection', {}).get('selected_ids', [c['id'] for c in ranked]))
+            available = {c['id']: c for c in _foresight_filter(list(context_candidates), plan)
+                         if c.get('view_status') != 'stale' and '_packet_item' in c}
+            context_fine = [available[mid] for mid in fine_ids if mid in available and mid not in selected_ids]
+            if (config.PACKET_SOURCE_QUERY_CONTEXT and config.PACKET_FINE_CONTEXT_RESERVE
+                    and config.PACKET_FINE_CONTEXT_5K and config.PACKET_FINE_CONTEXT_LEXICAL
+                    and not config.PACKET_FINE_CONTEXT_FILL):
+                from . import source_query_context
+                source_champions, source_nomination = source_query_context.nominate(available,
+                    routes=plan.get('_routes', []), query_specs=plan.get('_query_specs', []),
+                    query=req.query, options=req.options or (),
+                    coarse_ids=plan['_cascade'].get('coarse', {}).get('selected_ids', []),
+                    fine_ids=fine_ids, selected_ids=selected_ids,
+                    fine_selection=plan['_cascade'].get('fine', {}).get('selection', {}))
+        from . import combined_query_context
+        if combined_query_context.enabled():
+            packed,packet_hash,manifest,context_trace=combined_query_context.attach(
+                packed,packet_hash,manifest,context_fine,available,user_id=req.user_id,top_k=req.top_k,
+                routes=plan.get('_routes',[]),query_specs=plan.get('_query_specs',[]),query=req.query,
+                options=req.options or (),coarse_ids=plan['_cascade'].get('coarse',{}).get('selected_ids',[]),
+                fine_ids=fine_ids,selected_ids=selected_ids,
+                fine_selection=plan['_cascade'].get('fine',{}).get('selection',{}))
+        else:
+            packed, packet_hash, manifest, context_trace = conversation_context.attach(
+                packed, packet_hash, manifest, context_fine, user_id=req.user_id, top_k=req.top_k,
+                enabled=config.PACKET_ADJACENT_CONTEXT,reserve_enabled=config.PACKET_FINE_CONTEXT_RESERVE,
+                reserve_extended=config.PACKET_FINE_CONTEXT_5K,
+                lexical_enabled=config.PACKET_FINE_CONTEXT_LEXICAL,fill_enabled=config.PACKET_FINE_CONTEXT_FILL,
+                query=req.query,options=req.options,source_query_enabled=config.PACKET_SOURCE_QUERY_CONTEXT,
+                source_champions=source_champions,source_nomination=source_nomination)
+        if (config.PACKET_SOURCE_FIRST_RESIDUAL and config.PACKET_FINE_CONTEXT_RESERVE
+                and config.PACKET_FINE_CONTEXT_5K and config.PACKET_FINE_CONTEXT_LEXICAL
+                and not config.PACKET_FINE_CONTEXT_FILL and not config.PACKET_SOURCE_QUERY_CONTEXT
+                and not config.PACKET_QUESTION_CONTEXT_CE):
+            from . import source_first_residual
+            champions,nomination=source_first_residual.nominate(available,
+                routes=plan.get('_routes',[]),query_specs=plan.get('_query_specs',[]),query=req.query,
+                coarse_ids=plan['_cascade'].get('coarse',{}).get('selected_ids',[]),
+                fine_ids=fine_ids,selected_ids=selected_ids)
+            packed,packet_hash,manifest=source_first_residual.attach(packed,packet_hash,manifest,
+                champions,nomination,user_id=req.user_id,top_k=req.top_k)
+            context_trace=manifest['conversation_context']
+        if (config.PACKET_MARGINAL_QUERY_CONTEXT and config.PACKET_FINE_CONTEXT_RESERVE
+                and config.PACKET_FINE_CONTEXT_5K and config.PACKET_FINE_CONTEXT_LEXICAL
+                and not config.PACKET_FINE_CONTEXT_FILL and not config.PACKET_SOURCE_QUERY_CONTEXT
+                and not config.PACKET_QUESTION_CONTEXT_CE and not config.PACKET_SOURCE_FIRST_RESIDUAL):
+            from . import marginal_query_context
+            champions,nomination=marginal_query_context.nominate(available,packed,
+                routes=plan.get('_routes',[]),query_specs=plan.get('_query_specs',[]),query=req.query,
+                options=req.options or (),coarse_ids=plan['_cascade'].get('coarse',{}).get('selected_ids',[]),
+                selected_ids=selected_ids,user_id=req.user_id)
+            packed,packet_hash,manifest=marginal_query_context.attach(packed,packet_hash,manifest,
+                champions,nomination,user_id=req.user_id,top_k=req.top_k)
+            context_trace=manifest['conversation_context']
+        from . import core_gap_context
+        if core_gap_context.enabled():
+            champions, nomination = core_gap_context.nominate(available, packed,
+                fine_ids=fine_ids, coarse_ids=plan['_cascade'].get('coarse', {}).get('selected_ids', []),
+                selection=plan['_cascade'].get('fine', {}).get('selection', {}),
+                count=config.CASCADE_FINE_LIMIT)
+            packed, packet_hash, manifest = core_gap_context.attach(packed, packet_hash, manifest,
+                champions, nomination, user_id=req.user_id, top_k=req.top_k)
+            context_trace = manifest['conversation_context']
+        from . import sparse_source_context
+        if sparse_source_context.enabled():
+            champions, nomination = sparse_source_context.nominate(available, packed,
+                coarse_ids=plan['_cascade'].get('coarse', {}).get('selected_ids', []),
+                fine_ids=fine_ids, requirements=plan.get('_coverage_requirements', []),
+                user_id=req.user_id, top_k=req.top_k, byte_budget=manifest['token_budget'],
+                remaining_bytes=5120-manifest['conversation_context']['added_bytes'])
+            packed, packet_hash, manifest = sparse_source_context.attach(packed, packet_hash, manifest,
+                champions, nomination, user_id=req.user_id, top_k=req.top_k)
+            context_trace = manifest['conversation_context']
+        from . import exclusive_shared_context
+        if exclusive_shared_context.enabled():
+            champions, nomination = exclusive_shared_context.nominate(available, packed,
+                coarse_ids=plan['_cascade'].get('coarse', {}).get('selected_ids', []),
+                options=req.options or (), user_id=req.user_id, top_k=req.top_k,
+                byte_budget=manifest['token_budget'],
+                remaining_bytes=5120-manifest['conversation_context']['added_bytes'])
+            packed, packet_hash, manifest = exclusive_shared_context.attach(
+                packed, packet_hash, manifest, champions, nomination, user_id=req.user_id, top_k=req.top_k)
+            context_trace = manifest['conversation_context']
+        from . import unmatched_noun_context
+        if unmatched_noun_context.enabled():
+            champions, nomination = unmatched_noun_context.nominate(available, packed,
+                coarse_ids=plan['_cascade'].get('coarse', {}).get('selected_ids', []),
+                query=req.query, user_id=req.user_id, top_k=req.top_k,
+                byte_budget=manifest['token_budget'],
+                remaining_bytes=5120-manifest['conversation_context']['added_bytes'])
+            packed, packet_hash, manifest = unmatched_noun_context.attach(
+                packed, packet_hash, manifest, champions, nomination, user_id=req.user_id, top_k=req.top_k)
+            context_trace = manifest['conversation_context']
+        plan['_cascade']['conversation_context'] = context_trace
     manifest.update(manifest_budget)
     manifest['unit_omitted'] = plan.get('_unit_omitted', [])
+    return packed, packet_hash, manifest
+
+
+async def _append_question_context(req, plan, ranked, packed, packet_hash, manifest):
+    active = (config.PACKET_QUESTION_CONTEXT_CE and config.PACKET_FINE_CONTEXT_RESERVE
+        and config.PACKET_FINE_CONTEXT_5K and config.PACKET_FINE_CONTEXT_LEXICAL
+        and not config.PACKET_FINE_CONTEXT_FILL and not config.PACKET_SOURCE_QUERY_CONTEXT
+        and '_cascade' in plan)
+    if not active:
+        return packed, packet_hash, manifest
+    from . import question_context_ce
+    available = {c['id']: c for c in _foresight_filter(list(ranked), plan)
+        if c.get('view_status') != 'stale' and '_packet_item' in c}
+    selected = set(plan['_selection']['selected_ids'])
+    fine = [available[mid] for mid in plan['_cascade'].get('fine', {}).get('selected_ids', [])
+        if mid in available and mid not in selected]
+    packed, packet_hash, manifest = await question_context_ce.attach(packed, packet_hash, manifest, fine,
+        user_id=req.user_id, top_k=req.top_k, query=req.query)
+    plan['_cascade']['conversation_context'] = manifest['conversation_context']
     return packed, packet_hash, manifest
 
 
@@ -1056,7 +1201,8 @@ async def _run_search(st: store.Store,
             candidates = _foresight_filter(candidates, plan)
         ranked = await _filter_rerank(req, plan, candidates)
         selected = _select_evidence(req, plan, ranked, defer_limits=True)
-        packed, packet_hash, manifest = await local_work.run(_pack_evidence, st, req, plan, selected, anchor)
+        packed, packet_hash, manifest = await local_work.run(_pack_evidence, st, req, plan, selected, anchor, ranked)
+        packed, packet_hash, manifest = await _append_question_context(req, plan, ranked, packed, packet_hash, manifest)
         manifest['selection_mode'] = plan['_selection']['mode']
         manifest['selection_omitted'] = plan['_selection']['omitted']
         manifest['rerank_status'] = plan.get('_rerank_status', 'not_run')
@@ -1075,6 +1221,8 @@ async def _run_search(st: store.Store,
             or recovery_status not in ('not_needed', 'ok', 'recovered')
             or any(q.get('candidate_budget_exhausted') for v in manifest['vector_search'] for q in v.get('queries', []))
             or manifest['followup'].get('status') in ('error', 'budget_skipped'))
+        if manifest['cascade'].get('conversation_context', {}).get('question_ce', {}).get('status') == 'error':
+            manifest['search_degraded'] = True
         trace["pipeline"] = run_metadata.SEARCH_POLICY
         trace["fused"] = _snapshot(fused)
         trace["rounds"] = [{"round": r, "queries": [q['text'] for q in plan.get('_query_specs', [])
@@ -1121,6 +1269,8 @@ async def _run_search(st: store.Store,
         trace['query_specs'] = plan.get('_query_specs', [])
         trace['expansion'] = plan.get('_expansion', {})
         trace["include_history"] = plan.get("_include_history")
+        trace['requested_include_sensitive'] = req.include_sensitive
+        trace['include_sensitive'] = plan.get('_include_sensitive')
         trace["routes"] = plan.get("_routes", [])
         trace["scenes"] = plan.get("_scenes", [])
         trace["foresight_dropped"] = list(dict.fromkeys(plan.get("_foresight_dropped", [])))

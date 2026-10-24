@@ -23,6 +23,10 @@ def versions():
             'model': config.LLM_MODEL, 'embedding_model': config.EMBED_MODEL,
             'cross_encoder_model': config.CE_MODEL,
             'settings': {key: getattr(config, key) for key in (
+                'ASSOCIATION_WRITE', 'ASSOCIATION_RECALL', 'ASSOCIATION_VIEWS_PER_SOURCE',
+                'ASSOCIATION_QUERY', 'ASSOCIATION_QUERY_VIEWS', 'ASSOCIATION_QUERY_SECONDS', 'ASSOCIATION_QUERY_BYTES',
+                'ASSOCIATION_RECALL_LIMIT', 'ASSOCIATION_SOURCE_BYTES', 'ASSOCIATION_MAX_BATCHES',
+                'ASSOCIATION_GENERATION_SECONDS', 'ASSOCIATION_MIN_COSINE', 'ASSOCIATION_SCORE_WEIGHT',
                 'PACKET_QUESTION_CONTEXT_CE',
                 'PACKET_SOURCE_FIRST_RESIDUAL',
                 'PACKET_MARGINAL_QUERY_CONTEXT',

@@ -184,6 +184,21 @@ CHOICE_CONSTRAINT_CONTENT_TERMS = os.environ.get('AML_CHOICE_CONSTRAINT_CONTENT_
 CHOICE_CONSTRAINT_TERM_FORMS = os.environ.get('AML_CHOICE_CONSTRAINT_TERM_FORMS', '0') == '1'
 CHOICE_VERIFICATION_SCOPE = os.environ.get('AML_CHOICE_VERIFICATION_SCOPE', '0') == '1'
 GRAPH_FUSION_ENABLED = os.environ.get('AML_GRAPH_FUSION_ENABLED', '1') == '1'
+# Independent opt-in switches for the first association ablation. Existing
+# query planning and evidence verification remain the common baseline.
+ASSOCIATION_WRITE = os.environ.get('AML_ASSOCIATION_WRITE', '0') == '1'
+ASSOCIATION_RECALL = os.environ.get('AML_ASSOCIATION_RECALL', '0') == '1'
+ASSOCIATION_QUERY = os.environ.get('AML_ASSOCIATION_QUERY', '0') == '1'
+ASSOCIATION_QUERY_VIEWS = max(1, min(3, int(os.environ.get('AML_ASSOCIATION_QUERY_VIEWS', '3'))))
+ASSOCIATION_QUERY_SECONDS = max(1., float(os.environ.get('AML_ASSOCIATION_QUERY_SECONDS', '8')))
+ASSOCIATION_QUERY_BYTES = max(1024, min(32000, int(os.environ.get('AML_ASSOCIATION_QUERY_BYTES', '16000'))))
+ASSOCIATION_VIEWS_PER_SOURCE = max(1, min(4, int(os.environ.get('AML_ASSOCIATION_VIEWS_PER_SOURCE', '3'))))
+ASSOCIATION_RECALL_LIMIT = max(1, min(24, int(os.environ.get('AML_ASSOCIATION_RECALL_LIMIT', '12'))))
+ASSOCIATION_SOURCE_BYTES = max(1024, min(12000, int(os.environ.get('AML_ASSOCIATION_SOURCE_BYTES', '6000'))))
+ASSOCIATION_MAX_BATCHES = max(1, min(64, int(os.environ.get('AML_ASSOCIATION_MAX_BATCHES', '16'))))
+ASSOCIATION_GENERATION_SECONDS = max(1., float(os.environ.get('AML_ASSOCIATION_GENERATION_SECONDS', '30')))
+ASSOCIATION_MIN_COSINE = max(0., min(1., float(os.environ.get('AML_ASSOCIATION_MIN_COSINE', '0.3'))))
+ASSOCIATION_SCORE_WEIGHT = max(0., min(1., float(os.environ.get('AML_ASSOCIATION_SCORE_WEIGHT', '0.8'))))
 GRAPH_FUSION_MAX_CANDIDATES = max(16, int(os.environ.get('AML_GRAPH_FUSION_MAX_CANDIDATES', '256')))
 LLM_TEMPERATURE = 0.0
 # Additional retries for HTTP 429, independent of parsing/other error retries.

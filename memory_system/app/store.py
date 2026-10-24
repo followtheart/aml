@@ -26,6 +26,7 @@ import numpy as np
 
 from . import budget, config, graph, integrity, vector_index
 from .provenance import ProvenanceStore, source_identity
+from .association_views import SCHEMA as ASSOCIATION_SCHEMA
 from .errors import InvalidRequest
 
 _LOCK = threading.RLock()
@@ -226,6 +227,7 @@ class Store(ProvenanceStore):
             self.conn.executescript(FTS_SCHEMA)
             self.conn.executescript(SOURCE_SCHEMA)
             self._init_provenance()
+            self.conn.executescript(ASSOCIATION_SCHEMA)
             self.conn.executescript('''
                 CREATE TABLE IF NOT EXISTS search_database_identity (id INTEGER PRIMARY KEY CHECK(id=1), value TEXT NOT NULL);
                 CREATE TABLE IF NOT EXISTS vector_generations (user_id TEXT PRIMARY KEY, generation INTEGER NOT NULL DEFAULT 0);
@@ -300,6 +302,7 @@ class Store(ProvenanceStore):
         copy("claim_versions", "user_id=?", (user_id,))
         copy("view_dependencies", "user_id=?", (user_id,))
         copy("feedback_events", "user_id=?", (user_id,))
+        copy("association_views", "user_id=?", (user_id,))
         copy("amu_sources", "amu_id IN (SELECT id FROM amu WHERE user_id=?)", (user_id,))
         copy("amu_fts", "user_id=?", (user_id,))
         copy("sessions_fts", "user_id=?", (user_id,))
@@ -536,13 +539,13 @@ class Store(ProvenanceStore):
                         f"SELECT COUNT(*) FROM {table} WHERE user_id=?", (user_id,)
                     ).fetchone()[0]
                     for table in ("amu", "scenes", "triples", "sessions", "requests",
-                                  "source_messages")
+                                  "source_messages", "association_views")
                 }
                 self.conn.execute(
                     "DELETE FROM amu_sources WHERE amu_id IN "
                     "(SELECT id FROM amu WHERE user_id=?)", (user_id,))
                 for table in ("amu_fts", "sessions_fts", "source_fts", "triples", "scenes", "amu",
-                              "sessions", "requests", "source_messages", "claim_versions", "view_dependencies", "feedback_events"):
+                              "sessions", "requests", "source_messages", "claim_versions", "view_dependencies", "feedback_events", "association_views"):
                     self.conn.execute(f"DELETE FROM {table} WHERE user_id=?", (user_id,))
                 self.conn.execute(
                     "INSERT INTO deletion_epochs(user_id,epoch) VALUES (?,1) "

@@ -38,6 +38,7 @@ def _candidate_similarity(item, queries):
 def fuse(routes, plan, *, triples=(), sources=None, dependencies=None):
     sources, dependencies = sources or {}, dependencies or {}
     by_id, semantics, channels = {}, {}, defaultdict(set)
+    association_semantics = {}
     candidate_semantics = {}
     queries = _query_vectors(plan)
     descriptors = plan.get('_routes', [])
@@ -60,6 +61,11 @@ def fuse(routes, plan, *, triples=(), sources=None, dependencies=None):
                 score = _candidate_similarity(original, queries)
                 if score is not None:
                     candidate_semantics[mid] = score
+            if name == 'association':
+                score = original.get('_score', 0)
+                if isinstance(score, (float, int)) and math.isfinite(score):
+                    association_semantics[mid] = max(association_semantics.get(mid, 0),
+                        max(0.0, min(1.0, score)) * config.ASSOCIATION_SCORE_WEIGHT)
     if not by_id:
         plan['_graph_fusion'] = dict(method='typed_graph_propagation', nodes=0, edges=0, graph_weight=0, truncated_ids=[])
         plan['_fusion_edges'], plan['_fusion_triples'] = [], []
@@ -75,6 +81,7 @@ def fuse(routes, plan, *, triples=(), sources=None, dependencies=None):
         terms = pe.terms(item.get('_rank_text', item['content']))
         lexical = max((len(terms & q) / len(q) for q in needles if q), default=0)
         semantic = semantics.get(mid, candidate_semantics.get(mid, 0))
+        semantic = max(semantic, association_semantics.get(mid, 0))
         overlap = max((source_frequency[key] for key in source_sets[mid]), default=1)
         prior = max(.01, .55 * semantic + .45 * lexical) / math.sqrt(overlap)
         priors[mid] = prior

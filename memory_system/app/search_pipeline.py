@@ -361,6 +361,24 @@ async def _recall(st: store.Store, req: schemas.SearchRequest, plan: Dict) -> Li
     _route(plan, routes, 'vector', _merge_query_results(dense, config.RECALL_VECTOR_LIMIT), ' | '.join(queries))
     _route(plan, routes, 'full_text', lexical[0], ' | '.join(queries))
     _route(plan, routes, 'source_text', lexical[1], ' | '.join(queries))
+    if (config.ASSOCIATION_RECALL or config.ASSOCIATION_QUERY) and not supplemental:
+        from . import query_associations
+        try:
+            query_vectors = []
+            if config.ASSOCIATION_QUERY:
+                _, query_vectors, query_diagnostics = await query_associations.prepare(req)
+                plan['_query_association'] = query_diagnostics
+                if query_diagnostics['status'] not in ('ok','fake_no_expansion'):
+                    plan.setdefault('_recall_errors', []).append(dict(channel='query_association',
+                        error=query_diagnostics.get('error',query_diagnostics['status'])))
+            associated, diagnostics = await local_work.run(query_associations.recall,
+                st, req.user_id, vecs if vecs is not None else [], query_vectors,
+                write_enabled=config.ASSOCIATION_RECALL,include_history=history,include_sensitive=sensitive)
+            plan['_association_recall'] = diagnostics
+            _route(plan, routes, 'association', associated, ' | '.join(queries))
+        except Exception as exc:
+            budget.check()
+            plan.setdefault('_recall_errors', []).append(dict(channel='association', error=type(exc).__name__))
     if supplemental:
         # Grounded follow-up results retain their target only when the candidate
         # actually matches the follow-up text (a full dense list is not coverage).
@@ -1208,6 +1226,10 @@ async def _run_search(st: store.Store,
         manifest['rerank_status'] = plan.get('_rerank_status', 'not_run')
         manifest['rerank_errors'] = plan.get('_rerank_errors', [])
         manifest['recall_errors'] = plan.get('_recall_errors', [])
+        if config.ASSOCIATION_RECALL or config.ASSOCIATION_QUERY:
+            manifest['association_recall'] = plan.get('_association_recall', {'status': 'not_run'})
+        if config.ASSOCIATION_QUERY:
+            manifest['query_association'] = plan.get('_query_association', {'status': 'not_run'})
         manifest['planning_error'] = plan.get('_planning_error')
         manifest['calibration'] = plan.get('_calibration', {})
         manifest['fusion'] = plan.get('_graph_fusion', {})

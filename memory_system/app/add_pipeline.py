@@ -693,4 +693,7 @@ async def _run_add(st: store.Store, req: schemas.AddRequest) -> None:
     # repeated interest signals into first-person preferences (P0/P1).
     await profile.apply_forget_rules(st, req, persisted)
     await profile.consolidate(st, req, persisted)
+    if config.ASSOCIATION_WRITE:
+        from . import association_views
+        await association_views.index_sources(st, req.user_id, req.request_id)
     st.record_request(req.request_id, req.user_id, req.session_id)

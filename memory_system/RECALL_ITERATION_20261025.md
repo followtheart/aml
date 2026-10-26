@@ -2382,3 +2382,42 @@ state complete。独立复现117题原fine元数据、main成员/顺序/bytes、
 `runs/https-screened-source-20261026/finalizer-plan.json`固定最终分析源码，独立
 等待现有systemd实验服务真实终态及资源门槛后执行；不会重启实验或重发provider。
 本轮迭代仍在进行，未据部分正确率做采用判断。
+
+
+2026-10-26 来源提名 HTTPS 的回归队列已完整结束并通过全部审计：control 38/56
+（67.86%），treatment 33/56（58.93%），零终止错误。main 输入参考仍40题56回合；
+最终58→60回合实际为新增Q7/26/54、丢失Q20，并非旧参考无损。无答题获胜题，
+Q22/41/47/52/55由对变错；这五题的完整参考覆盖均无变化，判断路径含引文校验、
+范围判断及复核差异，不能将分差全部归因于召回。Search+reader报告tokens
+3765106→3832598（+1.79%）。完整9题变化档案及记录复核见
+`runs/https-screened-source-20261026/regression-paired-review.md`。
+回归已不满足答案不退步和旧最终参考无损门槛；默认仍关闭。联合终态见下文。
+
+
+2026-10-26 来源提名 HTTPS 验证control已完整61题，答对17（27.87%），零终止错误；
+client/stage/source审计均0。fine31题44回合→main28/40→最终27/39。
+该控制臂记录见`runs/https-screened-source-20261026/validation-control-findings.json`。
+
+等待期间完成独立来源组投影离线预检：
+`runs/source-bundle-capacity-v3-20261026/findings.md`。原117题主提示字节与显示审计
+精确匹配，保留所有来源及原main/图，按原CE/fused首个可行项至多追加一组。回归
+main仍40题56回合，验证28/40→29/41，仅Q292草稿原文新增一回合；不据此推断
+家族早发心脏病等个人事实，也没有最终召回/答题收益结论。两组选择先于参考评分固定。
+v1结果及v2空来源卡片导出失败均保留，v3修正后8测试通过、全量prepare/score exit0。
+116次新增、95份不同展示的全文及关联问题审查已完成；仅Q292审查了完整选项，
+不代表全部题目的答案语义裁决。因存在无关来源及缺失语境，拒绝当前首个可行项
+选择器接入运行时或付费测评，见同目录`context-review.json`。未接app；零模型调用。CPU25%、
+192/256MiB、Swap0，峰值192.5MiB，high214、max/oom/oom_kill0；资源门槛等待生效，
+4MiB块/SQLite每批256条。
+
+
+2026-10-26 联合 HTTPS 最终结果（覆盖上述运行中快照）：234个请求全部完成，
+实验、finalizer及验证汇总服务均已inactive/success；停止试验，保留基线。
+权威报告为`runs/https-screened-source-20261026/final-decision.json`，结论
+`reject_answer_or_reference_or_error_gate`，来源提名功能继续默认关闭。
+回归control 38/56（67.86%）、treatment 33/56（58.93%）；验证control
+17/61（27.87%）、treatment 15/61（24.59%）。两队列均未通过答案不退步及
+旧最终参考无损门槛；验证最终参考39→36回合，丢失Q283两回合及Q298一回合。
+零终止错误不代表内部无错误：验证control有一次Search调用费用未知，不能按零费用计算。
+本轮使用冻结Add/planner/usage的隔离TLS与相同FastAPI `/search`实现，
+不构成公网端到端基准。公网HTTPS服务保持运行，未重启或启用本轮实验功能。

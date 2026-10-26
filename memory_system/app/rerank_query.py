@@ -1,5 +1,7 @@
 """Compact CE questions: alternatives are hypotheses, never new user facts."""
+import json
 import re
+from . import config
 
 
 MAX_AUXILIARY_BYTES = 1800
@@ -34,7 +36,7 @@ def _premise(option):
     return value if len(value) <= MAX_PREMISE_CHARS else ''
 
 
-def build(req, plan):
+def _base_query(req, plan):
     """Keep the original question intact, adding only bounded premise clauses.
 
     Use the actual alternatives rather than a planner's rewritten advice. The
@@ -80,3 +82,28 @@ def build(req, plan):
         suffix += addition
         kept += 1
     return req.query + suffix if kept else req.query
+
+
+def with_complete_options(req, original):
+    """Append every original alternative atomically within the existing bound.
+
+    Options are competing retrieval hypotheses. Never truncate a qualifier,
+    use a planner rewrite, or include only the first options that happen to fit.
+    """
+    options = req.options
+    if (not isinstance(options, (list, tuple)) or not 2 <= len(options) <= MAX_PREMISES
+            or any(not isinstance(v, str) or not v.strip() for v in options)):
+        return original
+    suffix = ('\n\nAlternative answer texts (retrieval hypotheses, not established user facts). '
+              'Find original context relevant to comparing any of these alternatives:\n'
+              + json.dumps(list(options), ensure_ascii=False))
+    proposed = original + suffix
+    if (not original.startswith(req.query)
+            or len(proposed[len(req.query):].encode('utf-8')) > MAX_AUXILIARY_BYTES):
+        return original
+    return proposed
+
+
+def build(req, plan):
+    original = _base_query(req, plan)
+    return with_complete_options(req, original) if config.CE_FULL_OPTION_TEXT else original

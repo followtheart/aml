@@ -1143,6 +1143,13 @@ async def _append_question_context(req, plan, ranked, packed, packet_hash, manif
     return packed, packet_hash, manifest
 
 
+def _append_fine_completion(req, plan, ranked, packed, packet_hash, manifest):
+    if not config.PACKET_ENDPOINT_FINE_COMPLETION or '_cascade' not in plan:
+        return packed, packet_hash, manifest
+    from . import endpoint_fine_completion
+    return endpoint_fine_completion.attach(req, plan, ranked, packed, packet_hash, manifest)
+
+
 def _fuse_candidates(st, req, plan, routes):
     # Version/privacy filters run before any graph association is admitted.
     routes = [_fold_versions(route, plan) for route in routes]
@@ -1199,10 +1206,16 @@ async def _run_search(st: store.Store,
             fused = await local_work.run(_fuse_candidates, st, req, plan, routes)
             candidates = await local_work.run(_prepare_candidates, st, req, plan, fused)
             candidates = _foresight_filter(candidates, plan)
+        if config.RECALL_PORTER_SUPPLEMENT:
+            from .porter_recall import augment
+            fused, candidates = await local_work.run(augment, st, req, plan, routes, fused, candidates)
         ranked = await _filter_rerank(req, plan, candidates)
         selected = _select_evidence(req, plan, ranked, defer_limits=True)
         packed, packet_hash, manifest = await local_work.run(_pack_evidence, st, req, plan, selected, anchor, ranked)
         packed, packet_hash, manifest = await _append_question_context(req, plan, ranked, packed, packet_hash, manifest)
+        if config.PACKET_ENDPOINT_FINE_COMPLETION:
+            packed, packet_hash, manifest = await local_work.run(
+                _append_fine_completion, req, plan, ranked, packed, packet_hash, manifest)
         manifest['selection_mode'] = plan['_selection']['mode']
         manifest['selection_omitted'] = plan['_selection']['omitted']
         manifest['rerank_status'] = plan.get('_rerank_status', 'not_run')
@@ -1283,6 +1296,7 @@ async def _run_search(st: store.Store,
         trace['rerank_batches'] = sorted(plan.get('_rerank_batches', []), key=lambda b: b['batch'])
         trace['rerank_reserved_ids'] = plan.get('_rerank_reserved_ids', [])
         trace['graph_seed_ids'] = plan.get('_graph_seed_ids', [])
+        trace['porter_recall'] = plan.get('_porter_recall', {'status': 'disabled'})
         trace['selection'] = plan.get('_selection', {})
         trace['fusion'] = plan.get('_graph_fusion', {})
         trace['fusion_edges'] = plan.get('_fusion_edges', [])

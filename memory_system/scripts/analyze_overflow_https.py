@@ -10,14 +10,82 @@ import statistics
 import subprocess
 import sys
 from evaluation_model_guard import REQUIRED_MODEL, check_model, check_versions, check_provider_log
+from https_experiment_settings import fixture_values
+from batched_records import json_records
 
 
 def records(path):
-    return [json.loads(line) for line in path.read_text().splitlines() if line.strip()]
+    return list(json_records(path))
 
 
 def digest(path):
-    return hashlib.sha256(path.read_bytes()).hexdigest()
+    value = hashlib.sha256()
+    with path.open('rb') as stream:
+        for block in iter(lambda: stream.read(1024 * 1024), b''):
+            value.update(block)
+    return value.hexdigest()
+
+
+def audit_coarse_pool(trace):
+    """Check the old prefix and bounded, genuinely new supplemental pool."""
+    cfg = trace['versions']['settings']
+    coarse = trace['cascade']['coarse']
+    extra_limit = 8 if cfg['COARSE_EVIDENCE_EXTEND'] else 0
+    supplemental = coarse.get('supplemental_ids', [])
+    info = trace.get('porter_recall', {'status': 'disabled'})
+    nominated = info.get('nominated_ids', [])
+    enabled = cfg.get('RECALL_PORTER_SUPPLEMENT', False)
+    known = {c['id'] for r in trace.get('routes', []) if r['channel'] != 'lexical_porter'
+             for c in r['candidates']}
+    if (coarse['selected_ids'] != coarse['baseline_ids'] + coarse['extra_ids'] + supplemental
+            or len(coarse['baseline_ids']) > cfg['CASCADE_COARSE_LIMIT']
+            or len(coarse['extra_ids']) > extra_limit
+            or len(set(coarse['selected_ids'])) != len(coarse['selected_ids'])
+            or coarse['extra_limit'] != extra_limit
+            or coarse['limit'] != cfg['CASCADE_COARSE_LIMIT'] + extra_limit + (20 if supplemental else 0)):
+        raise ValueError('Coarse extension violated baseline prefix or count bound')
+    if (len(nominated) != len(set(nominated)) or len(nominated) > 20
+            or set(nominated) & known or not set(supplemental) <= set(nominated)
+            or supplemental != info.get('admitted_ids', [])
+            or (not enabled and (supplemental or nominated or info['status'] != 'disabled'))
+            or (supplemental and (coarse.get('supplemental_limit') != 20 or info['status'] != 'ok'))):
+        raise ValueError('Porter supplement violated eligibility or count bound')
+    if any(not set(batch['candidate_ids']) <= set(coarse['selected_ids'])
+           for batch in trace['cascade']['cross_encoder']['batches']):
+        raise ValueError('CE dispatched a candidate outside the coarse proposal')
+
+
+def fine_core_eligible(trace):
+    coarse = trace['cascade']['coarse']
+    baseline = set(coarse['baseline_ids'])
+    by_id = {v['id']: v for v in trace['ranked']}
+    new_scored = sorted([by_id[mid] for mid in coarse['selected_ids']
+                         if mid not in baseline and by_id[mid].get('_ce_score') is not None],
+                        key=lambda v: (v['_ce_score'], v.get('_fused', 0)), reverse=True)
+    return baseline | {v['id'] for v in new_scored[:1]}
+
+
+def compact_analysis_trace(trace):
+    """Retain every field consumed after validation, without full candidate copies."""
+    compact = dict(trace)
+    compact['ranked'] = [{k: c[k] for k in ('id', '_fused', '_ce_score', '_rank_text',
+                                          'content', '_supported_coverage_ids') if k in c}
+                         for c in trace['ranked']]
+    compact['routes'] = [dict(r, candidates=[{'id': c['id']} for c in r['candidates']])
+                         for r in trace['routes']]
+    compact['cascade'] = {k: dict(v) if isinstance(v, dict) else v
+                          for k, v in trace['cascade'].items()}
+    for stage in ('coarse', 'fine', 'listwise'):
+        for key in ('selection', 'extension_selection', 'attempts'):
+            compact['cascade'][stage].pop(key, None)
+    for key in ('fused', 'returned', 'rerank', 'fusion', 'fusion_edges', 'fusion_triples'):
+        compact.pop(key, None)
+    return compact
+
+
+def overflow_reviews(trace):
+    review = trace['cascade'].get('overflow', {}).get('review', {})
+    return review.get('batches', [review]) if review else []
 
 
 def provider_stage_costs(log):
@@ -83,6 +151,10 @@ def analyze(directory,include_reader_errors=False):
     fixture=json.loads((directory/'fixture.json').read_text())
     identities={(r['conversation_id'],r['qa_id']):r for r in fixture['requests']}
     summaries,arms,settings={}, {}, {}
+    manifests={}
+    # Complete both arms' subprocess audits before loading either full trace
+    # set. Retained data and allocator pages from control otherwise coexist
+    # with treatment's stage auditor and can exceed a small host's RAM cap.
     for arm in ('control','treatment'):
         run=directory/arm
         manifest=json.loads((run/'isolated-manifest.json').read_text())
@@ -99,13 +171,23 @@ def analyze(directory,include_reader_errors=False):
             raise ValueError('Prepared dataset changed')
         subprocess.run([sys.executable,str(Path(__file__).with_name('audit_https_stages.py')),
                         '--run',str(run),'--prepared',manifest['data']],check=True,stdout=subprocess.DEVNULL)
+        first_trace=next(json_records(run/'server-search-debug.jsonl'),None)
+        context_audit=bool(first_trace and 'PACKET_ADJACENT_CONTEXT' in first_trace['versions']['settings'])
+        del first_trace
+        if plan['toggle'] == 'PACKET_ENDPOINT_FINE_COMPLETION':
+            subprocess.run([sys.executable,str(Path(__file__).with_name('audit_endpoint_completion_https.py')),
+                            '--run',str(run)],check=True,stdout=subprocess.DEVNULL)
+        elif context_audit:
+            subprocess.run([sys.executable,str(Path(__file__).with_name('audit_adjacent_context.py')),
+                            '--run',str(run),*(['--include-reader-errors'] if include_reader_errors else [])],check=True,stdout=subprocess.DEVNULL)
+        manifests[arm]=manifest
+    for arm in ('control','treatment'):
+        run=directory/arm
+        manifest=manifests[arm]
         rows=records(run/'completed/data/results/personamem-v2-32k.jsonl')
         traces=records(run/'server-search-debug.jsonl')
         for trace in traces:
             check_versions(trace['versions'], arm + ' service trace')
-        if traces and 'PACKET_ADJACENT_CONTEXT' in traces[0]['versions']['settings']:
-            subprocess.run([sys.executable,str(Path(__file__).with_name('audit_adjacent_context.py')),
-                            '--run',str(run),*(['--include-reader-errors'] if include_reader_errors else [])],check=True,stdout=subprocess.DEVNULL)
         model_audit['arms'][arm]['service_traces'] = len(traces)
         by_search={t['search_id']:t for t in traces}
         if len(rows)!=plan['questions'] or len(traces)!=len(rows) or len(by_search)!=len(rows):
@@ -130,19 +212,8 @@ def analyze(directory,include_reader_errors=False):
                     raise ValueError('Service source fingerprint mismatch')
             observed_settings.add(json.dumps(t['versions']['settings'],sort_keys=True))
             c=t['cascade']; o=c.get('overflow',{})
-            if plan['toggle'] in ('FINE_SEMANTIC_RESERVE','COARSE_EVIDENCE_EXTEND','FINE_COARSE_CORE_QUOTA','FINE_WEAK_PROMOTION_ONE','SOURCE_RECALL_NOVELTY'):
-                coarse=c['coarse']; cfg=t['versions']['settings']
-                extra_limit=8 if cfg['COARSE_EVIDENCE_EXTEND'] else 0
-                if (coarse['selected_ids']!=coarse['baseline_ids']+coarse['extra_ids']
-                        or len(coarse['baseline_ids'])>cfg['CASCADE_COARSE_LIMIT']
-                        or len(coarse['extra_ids'])>extra_limit
-                        or len(set(coarse['selected_ids']))!=len(coarse['selected_ids'])
-                        or coarse['extra_limit']!=extra_limit
-                        or coarse['limit']!=cfg['CASCADE_COARSE_LIMIT']+extra_limit):
-                    raise ValueError('Coarse extension violated baseline prefix or count bound')
-                if any(not set(batch['candidate_ids'])<=set(coarse['selected_ids'])
-                       for batch in c['cross_encoder']['batches']):
-                    raise ValueError('CE dispatched a candidate outside the coarse proposal')
+            if plan['toggle'] in ('RECALL_PORTER_SUPPLEMENT','FINE_NEW_COARSE_MISSING_ONLY','FINE_NEW_COARSE_INSURANCE','FINE_SEMANTIC_RESERVE','COARSE_EVIDENCE_EXTEND','FINE_COARSE_CORE_QUOTA','FINE_WEAK_PROMOTION_ONE','SOURCE_RECALL_NOVELTY'):
+                audit_coarse_pool(t)
             cfg=t['versions']['settings']
             if 'SENSITIVE_RECALL_ENABLED' in cfg:
                 requested=t.get('requested_include_sensitive'); effective=t.get('include_sensitive')
@@ -172,11 +243,7 @@ def analyze(directory,include_reader_errors=False):
             if preserve:
                 core=adaptive['core_ids']
                 baseline=set(c['coarse']['baseline_ids'])
-                by_id={v['id']:v for v in t['ranked']}
-                new_scored=sorted([by_id[mid] for mid in c['coarse']['extra_ids']
-                                   if by_id[mid].get('_ce_score') is not None],
-                                  key=lambda v:(v['_ce_score'],v.get('_fused',0)),reverse=True)
-                eligible=baseline | {v['id'] for v in new_scored[:1]}
+                eligible=fine_core_eligible(t)
                 if (adaptive['core_policy']!='restricted_core_pool_v1'
                         or set(adaptive['core_pool_ids'])!=eligible
                         or len(set(core)-baseline)>1 or adaptive['new_coarse_core_limit']!=1
@@ -187,7 +254,7 @@ def analyze(directory,include_reader_errors=False):
                     raise ValueError('Fine core quota or total capacity invariant failed')
             review_batches=list(c['listwise'].get('recovery',{}).get('batches',[]))
             if o.get('review'):
-                review_batches.append(o['review'])
+                review_batches.extend(o['review'].get('batches', [o['review']]))
             for review_batch in review_batches:
                 expected_policy=('supplied_text_relevance_v1' if t['versions']['settings'].get('LISTWISE_TRANSFORM_CONTEXT') else None)
                 expected_topic=('question_topic_separate_from_premise_v1' if cfg.get('LISTWISE_TOPIC_INTEREST') else None)
@@ -208,31 +275,47 @@ def analyze(directory,include_reader_errors=False):
                 if not set(added)<=valid or set(o['proposed_ids'])&set(c['listwise']['candidate_ids']):
                     raise ValueError('Unvalidated or primary candidate admitted as overflow')
                 extended=t['versions']['settings'].get('LISTWISE_OVERFLOW_EXTEND',False)
-                if not set(reviewed.get('candidate_ids',[]))<=set(o['proposed_ids']) or len(o['proposed_ids'])>(6 if extended else 4):
-                    raise ValueError('Overflow exceeded candidate bound')
-                if extended:
-                    baseline=o['baseline_ids']; extras=o['extra_ids']
-                    if len(baseline)>4 or len(extras)>2 or o['proposed_ids']!=baseline+extras or set(baseline)&set(extras):
-                        raise ValueError('Extended overflow displaced original proposal or exceeded extra bound')
+                batched=cfg.get('LISTWISE_OVERFLOW_BATCHED',False)
+                batches=o.get('batches',[]) if batched else [o]
+                if not batches or len(batches)>(3 if batched else 1):
+                    raise ValueError('Overflow batch bound violated')
                 prompt_limit=min(16000 if extended else 12000,t['versions']['settings']['RERANK_MAX_PROMPT_BYTES'])
-                if reviewed.get('input_bytes',0)>prompt_limit or reviewed.get('prompt_limit_bytes',prompt_limit)!=prompt_limit:
-                    raise ValueError('Overflow exceeded per-call prompt bound')
+                seen=set(c['listwise']['candidate_ids'])
+                for batch in batches:
+                    proposals=batch['proposed_ids']; review_batch=batch.get('review',{})
+                    if (len(proposals)>(6 if extended else 4) or len(proposals)!=len(set(proposals))
+                            or set(proposals)&seen or not set(review_batch.get('candidate_ids',[]))<=set(proposals)):
+                        raise ValueError('Overflow exceeded candidate bound or repeated a candidate')
+                    seen.update(proposals)
+                    if extended:
+                        baseline=batch['baseline_ids']; extras=batch['extra_ids']
+                        if len(baseline)>4 or len(extras)>2 or proposals!=baseline+extras or set(baseline)&set(extras):
+                            raise ValueError('Extended overflow displaced original proposal or exceeded extra bound')
+                    if review_batch.get('input_bytes',0)>prompt_limit or review_batch.get('prompt_limit_bytes',prompt_limit)!=prompt_limit:
+                        raise ValueError('Overflow exceeded per-call prompt bound')
+                if batched:
+                    if (o['proposed_ids']!=[mid for b in batches for mid in b['proposed_ids']]
+                            or o['appended_ids']!=[mid for b in batches for mid in b['appended_ids']]
+                            or reviewed.get('candidate_ids',[])!=[mid for b in batches for mid in b.get('review',{}).get('candidate_ids',[])]):
+                        raise ValueError('Overflow aggregate differs from individual batches')
                 if any(b.get('prompt_limit_bytes',0)>12000 for b in c['listwise'].get('recovery',{}).get('batches',[])):
                     raise ValueError('Main deletion review prompt limit changed')
             elif o:
                 raise ValueError('Disabled overflow ran')
-            joined[key]=(r,t,stage_by[key])
+            joined[key]=(r,compact_analysis_trace(t),stage_by[key])
         if set(joined)!=set(identities) or len(observed_settings)!=1:
             raise ValueError('Question identity/settings mismatch')
         settings[arm]=json.loads(next(iter(observed_settings)))
         arms[arm]=joined
+        traces=[row[1] for row in joined.values()]
+        del by_search
         times=sorted(r['search_seconds'] for r in rows)
         s=stage['summary']
         server_log=(run/'server.log').read_text()
         provider_stages=provider_stage_costs(server_log)
         overflow_calls=[line for line in server_log.splitlines()
                         if 'provider_call kind=llm stage=search.listwise.overflow ' in line]
-        if len(overflow_calls)>sum(bool(t['cascade'].get('overflow',{}).get('review',{}).get('request_bound')) for t in traces):
+        if len(overflow_calls)>sum(bool(b.get('request_bound')) for t in traces for b in overflow_reviews(t)):
             raise ValueError('More overflow calls than dispatched review requests')
         if any('attempt=1 retries=0 ' not in line for line in overflow_calls):
             raise ValueError('Overflow performed a transport retry')
@@ -261,6 +344,13 @@ def analyze(directory,include_reader_errors=False):
             median_search_seconds=statistics.median(times),p95_search_seconds=times[math.ceil(.95*len(times))-1],
             coarse_proposed=sum(len(t['cascade']['coarse']['selected_ids']) for t in traces),
             coarse_extra_proposed=sum(len(t['cascade']['coarse'].get('extra_ids',[])) for t in traces),
+            porter_recall=dict(
+                statuses=dict(Counter(t.get('porter_recall',{}).get('status','disabled') for t in traces)),
+                nominated=sum(len(t.get('porter_recall',{}).get('nominated_ids',[])) for t in traces),
+                admitted=sum(len(t['cascade']['coarse'].get('supplemental_ids',[])) for t in traces),
+                max_ce_pool=max((len(t['cascade']['coarse']['selected_ids']) for t in traces),default=0),
+                new_main_questions=sum(bool(set(t['cascade']['coarse'].get('supplemental_ids',[]))
+                    & set(t['cascade']['listwise']['candidate_ids'])) for t in traces)),
             ce_scored=sum(t['cascade']['cross_encoder']['scored_count'] for t in traces),
             coarse_extra_stages={stage:sum(len(set(t['cascade']['coarse'].get('extra_ids',[])) & set(
                 [c['id'] for c in t['ranked'] if c.get('_ce_score') is not None] if stage=='ce_scored' else
@@ -290,7 +380,7 @@ def analyze(directory,include_reader_errors=False):
                 <= set(t['cascade']['listwise']['selected_ids'])],
             overflow_status=dict(Counter(t['cascade'].get('overflow',{}).get('status','disabled') for t in traces)),
             overflow_provider_calls=len(overflow_calls),
-            overflow_max_prompt_bytes=max(t['cascade'].get('overflow',{}).get('review',{}).get('input_bytes',0) for t in traces),
+            overflow_max_prompt_bytes=max((b.get('input_bytes',0) for t in traces for b in overflow_reviews(t)), default=0),
             overflow_extra_proposed=sum(len(t['cascade'].get('overflow',{}).get('extra_ids',[])) for t in traces),
             overflow_extra_added=sum(len(set(t['cascade'].get('overflow',{}).get('extra_ids',[]))
                                          & set(t['cascade'].get('overflow',{}).get('appended_ids',[]))) for t in traces),
@@ -304,9 +394,12 @@ def analyze(directory,include_reader_errors=False):
                 for e in j.get('validation_errors',[]))))
     differences={k:[settings['control'].get(k),settings['treatment'].get(k)] for k in settings['control'].keys()|settings['treatment'].keys()
                  if settings['control'].get(k)!=settings['treatment'].get(k)}
-    if plan['toggle'] not in ('PACKET_UNMATCHED_NOUN_CONTEXT','PACKET_EXCLUSIVE_SHARED_CONTEXT','PACKET_SPARSE_SOURCE_CONTEXT','PACKET_CORE_GAP_CONTEXT','FINE_SEMANTIC_RESERVE','PACKET_QUERY_CONTEXT_COMBINED','PACKET_MARGINAL_QUERY_CONTEXT','PACKET_SOURCE_FIRST_RESIDUAL','PACKET_QUESTION_CONTEXT_CE','PACKET_SOURCE_QUERY_CONTEXT','LISTWISE_OVERFLOW_REVIEW','LISTWISE_ROLE_BOUND_REFS','LISTWISE_TRANSFORM_CONTEXT','LISTWISE_TOPIC_INTEREST','PACKET_ADJACENT_CONTEXT','PACKET_FINE_CONTEXT_RESERVE','PACKET_FINE_CONTEXT_5K','PACKET_FINE_CONTEXT_LEXICAL','PACKET_FINE_CONTEXT_FILL','LISTWISE_ABBREVIATION_PARTS','LISTWISE_OVERFLOW_EXTEND','COARSE_EVIDENCE_EXTEND','FINE_COARSE_CORE_QUOTA','FINE_WEAK_PROMOTION_ONE','SOURCE_RECALL_NOVELTY'):
+    if plan['toggle'] not in ('PACKET_ENDPOINT_FINE_COMPLETION','RECALL_PORTER_SUPPLEMENT','RERANK_MAX_PROMPT_BYTES','LISTWISE_OVERFLOW_BATCHED','PACKET_UNMATCHED_NOUN_CONTEXT','PACKET_EXCLUSIVE_SHARED_CONTEXT','PACKET_SPARSE_SOURCE_CONTEXT','PACKET_CORE_GAP_CONTEXT','FINE_NEW_COARSE_MISSING_ONLY','FINE_NEW_COARSE_INSURANCE','FINE_SEMANTIC_RESERVE','PACKET_QUERY_CONTEXT_COMBINED','PACKET_MARGINAL_QUERY_CONTEXT','PACKET_SOURCE_FIRST_RESIDUAL','PACKET_QUESTION_CONTEXT_CE','PACKET_SOURCE_QUERY_CONTEXT','LISTWISE_OVERFLOW_REVIEW','LISTWISE_ROLE_BOUND_REFS','LISTWISE_TRANSFORM_CONTEXT','LISTWISE_TOPIC_INTEREST','PACKET_ADJACENT_CONTEXT','PACKET_FINE_CONTEXT_RESERVE','PACKET_FINE_CONTEXT_5K','PACKET_FINE_CONTEXT_LEXICAL','PACKET_FINE_CONTEXT_FILL','LISTWISE_ABBREVIATION_PARTS','LISTWISE_OVERFLOW_EXTEND','COARSE_EVIDENCE_EXTEND','FINE_COARSE_CORE_QUOTA','FINE_WEAK_PROMOTION_ONE','SOURCE_RECALL_NOVELTY'):
         raise ValueError('Unknown experimental toggle')
-    if differences!={plan['toggle']:[False,True]}:
+    expected_values=fixture_values(fixture)
+    if plan.get('setting_values',expected_values)!=expected_values:
+        raise ValueError('Plan setting values differ from fixture')
+    if differences!={plan['toggle']:[expected_values['control'],expected_values['treatment']]}:
         raise ValueError('Unexpected effective setting differences')
     if plan['toggle']=='PACKET_UNMATCHED_NOUN_CONTEXT':
         from app import unmatched_noun_context
@@ -411,7 +504,7 @@ def analyze(directory,include_reader_errors=False):
             settings[arm]['LISTWISE_SPAN_REFS'] and settings[arm]['LISTWISE_OVERFLOW_REVIEW']
             and not settings[arm]['LISTWISE_TRANSFORM_CONTEXT'] and not settings[arm]['LISTWISE_ROLE_BOUND_REFS'] for arm in settings):
         raise ValueError('Extension ablation requires span refs/overflow on, other review experiments off')
-    if plan['toggle'] in ('COARSE_EVIDENCE_EXTEND','FINE_COARSE_CORE_QUOTA','FINE_WEAK_PROMOTION_ONE') and any(
+    if plan['toggle'] in ('FINE_NEW_COARSE_MISSING_ONLY','FINE_NEW_COARSE_INSURANCE','COARSE_EVIDENCE_EXTEND','FINE_COARSE_CORE_QUOTA','FINE_WEAK_PROMOTION_ONE') and any(
             settings[arm]['LISTWISE_OVERFLOW_EXTEND'] or settings[arm]['LISTWISE_TRANSFORM_CONTEXT']
             or settings[arm]['LISTWISE_ROLE_BOUND_REFS'] for arm in settings):
         raise ValueError('Coarse ablation requires other review experiments off')
@@ -419,6 +512,14 @@ def analyze(directory,include_reader_errors=False):
             settings[arm]['COARSE_EVIDENCE_EXTEND'] and settings[arm]['FINE_EVIDENCE_ADAPTIVE']
             and not settings[arm]['FINE_TOPIC_CONTEXT'] for arm in settings):
         raise ValueError('Fine core ablation requires coarse extension/adaptive fine, topic context off')
+    if plan['toggle'] in ('FINE_NEW_COARSE_INSURANCE','FINE_NEW_COARSE_MISSING_ONLY') and not all(
+            settings[arm]['COARSE_EVIDENCE_EXTEND'] and settings[arm]['FINE_COARSE_CORE_QUOTA']
+            and settings[arm]['FINE_EVIDENCE_ADAPTIVE'] and not settings[arm]['FINE_TOPIC_CONTEXT']
+            and not settings[arm]['FINE_SEMANTIC_RESERVE'] for arm in settings):
+        raise ValueError('New-coarse insurance requires the existing quota/adaptive core and no other semantic intervention')
+    if plan['toggle']=='FINE_NEW_COARSE_MISSING_ONLY' and any(
+            settings[arm]['FINE_NEW_COARSE_INSURANCE'] for arm in settings):
+        raise ValueError('Missing-only experiment requires original new-coarse insurance off')
     if plan['toggle']=='FINE_WEAK_PROMOTION_ONE' and not all(
             settings[arm]['FINE_EVIDENCE_ADAPTIVE'] and not settings[arm]['FINE_TOPIC_CONTEXT'] for arm in settings):
         raise ValueError('Weak promotion ablation requires adaptive fine and topic context off')
@@ -439,6 +540,9 @@ def analyze(directory,include_reader_errors=False):
         return (first.get('query'),merge.get('ordered_ids'),merge.get('source_keys'))
     def initial_route_ids(t,channel):
         return [c['id'] for r in t['routes'] if r['channel']==channel and r['round']==1 for c in r['candidates']]
+    def original_precoarse(t):
+        supplemental=set(t['cascade']['coarse'].get('supplemental_ids',[]))
+        return [row for row in precoarse(t) if row[0] not in supplemental]
     pairs=[]
     for key in identities:
         a,ta,sa=arms['control'][key];b,tb,sb=arms['treatment'][key]
@@ -448,6 +552,10 @@ def analyze(directory,include_reader_errors=False):
             control_error=a.get('error_stage'),treatment_error=b.get('error_stage'),
             control_packet=bool(sa['visible']['packet']['full_turns']),treatment_packet=bool(sb['visible']['packet']['full_turns']),
             same_precoarse=precoarse(ta)==precoarse(tb),
+            same_original_precoarse=original_precoarse(ta)==original_precoarse(tb),
+            same_original_coarse=(ta['cascade']['coarse']['selected_ids']==[
+                mid for mid in tb['cascade']['coarse']['selected_ids']
+                if mid not in set(tb['cascade']['coarse'].get('supplemental_ids',[]))]),
             same_baseline_ce_scores=baseline_scores(ta)==baseline_scores(tb),
             baseline_ce_max_abs_delta=baseline_score_delta(ta,tb),
             same_coarse_input=ta['cascade']['coarse']['selected_ids']==tb['cascade']['coarse']['selected_ids'],
@@ -483,9 +591,13 @@ def analyze(directory,include_reader_errors=False):
                     baseline_changes.append(dict(qa_id=key[1],candidate_id=mid,control=old,treatment=new))
     clean=[r for r in pairs if not r['control_error'] and not r['treatment_error']]
     def same_upstream(r):
+        if plan['toggle']=='RECALL_PORTER_SUPPLEMENT':
+            return r['same_original_precoarse'] and r['same_original_coarse']
+        if plan['toggle']=='RERANK_MAX_PROMPT_BYTES':
+            return r['same_precoarse'] and r['same_coarse_input'] and r['same_fine_order']
         if plan['toggle']=='SOURCE_RECALL_NOVELTY':
             return r['same_source_merge_inputs'] and r['same_initial_fts'] and r['same_initial_vector']
-        if plan['toggle'] in ('COARSE_EVIDENCE_EXTEND','FINE_COARSE_CORE_QUOTA','FINE_WEAK_PROMOTION_ONE'):
+        if plan['toggle'] in ('FINE_NEW_COARSE_MISSING_ONLY','FINE_NEW_COARSE_INSURANCE','COARSE_EVIDENCE_EXTEND','FINE_COARSE_CORE_QUOTA','FINE_WEAK_PROMOTION_ONE'):
             return (r['same_precoarse'] and r['same_coarse_baseline']
                     and (plan['toggle']=='COARSE_EVIDENCE_EXTEND' or r['same_coarse_input']))
         return r['same_fine_order'] and r['same_main_input']
@@ -509,6 +621,8 @@ def analyze(directory,include_reader_errors=False):
         baseline_ce_max_abs_delta=max((r['baseline_ce_max_abs_delta'] for r in pairs if r['baseline_ce_max_abs_delta'] is not None),default=None),
         same_baseline_ce_score_questions=sum(r['same_baseline_ce_scores'] for r in pairs),
         same_precoarse_questions=sum(r['same_precoarse'] for r in pairs),
+        same_original_precoarse_questions=sum(r['same_original_precoarse'] for r in pairs),
+        same_original_coarse_questions=sum(r['same_original_coarse'] for r in pairs),
         same_coarse_input_questions=sum(r['same_coarse_input'] for r in pairs),
         same_coarse_baseline_questions=sum(r['same_coarse_baseline'] for r in pairs),
         same_fine_questions=sum(r['same_fine_order'] for r in pairs),same_main_input_questions=sum(r['same_main_input'] for r in pairs),
@@ -519,10 +633,14 @@ def analyze(directory,include_reader_errors=False):
                                treatment_score=sum(r['treatment_score'] for r in clean)),
         matched_upstream=dict(questions=len(matched),summaries=matched_summary,
             excluded=[r['qa_id'] for r in pairs if r not in matched],
-            caveat=('Descriptive frozen-request/plan/database, same initial source-merge inputs and FTS/vector IDs, complete-CE, runtime-error-free subset. Source-route output, graph/follow-up, coarse and fine differences are the intervention path; no matching on downstream candidate pools.'
+            caveat=('Descriptive same pre-coarse/coarse/fine input and complete CE subset without top-level client errors; main admission is the intervention and is not matched. Internal Search/reader errors are reported separately.'
+                    if plan['toggle']=='RERANK_MAX_PROMPT_BYTES' else
+                    'Descriptive same original prepared pool and original coarse prefix with complete CE and no top-level errors. Supplemental candidates and downstream selection are the intervention; internal Search/reader errors remain separately reported.'
+                    if plan['toggle']=='RECALL_PORTER_SUPPLEMENT' else
+                    'Descriptive frozen-request/plan/database, same initial source-merge inputs and FTS/vector IDs, complete-CE, runtime-error-free subset. Source-route output, graph/follow-up, coarse and fine differences are the intervention path; no matching on downstream candidate pools.'
                     if plan['toggle']=='SOURCE_RECALL_NOVELTY' else
                     'Descriptive same pre-coarse pool and baseline, complete-CE, runtime-error-free subset; downstream differences are the intervention path.'
-                    if plan['toggle'] in ('COARSE_EVIDENCE_EXTEND','FINE_COARSE_CORE_QUOTA','FINE_WEAK_PROMOTION_ONE') else 'Descriptive original-attempt same-fine/main-input, complete-CE subset without top-level client errors. Internally caught Search/reader errors are reported separately; this is not an error-free or unbiased repaired-run estimate.')),
+                    if plan['toggle'] in ('FINE_NEW_COARSE_MISSING_ONLY','FINE_NEW_COARSE_INSURANCE','COARSE_EVIDENCE_EXTEND','FINE_COARSE_CORE_QUOTA','FINE_WEAK_PROMOTION_ONE') else 'Descriptive original-attempt same-fine/main-input, complete-CE subset without top-level client errors. Internally caught Search/reader errors are reported separately; this is not an error-free or unbiased repaired-run estimate.')),
         caveat='Frozen ingestion/plans/usage reduce upstream confounding; live model judgments remain stochastic. Full reference turns measure transport, not entailment. Within-treatment additions are not a separately run no-overflow counterfactual packet.')
     (directory/'funnel-comparison.json').write_text(json.dumps(report,ensure_ascii=False,indent=2)+'\n')
     print(json.dumps({k:v for k,v in report.items() if k not in ('pairs','baseline_judgment_changes')},ensure_ascii=False,indent=2))

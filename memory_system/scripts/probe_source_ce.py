@@ -72,7 +72,10 @@ def select(t,coarse):
     fused={v['id'] for v in sorted(pool,key=lambda v:-(v.get('_fused') or 0))[:config.CASCADE_FUSED_RESERVE]}
     fine,selection=fine_evidence.propose(coarse,min(config.CASCADE_FINE_LIMIT,len(coarse)),
         t['coverage_manifest']['coverage']['requirements'],fused_ids=fused,extra_limit=config.FINE_EXTRA_LIMIT,
-        core_pool_ids=allowed,soft_promotion_limit=1 if config.FINE_WEAK_PROMOTION_ONE else None)
+        core_pool_ids=allowed,soft_promotion_limit=1 if config.FINE_WEAK_PROMOTION_ONE else None,
+        semantic_reserve=config.FINE_SEMANTIC_RESERVE,
+        new_coarse_insurance=config.FINE_NEW_COARSE_INSURANCE,
+        new_coarse_missing_only=config.FINE_NEW_COARSE_MISSING_ONLY)
     main,size=admit(t,fine,selection)
     return dict(fine=fine,main=main,main_bytes=size)
 

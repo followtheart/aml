@@ -13,15 +13,13 @@ from pathlib import Path
 import sys
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import audit_https_funnel as a
+from batched_records import csv_records, json_records
 
 ROOT = Path(__file__).resolve().parents[1]
 def load(path, partial=False):
     # A live writer can be between writes within the last JSONL record.
     # Only ignore an unterminated final line in explicit progress mode.
-    data = path.read_bytes()
-    if partial and data and not data.endswith(b'\n'):
-        data = data[:data.rfind(b'\n') + 1]
-    return [json.loads(line) for line in data.splitlines() if line.strip()]
+    return list(json_records(path, partial=partial))
 
 
 def reference_set_coverage(raw_coverage, stage_coverage):
@@ -66,8 +64,7 @@ def main():
         raise ValueError('Duplicate search identity')
     memory = load(RUN / 'server-memory-debug.jsonl', args.allow_partial)
     csv.field_size_limit(32 * 1024 * 1024)
-    with args.gold_csv.open() as f:
-        gold = list(csv.DictReader(f))
+    gold = list(csv_records(args.gold_csv))
     prepared = {r['conversation_id']: r for r in load(args.prepared)}
     # Reuse the full question/options/history/packet identity checks before
     # joining gold snippets to any stage. A qa_id alone is not sufficient.

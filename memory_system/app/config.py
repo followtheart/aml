@@ -135,6 +135,7 @@ def _cross_encoder_settings():
 
 
 CE_API_URL, CE_API_KEY, CE_MODEL, CE_API_FORMAT = _cross_encoder_settings()
+CE_FULL_OPTION_TEXT = os.environ.get('AML_CE_FULL_OPTION_TEXT', '0') == '1'
 CE_TIMEOUT_SECONDS = max(1.0, float(os.environ.get('AML_CE_TIMEOUT_SECONDS', '10')))
 CE_DEADLINE_SECONDS = max(1.0, float(os.environ.get('AML_CE_DEADLINE_SECONDS', '12')))
 CE_BATCH_SIZE = max(1, int(os.environ.get('AML_CE_BATCH_SIZE', '24')))
@@ -146,6 +147,9 @@ FINE_COARSE_CORE_QUOTA = os.environ.get('AML_FINE_COARSE_CORE_QUOTA', '1') == '1
 FINE_WEAK_PROMOTION_ONE = os.environ.get('AML_FINE_WEAK_PROMOTION_ONE', '0') == '1'
 # One existing extra seat for a displaced candidate inside the core CE cutoff.
 FINE_SEMANTIC_RESERVE = os.environ.get('AML_FINE_SEMANTIC_RESERVE', '0') == '1'
+# One existing extra seat for a full-pool CE head excluded by the new-core quota.
+FINE_NEW_COARSE_INSURANCE = os.environ.get('AML_FINE_NEW_COARSE_INSURANCE', '0') == '1'
+FINE_NEW_COARSE_MISSING_ONLY = os.environ.get('AML_FINE_NEW_COARSE_MISSING_ONLY', '0') == '1'
 COARSE_EVIDENCE_EXTEND = os.environ.get('AML_COARSE_EVIDENCE_EXTEND', '1') == '1'
 CASCADE_COARSE_LIMIT = max(1, int(os.environ.get('AML_CASCADE_COARSE_LIMIT', '50')))
 CASCADE_FINE_LIMIT = max(1, int(os.environ.get('AML_CASCADE_FINE_LIMIT', '16')))
@@ -231,6 +235,7 @@ RECALL_SOURCE_LIMIT = max(1, int(os.environ.get("AML_RECALL_SOURCE_LIMIT", "40")
 SOURCE_RECALL_DIVERSITY = os.environ.get("AML_SOURCE_RECALL_DIVERSITY", "1") == "1"
 # Defer source sets already represented by earlier candidates across queries.
 SOURCE_RECALL_NOVELTY = os.environ.get('AML_SOURCE_RECALL_NOVELTY', '0') == '1'
+RECALL_PORTER_SUPPLEMENT = os.environ.get('AML_RECALL_PORTER_SUPPLEMENT', '0') == '1'
 # Literal query views and context labels follow the selected control baseline.
 RECALL_TOPIC_ANCHORS = os.environ.get('AML_RECALL_TOPIC_ANCHORS', '1') == '1'
 RECALL_TOPIC_ANCHOR_LIMIT = max(0, min(4, int(os.environ.get('AML_RECALL_TOPIC_ANCHOR_LIMIT', '4'))))
@@ -251,6 +256,8 @@ LISTWISE_SHARED_SOURCES = os.environ.get('AML_LISTWISE_SHARED_SOURCES', '1') == 
 # Preserve the original overflow proposal, then append at most two complete units.
 LISTWISE_OVERFLOW_EXTEND = os.environ.get('AML_LISTWISE_OVERFLOW_EXTEND', '0') == '1'
 LISTWISE_OVERFLOW_REVIEW = os.environ.get('AML_LISTWISE_OVERFLOW_REVIEW', '1') == '1'
+# Review previously unsubmitted byte omissions in at most three bounded batches.
+LISTWISE_OVERFLOW_BATCHED = os.environ.get('AML_LISTWISE_OVERFLOW_BATCHED', '0') == '1'
 LISTWISE_KEYED_OUTPUT = os.environ.get('AML_LISTWISE_KEYED_OUTPUT', '1') == '1'
 # Separate usefulness, deletion review and ordering; legacy remains an ablation.
 LISTWISE_STAGED = os.environ.get('AML_LISTWISE_STAGED', '0') == '1'
@@ -273,6 +280,7 @@ PACKET_FINE_CONTEXT_5K = os.environ.get('AML_PACKET_FINE_CONTEXT_5K', '1') == '1
 PACKET_FINE_CONTEXT_LEXICAL = os.environ.get('AML_PACKET_FINE_CONTEXT_LEXICAL', '1') == '1'
 PACKET_QUERY_CONTEXT_COMBINED = os.environ.get('AML_PACKET_QUERY_CONTEXT_COMBINED', '0') == '1'
 PACKET_FINE_CONTEXT_FILL = os.environ.get('AML_PACKET_FINE_CONTEXT_FILL', '0') == '1'
+PACKET_ENDPOINT_FINE_COMPLETION = os.environ.get('AML_PACKET_ENDPOINT_FINE_COMPLETION', '0') == '1'
 # One source-query first hit inside the existing fine CE window; shares 5 KiB.
 PACKET_SOURCE_QUERY_CONTEXT = os.environ.get('AML_PACKET_SOURCE_QUERY_CONTEXT', '0') == '1'
 # One complete source after the lexical prefix, ranked by original-question CE.

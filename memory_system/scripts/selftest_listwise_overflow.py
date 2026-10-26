@@ -1,5 +1,6 @@
 """Boundary tests for byte-overflow review and immutable primary decisions."""
 import copy
+import re
 import time
 import unittest
 from unittest.mock import patch
@@ -11,7 +12,8 @@ from app import budget, config, listwise_overflow as overflow, llm, schemas
 class OverflowTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         self.req = schemas.SearchRequest(user_id='u', query=QUESTION, options=OPTIONS)
-        p = patch.multiple(config, LISTWISE_SPAN_REFS=False, LISTWISE_OVERFLOW_EXTEND=False, RERANK_MAX_PROMPT_BYTES=24000)
+        p = patch.multiple(config, LISTWISE_SPAN_REFS=False, LISTWISE_OVERFLOW_EXTEND=False,
+                           LISTWISE_OVERFLOW_BATCHED=False, RERANK_MAX_PROMPT_BYTES=24000)
         p.start()
         self.addCleanup(p.stop)
         p = patch('socket.socket.connect', side_effect=AssertionError('Offline only'))
@@ -157,6 +159,72 @@ class OverflowTests(unittest.IsolatedAsyncioTestCase):
         packed, _, _ = evidence_packet.pack_ranked([c['_packet_item'] for c in self.rows],
             top_k=10, token_budget=64000, groups=groups)
         self.assertEqual(len(packed),6)
+
+    async def batched_review(self, *, count=15, calls=12, fail_batch=None, invalid=(),
+                             negative=(), dependent=False, exhaust_tokens=False, exhaust_deadline=False):
+        self.rows = [evidence(f'm{i}', f'I enjoyed cycling in city number {i}.') for i in range(count)]
+        if dependent:
+            self.rows[5]['_relation_path_ids'] = ['m1', 'm5']
+        omissions = [dict(id=c['id'], stage='listwise', reason='prompt_budget') for c in self.rows[1:]]
+        dispatched = []
+        async def complete(prompt, **kwargs):
+            active = budget.current.get()
+            active.before_call()
+            mids = re.findall(r'"candidate_id": "(m\d+)"', prompt)
+            self.assertEqual(len(mids), len(set(mids)))
+            dispatched.append(mids)
+            if len(dispatched) == fail_batch:
+                raise RuntimeError('provider failure')
+            if exhaust_tokens:
+                active.tokens = active.max_tokens
+            if exhaust_deadline:
+                active.deadline = time.monotonic()
+            return dict(decisions=[
+                dict(candidate_id=mid, useful=False, target_id='', target_quote='', evidence_kind='none', citations=[])
+                if mid in negative else decision(mid, self.rows[int(mid[1:])]['content'],
+                    kind='assistant_context' if mid in invalid else 'user_context') for mid in mids])
+        before = copy.deepcopy(self.rows)
+        with patch.object(config, 'LISTWISE_OVERFLOW_BATCHED', True), \
+                patch.object(llm, 'complete_json', side_effect=complete), \
+                budget.scope(seconds=30, calls=calls, tokens=128000) as limits:
+            result, trace = await overflow.review(self.req, self.rows, self.rows[:1], self.rows[:1], omissions)
+        self.assertEqual(before, self.rows)
+        self.assertEqual((limits.reserved_calls, limits.reserved_tokens), (0, 0))
+        return result, trace, dispatched
+
+    async def test_batches_add_unseen_evidence_without_retrying_invalid_or_negative(self):
+        result, trace, batches = await self.batched_review(invalid=['m1'], negative=['m2'])
+        self.assertEqual(batches, [[f'm{i}' for i in range(a,a+4)] for a in (1,5,9)])
+        self.assertEqual([c['id'] for c in result], ['m0']+[f'm{i}' for i in range(3,13)])
+        self.assertEqual(trace['baseline_ids'], ['m1','m2','m3','m4'])
+        self.assertEqual(trace['review']['unreviewed_ids'], ['m1'])
+        self.assertEqual(len(trace['review']['candidate_ids']), 12)
+        self.assertEqual(trace['status'], 'partial')
+        self.assertNotIn('input_bytes', trace['review'])
+
+    async def test_later_batch_failure_preserves_earlier_additions(self):
+        result, trace, batches = await self.batched_review(fail_batch=2)
+        self.assertEqual(len(batches), 2)
+        self.assertEqual([c['id'] for c in result], [f'm{i}' for i in range(5)])
+        self.assertEqual(trace['batches'][1]['status'], 'error')
+
+    async def test_batches_share_call_and_token_budget(self):
+        for kw in (dict(calls=1), dict(exhaust_tokens=True), dict(exhaust_deadline=True)):
+            with self.subTest(kw=kw):
+                result, _, batches = await self.batched_review(**kw)
+                self.assertEqual(len(batches), 1)
+                self.assertEqual([c['id'] for c in result], [f'm{i}' for i in range(5)])
+
+    async def test_later_dependencies_cannot_restore_rejected_earlier_candidate(self):
+        result, _, batches = await self.batched_review(negative=['m1'], dependent=True)
+        self.assertNotIn('m5', [mid for b in batches for mid in b])
+        self.assertNotIn('m5', [c['id'] for c in result])
+
+    async def test_one_batch_compatible_when_no_other_candidates(self):
+        result, trace, batches = await self.batched_review(count=4)
+        self.assertEqual(batches, [['m1','m2','m3']])
+        self.assertEqual([c['id'] for c in result], ['m0','m1','m2','m3'])
+        self.assertEqual(trace['status'], 'recovered')
 
 
 if __name__ == '__main__':

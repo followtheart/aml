@@ -80,6 +80,16 @@ def query_text(req, plan):
     return rerank_query.build(req, plan)
 
 
+def recall_shortlist(ordinary, requirements, plan):
+    supplemental_ids = set(plan.get('_porter_supplement_ids', ())) if config.RECALL_PORTER_SUPPLEMENT else set()
+    coarse, metadata = coarse_shortlist([c for c in ordinary if c['id'] not in supplemental_ids], requirements)
+    if supplemental_ids:
+        from .porter_recall import extend_coarse
+        coarse, metadata = extend_coarse(coarse, metadata,
+            [c for c in ordinary if c['id'] in supplemental_ids])
+    return coarse, metadata
+
+
 def listwise_prompt(req, plan, rows):
     ids = {c['id'] for c in rows}
     triples = [t for t in plan.get('_fusion_triples', []) if t.get('amu_id') in ids]
@@ -239,7 +249,7 @@ async def rank(req, plan, candidates):
     trace['omitted'].extend(dict(id=c['id'], stage='rules', reason='rule_limit') for c in dropped_rules)
     ordinary = [c for c in candidates if not protected(c)]
     requirements = plan.get('_coverage_requirements', [])
-    coarse, trace['coarse'] = coarse_shortlist(ordinary, requirements)
+    coarse, trace['coarse'] = recall_shortlist(ordinary, requirements, plan)
     coarse_selection = trace['coarse']['selection']
     coarse_ids = {c['id'] for c in coarse}
     trace['omitted'].extend(dict(id=c['id'], stage='coarse', reason='coarse_limit')
@@ -427,7 +437,9 @@ async def rank(req, plan, candidates):
             requirements, rescue_ids=core_failed_ids, fused_ids=core_fused_ids, extra_limit=config.FINE_EXTRA_LIMIT,
             core_pool_ids=core_pool_ids, context_queries=plan.get('_query_specs', ()) if config.FINE_TOPIC_CONTEXT else (),
             soft_promotion_limit=1 if config.FINE_WEAK_PROMOTION_ONE else None,
-            semantic_reserve=config.FINE_SEMANTIC_RESERVE)
+            semantic_reserve=config.FINE_SEMANTIC_RESERVE,
+            new_coarse_insurance=config.FINE_NEW_COARSE_INSURANCE,
+            new_coarse_missing_only=config.FINE_NEW_COARSE_MISSING_ONLY)
         if core_pool_ids is not None:
             fine_selection['adaptive']['new_coarse_core_limit'] = FINE_NEW_COARSE_CORE_LIMIT
         plan['_fine_path_groups'] = fine_selection['adaptive']['path_groups']

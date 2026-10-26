@@ -147,7 +147,8 @@ class CascadeTests(unittest.IsolatedAsyncioTestCase):
         self.cascade = importlib.import_module('app.cascade_rerank')
         self.ce = importlib.import_module('app.cross_encoder')
         self.settings = patch.multiple(config, LISTWISE_KEYED_OUTPUT=False, RERANK_REPAIR_MAX_CALLS=1, CASCADE_COARSE_LIMIT=50,
-            CASCADE_FINE_LIMIT=12, CASCADE_LLM_LIMIT=10, create=True)
+            CASCADE_FINE_LIMIT=12, CASCADE_LLM_LIMIT=10, COARSE_EVIDENCE_EXTEND=False,
+            RECALL_PORTER_SUPPLEMENT=False, create=True)
         self.settings.start()
         self.addCleanup(self.settings.stop)
 

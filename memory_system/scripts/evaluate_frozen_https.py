@@ -26,6 +26,8 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 from app import config
 from evaluation_model_guard import REQUIRED_MODEL, check_runtime, check_versions
+from https_experiment_settings import arm_values, fixture_values, run_arms
+from batched_records import file_digest
 
 READER_ARM=ContextVar('frozen_https_reader_arm',default='none')
 
@@ -36,12 +38,35 @@ class ReaderArmFilter(logging.Filter):
         return record.reader_arm!='none'
 
 
-def records(path):
-    return [json.loads(line) for line in path.read_text().splitlines() if line.strip()]
+def records(path, block_bytes=4 * 1024 * 1024):
+    """Parse JSONL in binary batches, retaining only the unfinished record.
+
+    Decode complete records so UTF-8 characters may cross a block boundary.
+    A record larger than a block must still be held until it is complete.
+    """
+    if block_bytes < 1:
+        raise ValueError('Block size must be positive')
+    pending = bytearray()
+    with path.open('rb') as stream:
+        while block := stream.read(block_bytes):
+            batch = block.split(b'\n')
+            if len(batch) == 1:
+                pending.extend(block)
+                continue
+            pending.extend(batch[0])
+            if pending.strip():
+                yield json.loads(pending)
+            pending.clear()
+            for record in batch[1:-1]:
+                if record.strip():
+                    yield json.loads(record)
+            pending.extend(batch[-1])
+        if pending.strip():
+            yield json.loads(pending)
 
 
 def digest(path):
-    return hashlib.sha256(path.read_bytes()).hexdigest()
+    return file_digest(path)
 
 
 def write(path, value):
@@ -54,7 +79,7 @@ def serve(args):
     fixture = json.loads(args.fixture.read_text())
     for key, value in fixture['settings'].items():
         setattr(config, key, value)
-    setattr(config, fixture.get('toggle', 'LISTWISE_OVERFLOW_REVIEW'), args.arm == 'treatment')
+    setattr(config, fixture.get('toggle', 'LISTWISE_OVERFLOW_REVIEW'), fixture_values(fixture)[args.arm])
     check_runtime()
     run_metadata.versions.cache_clear()
     plans = {(r['request']['user_id'], r['request']['query'], tuple(r['request']['options'] or [])): r
@@ -86,9 +111,20 @@ async def evaluate(args):
     old_manifest = json.loads((source_run/'isolated-manifest.json').read_text())
     if digest(prepared) != old_manifest['data_sha256']:
         raise ValueError('Prepared data identity differs')
-    original = records(source_run/'completed/data/results/personamem-v2-32k.jsonl')
-    traces = {r['search_id']: r for r in records(source_run/'server-search-debug.jsonl')}
-    conversations = {r['conversation_id']: r for r in records(prepared)}
+    # Keep only fixture inputs, not every historical candidate/answer snapshot.
+    # This matters when the evaluator shares a 4 GB host with the public API.
+    original = [{k: row[k] for k in ('search_id', 'qa_id', 'conversation_id')}
+                for row in records(source_run/'completed/data/results/personamem-v2-32k.jsonl')]
+    search_ids = {row['search_id'] for row in original}
+    trace_fields = ('search_id', 'versions', 'user_id', 'query', 'options', 'top_k',
+                    'reference_time', 'evidence_token_budget', 'requested_include_sensitive', 'plan', 'anchor_time')
+    traces = {}
+    for row in records(source_run/'server-search-debug.jsonl'):
+        if row['search_id'] in search_ids:
+            traces[row['search_id']] = {key: row[key] for key in trace_fields if key in row}
+    conversation_ids = {row['conversation_id'] for row in original}
+    conversations = {row['conversation_id']: row for row in records(prepared)
+                     if row['conversation_id'] in conversation_ids}
     settings = traces[original[0]['search_id']]['versions']['settings']
     requests = []
     for r in original:
@@ -114,7 +150,8 @@ async def evaluate(args):
         raise ValueError('Duplicate question identity')
     fixture = run/'fixture.json'
     # No answers, snippet references, old ranks, or gold metadata reach server.
-    write(fixture, dict(settings=settings, requests=requests, toggle=args.toggle))
+    setting_values = arm_values(args.toggle, settings)
+    write(fixture, dict(settings=settings, requests=requests, toggle=args.toggle, setting_values=setting_values))
     snapshot = run/'source'
     project = snapshot/'memory_system'
     for directory in ('app','scripts'):
@@ -139,7 +176,7 @@ async def evaluate(args):
             src.backup(dst)
     for k,v in settings.items():
         setattr(config,k,v)
-    setattr(config,args.toggle,False)
+    setattr(config,args.toggle,setting_values['control'])
     config.EVAL_CHOICE_POLICY='local'
     check_runtime()
     run_metadata.versions.cache_clear()
@@ -147,11 +184,12 @@ async def evaluate(args):
         questions=len(requests), source_trace_sha256=digest(source_run/'server-search-debug.jsonl'),
         data_sha256=digest(prepared), database_sha256=digest(base_db), fixture_sha256=digest(fixture),
         frozen_planner=True, frozen_usage=True, frozen_anchor=True, fresh_ingestion=False,
-        concurrency_per_arm=args.concurrency, toggle=args.toggle,
+        concurrency_per_arm=args.concurrency, arm_schedule='sequential' if args.sequential_arms else 'concurrent',
+        toggle=args.toggle, setting_values=setting_values,
         reader_versions=run_metadata.versions(),
         source_files={str(p.relative_to(snapshot)):digest(p) for p in sorted(snapshot.rglob('*'))
                       if p.is_file() and p.suffix in ('.py','.txt','.zip')},
-        limitation='Single stochastic paired search run; real HTTPS, frozen Add/planning/usage; concurrent latency is not a single-request benchmark.')
+        limitation='Single stochastic paired search run; real HTTPS, frozen Add/planning/usage. Scheduling and host resource limits affect latency; not an unrestricted latency benchmark.')
     write(run/'plan.json', metadata)
     async def arm(name, port):
         out=run/name
@@ -264,7 +302,7 @@ async def evaluate(args):
     handler.setFormatter(logging.Formatter('reader_arm=%(reader_arm)s %(message)s'))
     logger.addHandler(handler)
     try:
-        failed = await asyncio.gather(arm('control',args.port),arm('treatment',args.port+1))
+        failed = await run_arms(arm, args.port, sequential=args.sequential_arms)
     finally:
         logger.removeHandler(handler);handler.close();logger.setLevel(previous_level)
     code = int(any(failed))
@@ -280,8 +318,9 @@ if __name__=='__main__':
     p.add_argument('--prepared',type=Path,default=ROOT/'data/prepared/personamem-v2-32k.jsonl')
     p.add_argument('--port',type=int,default=18546)
     p.add_argument('--concurrency',type=int,default=2)
+    p.add_argument('--sequential-arms',action='store_true',help='Finish each arm and its audit before starting the next service')
     p.add_argument('--legacy-sensitive-recall',choices=['on','off'])
-    p.add_argument('--toggle',choices=['PACKET_UNMATCHED_NOUN_CONTEXT','PACKET_EXCLUSIVE_SHARED_CONTEXT','PACKET_SPARSE_SOURCE_CONTEXT','PACKET_CORE_GAP_CONTEXT','FINE_SEMANTIC_RESERVE','PACKET_QUERY_CONTEXT_COMBINED','PACKET_MARGINAL_QUERY_CONTEXT','PACKET_SOURCE_FIRST_RESIDUAL','PACKET_QUESTION_CONTEXT_CE','PACKET_SOURCE_QUERY_CONTEXT','LISTWISE_OVERFLOW_REVIEW','LISTWISE_ROLE_BOUND_REFS','LISTWISE_TRANSFORM_CONTEXT','LISTWISE_TOPIC_INTEREST','PACKET_ADJACENT_CONTEXT','PACKET_FINE_CONTEXT_RESERVE','PACKET_FINE_CONTEXT_5K','PACKET_FINE_CONTEXT_LEXICAL','PACKET_FINE_CONTEXT_FILL','LISTWISE_ABBREVIATION_PARTS','LISTWISE_OVERFLOW_EXTEND','COARSE_EVIDENCE_EXTEND','FINE_COARSE_CORE_QUOTA','FINE_WEAK_PROMOTION_ONE','SOURCE_RECALL_NOVELTY'],
+    p.add_argument('--toggle',choices=['PACKET_ENDPOINT_FINE_COMPLETION','RECALL_PORTER_SUPPLEMENT','RERANK_MAX_PROMPT_BYTES','LISTWISE_OVERFLOW_BATCHED','PACKET_UNMATCHED_NOUN_CONTEXT','PACKET_EXCLUSIVE_SHARED_CONTEXT','PACKET_SPARSE_SOURCE_CONTEXT','PACKET_CORE_GAP_CONTEXT','FINE_NEW_COARSE_MISSING_ONLY','FINE_NEW_COARSE_INSURANCE','FINE_SEMANTIC_RESERVE','PACKET_QUERY_CONTEXT_COMBINED','PACKET_MARGINAL_QUERY_CONTEXT','PACKET_SOURCE_FIRST_RESIDUAL','PACKET_QUESTION_CONTEXT_CE','PACKET_SOURCE_QUERY_CONTEXT','LISTWISE_OVERFLOW_REVIEW','LISTWISE_ROLE_BOUND_REFS','LISTWISE_TRANSFORM_CONTEXT','LISTWISE_TOPIC_INTEREST','PACKET_ADJACENT_CONTEXT','PACKET_FINE_CONTEXT_RESERVE','PACKET_FINE_CONTEXT_5K','PACKET_FINE_CONTEXT_LEXICAL','PACKET_FINE_CONTEXT_FILL','LISTWISE_ABBREVIATION_PARTS','LISTWISE_OVERFLOW_EXTEND','COARSE_EVIDENCE_EXTEND','FINE_COARSE_CORE_QUOTA','FINE_WEAK_PROMOTION_ONE','SOURCE_RECALL_NOVELTY'],
                    default='LISTWISE_OVERFLOW_REVIEW')
     p.add_argument('--fixture',type=Path)
     p.add_argument('--arm',choices=['control','treatment'])

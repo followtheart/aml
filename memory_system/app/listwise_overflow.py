@@ -1,13 +1,15 @@
-"""One bounded review of fine units omitted solely by prompt bytes.
+"""Bounded reviews of fine units omitted solely by prompt bytes.
 
 Main listwise decisions are immutable. Only validated useful additions whose
 recorded dependencies survive may enter the final packet competition.
 """
+import time
 from . import budget, config, evidence_selection, fine_evidence, listwise_recovery
 
 MAX_CANDIDATES = 4
 MAX_EXTRA_CANDIDATES = 2
 EXTENDED_PROMPT_BYTES = 16000
+MAX_REVIEW_BATCHES = 3
 
 
 def merge_groups(groups, selected):
@@ -94,7 +96,7 @@ def propose(req, fine, submitted, selected, omissions):
     return proposal(req, fine, submitted, selected, omissions)[:3]
 
 
-async def review(req, fine, submitted, selected, omissions, *, deadline=None):
+async def _review_once(req, fine, submitted, selected, omissions, *, deadline=None):
     pending, groups, decisions, metadata = proposal(req, fine, submitted, selected, omissions)
     kept = {c['id'] for c in selected}
     trace = dict(status='not_needed', proposed_ids=[c['id'] for c in pending],
@@ -118,3 +120,45 @@ async def review(req, fine, submitted, selected, omissions, *, deadline=None):
                  appended_ids=[c['id'] for c in additions],
                  dependency_blocked_ids=sorted(useful - accepted))
     return selected + additions, trace
+
+
+async def review(req, fine, submitted, selected, omissions, *, deadline=None):
+    if not config.LISTWISE_OVERFLOW_BATCHED:
+        return await _review_once(req, fine, submitted, selected, omissions, deadline=deadline)
+    # Share a deadline across batches, including calls without an outer scope.
+    deadline = min(deadline if deadline is not None else float('inf'),
+                   time.monotonic() + config.RERANK_DEADLINE_SECONDS)
+    attempted = list(submitted)
+    by_id = {c['id']: c for c in fine}
+    batches = []
+    for _ in range(MAX_REVIEW_BATCHES):
+        selected, trace = await _review_once(
+            req, fine, attempted, selected, omissions, deadline=deadline)
+        batches.append(trace)
+        attempted.extend(by_id[mid] for mid in trace['proposed_ids'])
+        # Never repeat negative/invalid judgments. Only fresh byte omissions
+        # can reach subsequent requests, under the original token/call limits.
+        if not trace['proposed_ids'] or trace['status'] in ('error', 'budget_skipped'):
+            break
+        limits = budget.current.get()
+        if time.monotonic() >= deadline or (limits and (
+                limits.cancelled.is_set() or time.monotonic() >= limits.deadline - 2
+                or limits.calls + limits.reserved_calls >= limits.max_calls)):
+            break
+    merged = dict(batches[0], batches=batches, batch_limit=MAX_REVIEW_BATCHES)
+    for field in ('proposed_ids', 'decisions', 'groups', 'appended_ids', 'dependency_blocked_ids'):
+        merged[field] = [v for b in batches for v in b.get(field, [])]
+    merged['extra_ids'] = [mid for mid in merged['proposed_ids'] if mid not in merged['baseline_ids']]
+    reviews = [b['review'] for b in batches if 'review' in b]
+    if reviews:
+        combined = dict(reviews[0], batches=reviews)
+        for field in ('candidate_ids', 'sources', 'reviewed_ids', 'restored_ids', 'unreviewed_ids',
+                      'represented', 'judgments', 'errors', 'omitted'):
+            combined[field] = [v for r in reviews for v in r.get(field, [])]
+        # Byte counts and hashes belong to individual calls, not this aggregate.
+        for field in ('prompt_sha256', 'input_bytes', 'request_bound', 'time_limit_seconds', 'output_contract'):
+            combined.pop(field, None)
+        combined['status'] = ('partial' if combined['errors'] else
+                              'recovered' if combined['restored_ids'] else 'ok')
+        merged.update(status=combined['status'], review=combined)
+    return selected, merged

@@ -84,7 +84,30 @@ def closure(row, by_id):
 
 def propose(rows, count, requirements, *, rescue_ids=(), fused_ids=(), extra_limit=8,
             context_queries=(), core_pool_ids=None, soft_promotion_limit=None,
-            semantic_reserve=False):
+            semantic_reserve=False, new_coarse_insurance=False, new_coarse_missing_only=False):
+    """Select evidence, optionally insuring only candidates missing from baseline.
+
+    The missing-only policy computes the original fine selection on these exact
+    inputs before excluding its members from the extra semantic nomination.
+    """
+    options = dict(rescue_ids=rescue_ids, fused_ids=fused_ids, extra_limit=extra_limit,
+                   context_queries=context_queries, core_pool_ids=core_pool_ids,
+                   soft_promotion_limit=soft_promotion_limit, semantic_reserve=semantic_reserve)
+    baseline_ids = ()
+    if new_coarse_missing_only:
+        baseline, _ = _propose(rows, count, requirements, **options)
+        baseline_ids = tuple(c['id'] for c in baseline)
+    chosen, trace = _propose(rows, count, requirements, **options,
+        new_coarse_insurance=new_coarse_insurance or new_coarse_missing_only,
+        excluded_insurance_ids=baseline_ids)
+    if new_coarse_missing_only:
+        trace['adaptive']['new_coarse_insurance'].update(missing_only=True, baseline_fine_ids=list(baseline_ids))
+    return chosen, trace
+
+
+def _propose(rows, count, requirements, *, rescue_ids=(), fused_ids=(), extra_limit=8,
+             context_queries=(), core_pool_ids=None, soft_promotion_limit=None,
+             semantic_reserve=False, new_coarse_insurance=False, excluded_insurance_ids=()):
     """Keep the existing bounded selection core; add novel relevant groups.
 
     Extra capacity is earned by visible evidence gain, not requirement count.
@@ -141,7 +164,16 @@ def propose(rows, count, requirements, *, rescue_ids=(), fused_ids=(), extra_lim
     semantic_ids = {c['id'] for c in core_pool[:max(0, count)]
                     if type(c.get('_ce_score')) in (int, float)
                     and math.isfinite(c['_ce_score']) and visible[c['id']]}
+    # The core quota may exclude a strong new-coarse candidate altogether.
+    # Give only full-pool CE heads a chance in the existing extra capacity.
+    # Both insurance policies share one seat; neither changes the core pool.
+    new_coarse_ids = ({c['id'] for c in ordered[:max(0, count)]
+                      if c['id'] not in allowed and c['id'] not in excluded_insurance_ids
+                      and type(c.get('_ce_score')) in (int, float)
+                      and math.isfinite(c['_ce_score']) and visible[c['id']]}
+                     if new_coarse_insurance and core_pool_ids is not None else set())
     semantic_used = False
+    new_coarse_used = False
     # Complete recorded dependencies of the core before optional topical gains.
     pending = [c for c in ordered if c not in core or dependencies(c)]
     while pending and len(chosen) < capacity:
@@ -157,8 +189,9 @@ def propose(rows, count, requirements, *, rescue_ids=(), fused_ids=(), extra_lim
             if not new_ids:
                 continue
             required = c['id'] in chosen_ids and bool(dependencies(c))
-            semantic = (semantic_reserve and not semantic_used and not required
-                        and c['id'] in semantic_ids and len(new_ids) == 1)
+            semantic = (not semantic_used and not required and len(new_ids) == 1
+                        and ((semantic_reserve and c['id'] in semantic_ids)
+                             or c['id'] in new_coarse_ids))
             if not required and ((not semantic and not matches[c['id']]) or
                                  selection.represented_by(c, chosen, visible)):
                 continue
@@ -178,10 +211,12 @@ def propose(rows, count, requirements, *, rescue_ids=(), fused_ids=(), extra_lim
             break
         _, c, group, new_ids, semantic = max(proposals, key=lambda p: p[0])
         semantic_used = semantic_used or semantic
+        new_coarse_used = new_coarse_used or (semantic and c['id'] in new_coarse_ids)
         chunk = [r for r in ordered if r['id'] in new_ids]
         additions.append(dict(candidate_id=c['id'], ids=[r['id'] for r in chunk],
             group_ids=sorted(group), requirement_ids=sorted(matches[c['id']]),
             reason=('path_completion' if c['id'] in chosen_ids else
+                    'new_coarse_core_insurance' if semantic and c['id'] in new_coarse_ids else
                     'ce_core_insurance' if semantic else
                     'sparse_topic_evidence' if c['id'] in sparse_ids else 'novel_visible_evidence'),
             unscored=c.get('_ce_score') is None))
@@ -221,8 +256,12 @@ def propose(rows, count, requirements, *, rescue_ids=(), fused_ids=(), extra_lim
                              support_labels_unchanged=True)
     if semantic_reserve:
         trace['adaptive']['semantic_reserve'] = dict(limit=1, max_ce_rank=count,
-            rank_scope='core_pool', used=semantic_used,
+            rank_scope='core_pool', used=semantic_used and not new_coarse_used,
             eligible_ids=[c['id'] for c in core_pool if c['id'] in semantic_ids])
+    if new_coarse_insurance:
+        trace['adaptive']['new_coarse_insurance'] = dict(limit=1, max_ce_rank=count,
+            rank_scope='full_coarse_outside_core_pool', used=new_coarse_used,
+            eligible_ids=[c['id'] for c in ordered if c['id'] in new_coarse_ids])
     if core_pool_ids is not None:
         trace['adaptive'].update(core_policy='restricted_core_pool_v1',
                                  core_pool_ids=[c['id'] for c in core_pool])

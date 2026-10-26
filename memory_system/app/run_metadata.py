@@ -4,7 +4,7 @@ from functools import lru_cache
 from pathlib import Path
 from . import answer_choice, config, direct_catalog_reader
 
-SEARCH_POLICY = 'graph_cascade_v43-unmatched-question-noun-context'
+SEARCH_POLICY = 'graph_cascade_v47-retained-porter-recall'
 
 
 @lru_cache(maxsize=1)
@@ -23,7 +23,12 @@ def versions():
             'model': config.LLM_MODEL, 'embedding_model': config.EMBED_MODEL,
             'cross_encoder_model': config.CE_MODEL,
             'settings': {key: getattr(config, key) for key in (
+                'CE_FULL_OPTION_TEXT',
+                'FINE_NEW_COARSE_INSURANCE',
+                'FINE_NEW_COARSE_MISSING_ONLY',
+                'LISTWISE_OVERFLOW_BATCHED',
                 'PACKET_QUESTION_CONTEXT_CE',
+                'PACKET_ENDPOINT_FINE_COMPLETION',
                 'PACKET_SOURCE_FIRST_RESIDUAL',
                 'PACKET_MARGINAL_QUERY_CONTEXT',
                 'PACKET_QUERY_CONTEXT_COMBINED',
@@ -56,7 +61,7 @@ def versions():
                 'SEARCH_MAX_CALLS', 'SEARCH_MAX_TOKENS',
                 'EVIDENCE_FALLBACK_ITEMS',
                 'RECALL_VECTOR_LIMIT', 'RECALL_SOURCE_LIMIT', 'RECALL_FTS_LIMIT',
-                'SOURCE_RECALL_DIVERSITY', 'SOURCE_RECALL_NOVELTY', 'SENSITIVE_RECALL_ENABLED',
+                'SOURCE_RECALL_DIVERSITY', 'SOURCE_RECALL_NOVELTY', 'RECALL_PORTER_SUPPLEMENT', 'SENSITIVE_RECALL_ENABLED',
                 'RECALL_TOPIC_ANCHORS', 'RECALL_TOPIC_ANCHOR_LIMIT', 'LISTWISE_CONTEXT_LABEL',
                 'RECALL_PROFILE_LIMIT', 'RECALL_EXPANSION_LIMIT',
                 'RECALL_EXPANSION_MIN_DIRECT')}}

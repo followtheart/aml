@@ -90,7 +90,7 @@ def recall_shortlist(ordinary, requirements, plan):
     return coarse, metadata
 
 
-def listwise_prompt(req, plan, rows):
+def listwise_graph(plan, rows):
     ids = {c['id'] for c in rows}
     triples = [t for t in plan.get('_fusion_triples', []) if t.get('amu_id') in ids]
     edges = [e for e in plan.get('_fusion_edges', []) if e['source'] in ids and e['target'] in ids]
@@ -104,11 +104,16 @@ def listwise_prompt(req, plan, rows):
         metadata['recorded_paths_for_joint_review'] = [
             g for g in plan['_fine_path_groups'] if set(g) <= ids]
         metadata['path_scope'] = 'Recorded retrieval relations, not proof. Inspect these sources together.'
+    return metadata
+
+
+def listwise_prompt(req, plan, rows, *, compact_graph=False):
+    metadata = listwise_graph(plan, rows)
     return prompts.render('05c_listwise_rerank.txt', query=req.query,
         options='\n'.join(req.options or []) or '(none)',
         time_scope=json.dumps(plan.get('time_scope') or {}, ensure_ascii=False),
         requirements=json.dumps(plan.get('_coverage_requirements', []), ensure_ascii=False),
-        relations=json.dumps(metadata, ensure_ascii=False), last_index=len(rows) - 1,
+        relations=json.dumps(metadata, ensure_ascii=False, **({'separators': (',', ':')} if compact_graph else {})), last_index=len(rows) - 1,
         candidates='\n'.join(f"{i}: [id: {c['id']}] " + re.sub(r'\s+', ' ', c.get('_rank_text', c['content'])).strip()
                              for i, c in enumerate(rows)))
 
@@ -157,12 +162,20 @@ def listwise_retry_kind(exc):
 
 
 def listwise_request(req, plan, rows, *, repair=False, shared_sources=None, feedback=None,
-                     repair_field=None, locked=None, keyed=None, candidate_keys=None):
+                     repair_field=None, locked=None, keyed=None, candidate_keys=None,
+                     display_ids=False, _compact_graph=False):
     """Use the same full request bound for scheduling and provider dispatch."""
-    prompt = listwise_prompt(req, plan, rows)
+    if display_ids:
+        from .local_candidate_display import request
+        import sys
+        return request(req, plan, rows, sys.modules[__name__], repair=repair, shared_sources=shared_sources,
+            feedback=feedback, repair_field=repair_field, locked=locked, keyed=keyed, candidate_keys=candidate_keys)[0]
+    def render(req, plan, rows):
+        return listwise_prompt(req, plan, rows, compact_graph=_compact_graph)
+    prompt = render(req, plan, rows)
     if rows and (config.LISTWISE_SHARED_SOURCES if shared_sources is None else shared_sources):
         from .listwise_sources import prompt_with_shared
-        compact = prompt_with_shared(listwise_prompt)(req, plan, rows)
+        compact = prompt_with_shared(render)(req, plan, rows)
         if len(compact.encode('utf-8')) < len(prompt.encode('utf-8')):
             prompt = compact
     keyed = config.LISTWISE_KEYED_OUTPUT if keyed is None else keyed
@@ -527,6 +540,14 @@ async def rank(req, plan, candidates):
             trace['reservation_missing'].extend(dict(requirement_id=rid,candidate_id=r['candidate_id'],
                 stage='listwise',reason=reason) for rid in r['requirement_ids'] or [None])
     overflow_deadline = time.monotonic() + config.RERANK_DEADLINE_SECONDS
+    display_ids = False
+    if config.SOURCE_CE_LATE_ADMISSION:
+        from . import screened_source_nomination
+        import sys
+        submitted, trace['source_nomination'] = await screened_source_nomination.append(
+            req, plan, coarse, fine, submitted, sys.modules[__name__])
+        display_ids = trace['source_nomination']['display_ids']
+        overflow_deadline = time.monotonic() + config.RERANK_DEADLINE_SECONDS
     if config.LISTWISE_STAGED and submitted:
         from . import listwise_staged
         seconds = min(config.RERANK_DEADLINE_SECONDS, max(.01, limits.deadline - time.monotonic() - 2)) if limits else config.RERANK_DEADLINE_SECONDS
@@ -562,6 +583,7 @@ async def rank(req, plan, candidates):
                             if limits and limits.calls + limits.reserved_calls >= limits.max_calls:
                                 raise budget.BudgetExceeded('No listwise call slot remaining')
                             request = listwise_request(req, plan, submitted,
+                                display_ids=display_ids,
                                 repair=repair_field is not None or bool(attempt and retry_kind == 'structure'),
                                 feedback=feedback, repair_field=repair_field, keyed=keyed,
                                 candidate_keys=contract.pending_candidate_keys() if keyed and repair_field == 'candidates' else None,
@@ -660,7 +682,7 @@ async def rank(req, plan, candidates):
             transport_retries=sum(a['dispatched'] and a['stage'] == 'search.listwise.retry' for a in attempts),
             candidate_key_map={f'c{i}': c['id'] for i, c in enumerate(submitted)} if keyed else {},
             candidate_ids=[c['id'] for c in submitted], selected_ids=[c['id'] for c in selected],
-            input_bytes=len(listwise_request(req, plan, submitted)['prompt'].encode('utf-8')) if submitted else 0,
+            input_bytes=len(listwise_request(req, plan, submitted, display_ids=display_ids)['prompt'].encode('utf-8')) if submitted else 0,
             shared_sources=config.LISTWISE_SHARED_SOURCES,
             baseline_candidate_ids=sorted(baseline_ids),
             attempts=attempts, errors=errors, selection=admission_selection, carried_ids=sorted(carried_ids),

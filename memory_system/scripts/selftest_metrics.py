@@ -162,6 +162,16 @@ class RetryTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(call.await_count, 3)
         self.assertEqual(sleep.await_count, 2)
 
+    async def test_per_call_zero_rate_retries_preserves_global_policy(self):
+        call = AsyncMock(side_effect=RateLimitError())
+        with patch.object(metrics.config, 'RATE_LIMIT_RETRIES', 6), \
+                patch.object(metrics.asyncio, 'sleep', new_callable=AsyncMock) as sleep:
+            with self.assertRaises(RateLimitError):
+                await self.run_call(call, attempts=1, rate_limit_retries=0)
+            self.assertEqual(metrics.config.RATE_LIMIT_RETRIES, 6)
+        self.assertEqual(call.await_count, 1)
+        sleep.assert_not_awaited()
+
     async def test_other_errors_keep_original_budget(self):
         call = AsyncMock(side_effect=ValueError("invalid tool JSON"))
         with patch.object(metrics.asyncio, "sleep", new_callable=AsyncMock) as sleep:

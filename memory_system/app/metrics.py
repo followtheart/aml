@@ -52,14 +52,15 @@ _pacers = weakref.WeakKeyDictionary()
 
 
 async def measured_call(*, kind, stage, model, call, attempts=2,
-                        input_count=None, response_getter=None):
+                        input_count=None, response_getter=None, rate_limit_retries=None):
     # Per-loop state also supports repeated asyncio.run() in local tools/tests.
     states = _pacers.setdefault(asyncio.get_running_loop(), {})
     pacer = states.setdefault((kind, model), _Pacer())
     async with pacer.lock:
         return await _measured_call(
             kind=kind, stage=stage, model=model, call=call, attempts=attempts,
-            input_count=input_count, response_getter=response_getter, pacer=pacer)
+            input_count=input_count, response_getter=response_getter, pacer=pacer,
+            rate_limit_retries=rate_limit_retries)
 
 
 def _rate_limited(exc):
@@ -122,7 +123,7 @@ async def _measured_call(
         *, kind: str, stage: str, model: str,
         call: Callable[[int], Awaitable], attempts: int = 2,
         input_count: Optional[int] = None,
-        response_getter: Optional[Callable] = None, pacer=None):
+        response_getter: Optional[Callable] = None, pacer=None, rate_limit_retries=None):
     """Run an async provider call with explicit, observable retries.
 
     Prompt/input contents and credentials are deliberately never logged.
@@ -191,7 +192,7 @@ async def _measured_call(
                 pacer.record(failed_usage[2])
             delay = 0.0
             if _rate_limited(exc):
-                will_retry = rate_retries < config.RATE_LIMIT_RETRIES
+                will_retry = rate_retries < (config.RATE_LIMIT_RETRIES if rate_limit_retries is None else rate_limit_retries)
                 if will_retry:
                     delay = _rate_limit_delay(exc, rate_retries)
                     rate_retries += 1

@@ -136,6 +136,7 @@ def _cross_encoder_settings():
 
 CE_API_URL, CE_API_KEY, CE_MODEL, CE_API_FORMAT = _cross_encoder_settings()
 CE_FULL_OPTION_TEXT = os.environ.get('AML_CE_FULL_OPTION_TEXT', '0') == '1'
+SOURCE_CE_LATE_ADMISSION = os.environ.get('AML_SOURCE_CE_LATE_ADMISSION', '0') == '1'
 CE_TIMEOUT_SECONDS = max(1.0, float(os.environ.get('AML_CE_TIMEOUT_SECONDS', '10')))
 CE_DEADLINE_SECONDS = max(1.0, float(os.environ.get('AML_CE_DEADLINE_SECONDS', '12')))
 CE_BATCH_SIZE = max(1, int(os.environ.get('AML_CE_BATCH_SIZE', '24')))

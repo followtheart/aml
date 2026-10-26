@@ -24,6 +24,7 @@ def versions():
             'cross_encoder_model': config.CE_MODEL,
             'settings': {key: getattr(config, key) for key in (
                 'CE_FULL_OPTION_TEXT',
+                'SOURCE_CE_LATE_ADMISSION',
                 'FINE_NEW_COARSE_INSURANCE',
                 'FINE_NEW_COARSE_MISSING_ONLY',
                 'LISTWISE_OVERFLOW_BATCHED',

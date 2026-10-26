@@ -293,9 +293,16 @@ async def evaluate(args):
                     stdout=log,stderr=log)
                 manifest['audit_exit_code']=await audit.wait()
             write(out/'isolated-manifest.json',manifest)
+            if args.toggle == 'SOURCE_CE_LATE_ADMISSION':
+                with (out/'source-audit.log').open('w') as log:
+                    audit=await asyncio.create_subprocess_exec(sys.executable,str(project/'scripts/audit_screened_source_https.py'),
+                        '--run',str(out),stdout=log,stderr=log)
+                    manifest['source_audit_exit_code']=await audit.wait()
+                write(out/'isolated-manifest.json',manifest)
         print(json.dumps(dict(arm=name,finished=True,client_exit_code=manifest.get('client_exit_code'),
                               audit_exit_code=manifest.get('audit_exit_code'))),flush=True)
-        return bool(manifest.get('client_exit_code', 2) or manifest.get('audit_exit_code', 2))
+        return bool(manifest.get('client_exit_code', 2) or manifest.get('audit_exit_code', 2)
+                    or manifest.get('source_audit_exit_code', 0))
     logger=logging.getLogger('aml.metrics');previous_level=logger.level;logger.setLevel(logging.INFO)
     handler=logging.FileHandler(run/'reader-provider.log')
     handler.addFilter(ReaderArmFilter())
@@ -320,7 +327,7 @@ if __name__=='__main__':
     p.add_argument('--concurrency',type=int,default=2)
     p.add_argument('--sequential-arms',action='store_true',help='Finish each arm and its audit before starting the next service')
     p.add_argument('--legacy-sensitive-recall',choices=['on','off'])
-    p.add_argument('--toggle',choices=['PACKET_ENDPOINT_FINE_COMPLETION','RECALL_PORTER_SUPPLEMENT','RERANK_MAX_PROMPT_BYTES','LISTWISE_OVERFLOW_BATCHED','PACKET_UNMATCHED_NOUN_CONTEXT','PACKET_EXCLUSIVE_SHARED_CONTEXT','PACKET_SPARSE_SOURCE_CONTEXT','PACKET_CORE_GAP_CONTEXT','FINE_NEW_COARSE_MISSING_ONLY','FINE_NEW_COARSE_INSURANCE','FINE_SEMANTIC_RESERVE','PACKET_QUERY_CONTEXT_COMBINED','PACKET_MARGINAL_QUERY_CONTEXT','PACKET_SOURCE_FIRST_RESIDUAL','PACKET_QUESTION_CONTEXT_CE','PACKET_SOURCE_QUERY_CONTEXT','LISTWISE_OVERFLOW_REVIEW','LISTWISE_ROLE_BOUND_REFS','LISTWISE_TRANSFORM_CONTEXT','LISTWISE_TOPIC_INTEREST','PACKET_ADJACENT_CONTEXT','PACKET_FINE_CONTEXT_RESERVE','PACKET_FINE_CONTEXT_5K','PACKET_FINE_CONTEXT_LEXICAL','PACKET_FINE_CONTEXT_FILL','LISTWISE_ABBREVIATION_PARTS','LISTWISE_OVERFLOW_EXTEND','COARSE_EVIDENCE_EXTEND','FINE_COARSE_CORE_QUOTA','FINE_WEAK_PROMOTION_ONE','SOURCE_RECALL_NOVELTY'],
+    p.add_argument('--toggle',choices=['SOURCE_CE_LATE_ADMISSION','PACKET_ENDPOINT_FINE_COMPLETION','RECALL_PORTER_SUPPLEMENT','RERANK_MAX_PROMPT_BYTES','LISTWISE_OVERFLOW_BATCHED','PACKET_UNMATCHED_NOUN_CONTEXT','PACKET_EXCLUSIVE_SHARED_CONTEXT','PACKET_SPARSE_SOURCE_CONTEXT','PACKET_CORE_GAP_CONTEXT','FINE_NEW_COARSE_MISSING_ONLY','FINE_NEW_COARSE_INSURANCE','FINE_SEMANTIC_RESERVE','PACKET_QUERY_CONTEXT_COMBINED','PACKET_MARGINAL_QUERY_CONTEXT','PACKET_SOURCE_FIRST_RESIDUAL','PACKET_QUESTION_CONTEXT_CE','PACKET_SOURCE_QUERY_CONTEXT','LISTWISE_OVERFLOW_REVIEW','LISTWISE_ROLE_BOUND_REFS','LISTWISE_TRANSFORM_CONTEXT','LISTWISE_TOPIC_INTEREST','PACKET_ADJACENT_CONTEXT','PACKET_FINE_CONTEXT_RESERVE','PACKET_FINE_CONTEXT_5K','PACKET_FINE_CONTEXT_LEXICAL','PACKET_FINE_CONTEXT_FILL','LISTWISE_ABBREVIATION_PARTS','LISTWISE_OVERFLOW_EXTEND','COARSE_EVIDENCE_EXTEND','FINE_COARSE_CORE_QUOTA','FINE_WEAK_PROMOTION_ONE','SOURCE_RECALL_NOVELTY'],
                    default='LISTWISE_OVERFLOW_REVIEW')
     p.add_argument('--fixture',type=Path)
     p.add_argument('--arm',choices=['control','treatment'])

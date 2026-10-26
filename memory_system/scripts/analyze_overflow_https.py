@@ -394,7 +394,7 @@ def analyze(directory,include_reader_errors=False):
                 for e in j.get('validation_errors',[]))))
     differences={k:[settings['control'].get(k),settings['treatment'].get(k)] for k in settings['control'].keys()|settings['treatment'].keys()
                  if settings['control'].get(k)!=settings['treatment'].get(k)}
-    if plan['toggle'] not in ('PACKET_ENDPOINT_FINE_COMPLETION','RECALL_PORTER_SUPPLEMENT','RERANK_MAX_PROMPT_BYTES','LISTWISE_OVERFLOW_BATCHED','PACKET_UNMATCHED_NOUN_CONTEXT','PACKET_EXCLUSIVE_SHARED_CONTEXT','PACKET_SPARSE_SOURCE_CONTEXT','PACKET_CORE_GAP_CONTEXT','FINE_NEW_COARSE_MISSING_ONLY','FINE_NEW_COARSE_INSURANCE','FINE_SEMANTIC_RESERVE','PACKET_QUERY_CONTEXT_COMBINED','PACKET_MARGINAL_QUERY_CONTEXT','PACKET_SOURCE_FIRST_RESIDUAL','PACKET_QUESTION_CONTEXT_CE','PACKET_SOURCE_QUERY_CONTEXT','LISTWISE_OVERFLOW_REVIEW','LISTWISE_ROLE_BOUND_REFS','LISTWISE_TRANSFORM_CONTEXT','LISTWISE_TOPIC_INTEREST','PACKET_ADJACENT_CONTEXT','PACKET_FINE_CONTEXT_RESERVE','PACKET_FINE_CONTEXT_5K','PACKET_FINE_CONTEXT_LEXICAL','PACKET_FINE_CONTEXT_FILL','LISTWISE_ABBREVIATION_PARTS','LISTWISE_OVERFLOW_EXTEND','COARSE_EVIDENCE_EXTEND','FINE_COARSE_CORE_QUOTA','FINE_WEAK_PROMOTION_ONE','SOURCE_RECALL_NOVELTY'):
+    if plan['toggle'] not in ('SOURCE_CE_LATE_ADMISSION','PACKET_ENDPOINT_FINE_COMPLETION','RECALL_PORTER_SUPPLEMENT','RERANK_MAX_PROMPT_BYTES','LISTWISE_OVERFLOW_BATCHED','PACKET_UNMATCHED_NOUN_CONTEXT','PACKET_EXCLUSIVE_SHARED_CONTEXT','PACKET_SPARSE_SOURCE_CONTEXT','PACKET_CORE_GAP_CONTEXT','FINE_NEW_COARSE_MISSING_ONLY','FINE_NEW_COARSE_INSURANCE','FINE_SEMANTIC_RESERVE','PACKET_QUERY_CONTEXT_COMBINED','PACKET_MARGINAL_QUERY_CONTEXT','PACKET_SOURCE_FIRST_RESIDUAL','PACKET_QUESTION_CONTEXT_CE','PACKET_SOURCE_QUERY_CONTEXT','LISTWISE_OVERFLOW_REVIEW','LISTWISE_ROLE_BOUND_REFS','LISTWISE_TRANSFORM_CONTEXT','LISTWISE_TOPIC_INTEREST','PACKET_ADJACENT_CONTEXT','PACKET_FINE_CONTEXT_RESERVE','PACKET_FINE_CONTEXT_5K','PACKET_FINE_CONTEXT_LEXICAL','PACKET_FINE_CONTEXT_FILL','LISTWISE_ABBREVIATION_PARTS','LISTWISE_OVERFLOW_EXTEND','COARSE_EVIDENCE_EXTEND','FINE_COARSE_CORE_QUOTA','FINE_WEAK_PROMOTION_ONE','SOURCE_RECALL_NOVELTY'):
         raise ValueError('Unknown experimental toggle')
     expected_values=fixture_values(fixture)
     if plan.get('setting_values',expected_values)!=expected_values:
@@ -593,7 +593,7 @@ def analyze(directory,include_reader_errors=False):
     def same_upstream(r):
         if plan['toggle']=='RECALL_PORTER_SUPPLEMENT':
             return r['same_original_precoarse'] and r['same_original_coarse']
-        if plan['toggle']=='RERANK_MAX_PROMPT_BYTES':
+        if plan['toggle'] in ('SOURCE_CE_LATE_ADMISSION','RERANK_MAX_PROMPT_BYTES'):
             return r['same_precoarse'] and r['same_coarse_input'] and r['same_fine_order']
         if plan['toggle']=='SOURCE_RECALL_NOVELTY':
             return r['same_source_merge_inputs'] and r['same_initial_fts'] and r['same_initial_vector']
@@ -634,7 +634,7 @@ def analyze(directory,include_reader_errors=False):
         matched_upstream=dict(questions=len(matched),summaries=matched_summary,
             excluded=[r['qa_id'] for r in pairs if r not in matched],
             caveat=('Descriptive same pre-coarse/coarse/fine input and complete CE subset without top-level client errors; main admission is the intervention and is not matched. Internal Search/reader errors are reported separately.'
-                    if plan['toggle']=='RERANK_MAX_PROMPT_BYTES' else
+                    if plan['toggle'] in ('SOURCE_CE_LATE_ADMISSION','RERANK_MAX_PROMPT_BYTES') else
                     'Descriptive same original prepared pool and original coarse prefix with complete CE and no top-level errors. Supplemental candidates and downstream selection are the intervention; internal Search/reader errors remain separately reported.'
                     if plan['toggle']=='RECALL_PORTER_SUPPLEMENT' else
                     'Descriptive frozen-request/plan/database, same initial source-merge inputs and FTS/vector IDs, complete-CE, runtime-error-free subset. Source-route output, graph/follow-up, coarse and fine differences are the intervention path; no matching on downstream candidate pools.'

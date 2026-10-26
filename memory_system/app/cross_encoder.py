@@ -50,7 +50,7 @@ def _usage(payload, estimate):
     return {'usage': {'prompt_tokens': total, 'completion_tokens': 0, 'total_tokens': total}}
 
 
-async def rerank(query, documents, stage='search.cross_encoder'):
+async def rerank(query, documents, stage='search.cross_encoder', *, rate_limit_retries=None):
     if not documents:
         return []
     if not isinstance(query, str) or not query.strip() or any(not isinstance(d, str) or not d for d in documents):
@@ -93,7 +93,7 @@ async def rerank(query, documents, stage='search.cross_encoder'):
     try:
         payload = await asyncio.wait_for(metrics.measured_call(kind='rerank', stage=stage,
             model=config.CE_MODEL, call=call, attempts=1, input_count=len(documents),
-            response_getter=lambda data: _usage(data, size)), config.CE_TIMEOUT_SECONDS)
+            response_getter=lambda data: _usage(data, size), rate_limit_retries=rate_limit_retries), config.CE_TIMEOUT_SECONDS)
     finally:
         if limits:
             limits.release_tokens(size)

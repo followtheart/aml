@@ -1,0 +1,87 @@
+"""Convert a public benchmark to validated, streaming local-eval JSONL."""
+import argparse
+import hashlib
+import json
+import os
+import sys
+from collections import Counter
+from itertools import islice
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from app.eval_data import DATASETS, convert_records
+
+
+def main():
+    p = argparse.ArgumentParser(description=__doc__)
+    p.add_argument("--dataset", required=True, choices=DATASETS)
+    p.add_argument("--input", required=True)
+    p.add_argument("--output", required=True, help="JSONL output")
+    p.add_argument("--history-dir")
+    p.add_argument("--size", choices=["32k", "128k"], default="32k")
+    p.add_argument("--convs", type=int, default=0, help="0 means all source conversations")
+    args = p.parse_args()
+    if args.convs < 0:
+        p.error("--convs must be nonnegative")
+    dst = Path(args.output)
+    if dst.suffix != ".jsonl" or dst.resolve() == Path(args.input).resolve():
+        p.error("Output must be a separate .jsonl file")
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    temp = dst.with_suffix(".jsonl.partial")
+    count = qas = sessions = empty_messages = 0
+    categories = Counter()
+    protocols = set()
+    digest = hashlib.sha256()
+    try:
+        with temp.open("wb") as f:
+            source = convert_records(args.input, args.dataset, args.history_dir, args.size)
+            for conv in islice(source, args.convs or None):
+                conv.setdefault("protocol", "local-text-proxy-v1")
+                protocols.add(conv["protocol"])
+                b = (json.dumps(conv, ensure_ascii=False) + "\n").encode()
+                f.write(b)
+                digest.update(b)
+                count += 1
+                qas += len(conv["qa"])
+                categories.update(q.get('category', 'unknown') for q in conv['qa'])
+                sessions += len(conv["sessions"])
+                empty_messages += conv.get("preprocessing", {}).get("empty_messages_removed", 0)
+        if not count:
+            raise ValueError("Dataset contains no conversations")
+        os.replace(temp, dst)
+    except Exception:
+        temp.unlink(missing_ok=True)
+        raise
+    manifest = {"dataset": args.dataset, "input": str(Path(args.input).resolve()),
+                "conversations": count, "sessions": sessions, "qa": qas,
+                "conversation_limit": args.convs, "size": args.size,
+                "empty_messages_removed": empty_messages,
+                "sha256": digest.hexdigest(), "protocol": next(iter(protocols)) if len(protocols) == 1 else sorted(protocols),
+                "official_aml_score": False}
+    if args.dataset == "personamem-v3":
+        index = json.loads(Path(args.input).read_text())
+        tasks = Counter(q['task_type'] for uid in index['users'] for q in json.loads(
+            (Path(args.input).parent / 'backend' / uid / 'test.json').read_text()))
+        manifest.update(source_revision=index['revision'], source_users=index['users'],
+                        source_task_counts=dict(tasks),
+                        supported_task_types=['chatbot_personalized_response'],
+                        unsupported_questions=sum(n for task, n in tasks.items()
+                                                  if task != 'chatbot_personalized_response'),
+                        snapshot_limit=args.convs, size=None,
+                        official_personamem_v3_score=False,
+                        temporal_policy='source_timestamp < query.ts; held-out source object excluded',
+                        source_index_sha256=hashlib.sha256(Path(args.input).read_bytes()).hexdigest())
+    elif args.dataset == 'perma':
+        index = json.loads(Path(args.input).read_text())
+        manifest.update(source_revision=index['revision'], source_users=index['users'],
+                        variant=index['variant'], domains=index['domains'], size=None,
+                        source_questions=index['source_questions'], categories=dict(categories),
+                        official_perma_score=False, evaluation='MCQ exact-label accuracy; local reader',
+                        temporal_policy='type1: no memory; type2/3: supplied checkpoint, inclusive question day',
+                        source_index_sha256=hashlib.sha256(Path(args.input).read_bytes()).hexdigest())
+    dst.with_suffix(".manifest.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
+    print(json.dumps(manifest, ensure_ascii=False, indent=2))
+
+
+if __name__ == "__main__":
+    main()

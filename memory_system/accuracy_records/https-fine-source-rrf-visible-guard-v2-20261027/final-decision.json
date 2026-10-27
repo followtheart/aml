@@ -1,0 +1,1278 @@
+{
+  "status": "complete_paired_https_analysis",
+  "scores": {
+    "control": {
+      "regression": {
+        "correct": 36,
+        "questions": 56,
+        "accuracy": 0.6428571428571429,
+        "errors": 0
+      },
+      "validation": {
+        "correct": 22,
+        "questions": 61,
+        "accuracy": 0.36065573770491804,
+        "errors": 0
+      },
+      "total": {
+        "correct": 58,
+        "questions": 117,
+        "accuracy": 0.49572649572649574,
+        "errors": 0
+      }
+    },
+    "treatment": {
+      "regression": {
+        "correct": 29,
+        "questions": 56,
+        "accuracy": 0.5178571428571429,
+        "errors": 0
+      },
+      "validation": {
+        "correct": 13,
+        "questions": 61,
+        "accuracy": 0.21311475409836064,
+        "errors": 0
+      },
+      "total": {
+        "correct": 42,
+        "questions": 117,
+        "accuracy": 0.358974358974359,
+        "errors": 0
+      }
+    }
+  },
+  "records": [
+    {
+      "arm": "control",
+      "scope": "total",
+      "correct": 58,
+      "questions": 117,
+      "previous_correct": 55.0
+    }
+  ],
+  "decision": "retain_default_baseline",
+  "candidate_gates_passed": false,
+  "default_changed": false,
+  "comparisons": {
+    "regression": {
+      "stages": {
+        "fused": {
+          "control": 72,
+          "treatment": 72,
+          "gains": 0,
+          "losses": 0
+        },
+        "coarse": {
+          "control": 72,
+          "treatment": 72,
+          "gains": 0,
+          "losses": 0
+        },
+        "fine": {
+          "control": 67,
+          "treatment": 69,
+          "gains": 2,
+          "losses": 0
+        },
+        "listwise_input": {
+          "control": 56,
+          "treatment": 56,
+          "gains": 4,
+          "losses": 4
+        },
+        "listwise_selected": {
+          "control": 52,
+          "treatment": 54,
+          "gains": 6,
+          "losses": 4
+        },
+        "packet": {
+          "control": 60,
+          "treatment": 58,
+          "gains": 4,
+          "losses": 6
+        },
+        "catalog": {
+          "control": 60,
+          "treatment": 58,
+          "gains": 4,
+          "losses": 6
+        }
+      },
+      "gains": [
+        {
+          "conversation_id": "911d1d0140349ab4dd01",
+          "qa_id": "17",
+          "turn_index": 0,
+          "stage": "fine"
+        },
+        {
+          "conversation_id": "911d1d0140349ab4dd01",
+          "qa_id": "17",
+          "turn_index": 1,
+          "stage": "fine"
+        },
+        {
+          "conversation_id": "911d1d0140349ab4dd01",
+          "qa_id": "17",
+          "turn_index": 0,
+          "stage": "listwise_input"
+        },
+        {
+          "conversation_id": "911d1d0140349ab4dd01",
+          "qa_id": "17",
+          "turn_index": 1,
+          "stage": "listwise_input"
+        },
+        {
+          "conversation_id": "911d1d0140349ab4dd01",
+          "qa_id": "17",
+          "turn_index": 0,
+          "stage": "listwise_selected"
+        },
+        {
+          "conversation_id": "911d1d0140349ab4dd01",
+          "qa_id": "17",
+          "turn_index": 1,
+          "stage": "listwise_selected"
+        },
+        {
+          "conversation_id": "911d1d0140349ab4dd01",
+          "qa_id": "17",
+          "turn_index": 0,
+          "stage": "packet"
+        },
+        {
+          "conversation_id": "911d1d0140349ab4dd01",
+          "qa_id": "17",
+          "turn_index": 1,
+          "stage": "packet"
+        },
+        {
+          "conversation_id": "911d1d0140349ab4dd01",
+          "qa_id": "17",
+          "turn_index": 0,
+          "stage": "catalog"
+        },
+        {
+          "conversation_id": "911d1d0140349ab4dd01",
+          "qa_id": "17",
+          "turn_index": 1,
+          "stage": "catalog"
+        },
+        {
+          "conversation_id": "911d1d0140349ab4dd01",
+          "qa_id": "2",
+          "turn_index": 0,
+          "stage": "listwise_input"
+        },
+        {
+          "conversation_id": "911d1d0140349ab4dd01",
+          "qa_id": "2",
+          "turn_index": 1,
+          "stage": "listwise_input"
+        },
+        {
+          "conversation_id": "911d1d0140349ab4dd01",
+          "qa_id": "2",
+          "turn_index": 0,
+          "stage": "listwise_selected"
+        },
+        {
+          "conversation_id": "911d1d0140349ab4dd01",
+          "qa_id": "2",
+          "turn_index": 1,
+          "stage": "listwise_selected"
+        },
+        {
+          "conversation_id": "911d1d0140349ab4dd01",
+          "qa_id": "7",
+          "turn_index": 0,
+          "stage": "listwise_selected"
+        },
+        {
+          "conversation_id": "911d1d0140349ab4dd01",
+          "qa_id": "7",
+          "turn_index": 0,
+          "stage": "packet"
+        },
+        {
+          "conversation_id": "911d1d0140349ab4dd01",
+          "qa_id": "7",
+          "turn_index": 0,
+          "stage": "catalog"
+        },
+        {
+          "conversation_id": "b97fc2574d9412b16520",
+          "qa_id": "44",
+          "turn_index": 0,
+          "stage": "listwise_selected"
+        },
+        {
+          "conversation_id": "b97fc2574d9412b16520",
+          "qa_id": "54",
+          "turn_index": 0,
+          "stage": "packet"
+        },
+        {
+          "conversation_id": "b97fc2574d9412b16520",
+          "qa_id": "54",
+          "turn_index": 0,
+          "stage": "catalog"
+        }
+      ],
+      "losses": [
+        {
+          "conversation_id": "911d1d0140349ab4dd01",
+          "qa_id": "20",
+          "turn_index": 0,
+          "stage": "listwise_selected"
+        },
+        {
+          "conversation_id": "911d1d0140349ab4dd01",
+          "qa_id": "20",
+          "turn_index": 0,
+          "stage": "packet"
+        },
+        {
+          "conversation_id": "911d1d0140349ab4dd01",
+          "qa_id": "20",
+          "turn_index": 0,
+          "stage": "catalog"
+        },
+        {
+          "conversation_id": "911d1d0140349ab4dd01",
+          "qa_id": "25",
+          "turn_index": 0,
+          "stage": "listwise_input"
+        },
+        {
+          "conversation_id": "911d1d0140349ab4dd01",
+          "qa_id": "25",
+          "turn_index": 0,
+          "stage": "listwise_selected"
+        },
+        {
+          "conversation_id": "911d1d0140349ab4dd01",
+          "qa_id": "25",
+          "turn_index": 0,
+          "stage": "packet"
+        },
+        {
+          "conversation_id": "911d1d0140349ab4dd01",
+          "qa_id": "25",
+          "turn_index": 0,
+          "stage": "catalog"
+        },
+        {
+          "conversation_id": "911d1d0140349ab4dd01",
+          "qa_id": "5",
+          "turn_index": 0,
+          "stage": "listwise_input"
+        },
+        {
+          "conversation_id": "911d1d0140349ab4dd01",
+          "qa_id": "5",
+          "turn_index": 0,
+          "stage": "listwise_selected"
+        },
+        {
+          "conversation_id": "b97fc2574d9412b16520",
+          "qa_id": "37",
+          "turn_index": 0,
+          "stage": "packet"
+        },
+        {
+          "conversation_id": "b97fc2574d9412b16520",
+          "qa_id": "37",
+          "turn_index": 1,
+          "stage": "packet"
+        },
+        {
+          "conversation_id": "b97fc2574d9412b16520",
+          "qa_id": "37",
+          "turn_index": 2,
+          "stage": "packet"
+        },
+        {
+          "conversation_id": "b97fc2574d9412b16520",
+          "qa_id": "37",
+          "turn_index": 0,
+          "stage": "catalog"
+        },
+        {
+          "conversation_id": "b97fc2574d9412b16520",
+          "qa_id": "37",
+          "turn_index": 1,
+          "stage": "catalog"
+        },
+        {
+          "conversation_id": "b97fc2574d9412b16520",
+          "qa_id": "37",
+          "turn_index": 2,
+          "stage": "catalog"
+        },
+        {
+          "conversation_id": "b97fc2574d9412b16520",
+          "qa_id": "41",
+          "turn_index": 0,
+          "stage": "listwise_input"
+        },
+        {
+          "conversation_id": "b97fc2574d9412b16520",
+          "qa_id": "41",
+          "turn_index": 0,
+          "stage": "listwise_selected"
+        },
+        {
+          "conversation_id": "b97fc2574d9412b16520",
+          "qa_id": "41",
+          "turn_index": 0,
+          "stage": "packet"
+        },
+        {
+          "conversation_id": "b97fc2574d9412b16520",
+          "qa_id": "41",
+          "turn_index": 0,
+          "stage": "catalog"
+        },
+        {
+          "conversation_id": "b97fc2574d9412b16520",
+          "qa_id": "54",
+          "turn_index": 0,
+          "stage": "listwise_input"
+        }
+      ],
+      "first_loss": {
+        "control": {
+          "delivered_all_stages": 52,
+          "fine": 5,
+          "listwise_input": 11,
+          "fused": 6,
+          "listwise_selected": 4,
+          "not_available_in_raw": 4
+        },
+        "treatment": {
+          "delivered_all_stages": 54,
+          "listwise_selected": 2,
+          "listwise_input": 13,
+          "fused": 6,
+          "fine": 3,
+          "not_available_in_raw": 4
+        }
+      }
+    },
+    "validation": {
+      "stages": {
+        "fused": {
+          "control": 69,
+          "treatment": 69,
+          "gains": 0,
+          "losses": 0
+        },
+        "coarse": {
+          "control": 69,
+          "treatment": 69,
+          "gains": 0,
+          "losses": 0
+        },
+        "fine": {
+          "control": 44,
+          "treatment": 49,
+          "gains": 8,
+          "losses": 3
+        },
+        "listwise_input": {
+          "control": 40,
+          "treatment": 43,
+          "gains": 8,
+          "losses": 5
+        },
+        "listwise_selected": {
+          "control": 35,
+          "treatment": 36,
+          "gains": 7,
+          "losses": 6
+        },
+        "packet": {
+          "control": 38,
+          "treatment": 45,
+          "gains": 9,
+          "losses": 2
+        },
+        "catalog": {
+          "control": 38,
+          "treatment": 45,
+          "gains": 9,
+          "losses": 2
+        }
+      },
+      "gains": [
+        {
+          "conversation_id": "160145517d81465ce456",
+          "qa_id": "289",
+          "turn_index": 0,
+          "stage": "fine"
+        },
+        {
+          "conversation_id": "160145517d81465ce456",
+          "qa_id": "289",
+          "turn_index": 0,
+          "stage": "listwise_input"
+        },
+        {
+          "conversation_id": "160145517d81465ce456",
+          "qa_id": "289",
+          "turn_index": 0,
+          "stage": "packet"
+        },
+        {
+          "conversation_id": "160145517d81465ce456",
+          "qa_id": "289",
+          "turn_index": 0,
+          "stage": "catalog"
+        },
+        {
+          "conversation_id": "160145517d81465ce456",
+          "qa_id": "291",
+          "turn_index": 0,
+          "stage": "fine"
+        },
+        {
+          "conversation_id": "160145517d81465ce456",
+          "qa_id": "291",
+          "turn_index": 0,
+          "stage": "listwise_input"
+        },
+        {
+          "conversation_id": "160145517d81465ce456",
+          "qa_id": "291",
+          "turn_index": 0,
+          "stage": "listwise_selected"
+        },
+        {
+          "conversation_id": "160145517d81465ce456",
+          "qa_id": "291",
+          "turn_index": 0,
+          "stage": "packet"
+        },
+        {
+          "conversation_id": "160145517d81465ce456",
+          "qa_id": "291",
+          "turn_index": 0,
+          "stage": "catalog"
+        },
+        {
+          "conversation_id": "160145517d81465ce456",
+          "qa_id": "299",
+          "turn_index": 0,
+          "stage": "fine"
+        },
+        {
+          "conversation_id": "160145517d81465ce456",
+          "qa_id": "299",
+          "turn_index": 1,
+          "stage": "fine"
+        },
+        {
+          "conversation_id": "160145517d81465ce456",
+          "qa_id": "299",
+          "turn_index": 0,
+          "stage": "listwise_input"
+        },
+        {
+          "conversation_id": "160145517d81465ce456",
+          "qa_id": "299",
+          "turn_index": 1,
+          "stage": "listwise_input"
+        },
+        {
+          "conversation_id": "160145517d81465ce456",
+          "qa_id": "299",
+          "turn_index": 0,
+          "stage": "packet"
+        },
+        {
+          "conversation_id": "160145517d81465ce456",
+          "qa_id": "299",
+          "turn_index": 1,
+          "stage": "packet"
+        },
+        {
+          "conversation_id": "160145517d81465ce456",
+          "qa_id": "299",
+          "turn_index": 0,
+          "stage": "catalog"
+        },
+        {
+          "conversation_id": "160145517d81465ce456",
+          "qa_id": "299",
+          "turn_index": 1,
+          "stage": "catalog"
+        },
+        {
+          "conversation_id": "160145517d81465ce456",
+          "qa_id": "301",
+          "turn_index": 1,
+          "stage": "fine"
+        },
+        {
+          "conversation_id": "160145517d81465ce456",
+          "qa_id": "301",
+          "turn_index": 1,
+          "stage": "listwise_input"
+        },
+        {
+          "conversation_id": "160145517d81465ce456",
+          "qa_id": "301",
+          "turn_index": 1,
+          "stage": "listwise_selected"
+        },
+        {
+          "conversation_id": "160145517d81465ce456",
+          "qa_id": "301",
+          "turn_index": 1,
+          "stage": "packet"
+        },
+        {
+          "conversation_id": "160145517d81465ce456",
+          "qa_id": "301",
+          "turn_index": 1,
+          "stage": "catalog"
+        },
+        {
+          "conversation_id": "160145517d81465ce456",
+          "qa_id": "308",
+          "turn_index": 0,
+          "stage": "listwise_selected"
+        },
+        {
+          "conversation_id": "160145517d81465ce456",
+          "qa_id": "308",
+          "turn_index": 0,
+          "stage": "packet"
+        },
+        {
+          "conversation_id": "160145517d81465ce456",
+          "qa_id": "308",
+          "turn_index": 0,
+          "stage": "catalog"
+        },
+        {
+          "conversation_id": "309dac78d2ccdd53f786",
+          "qa_id": "315",
+          "turn_index": 0,
+          "stage": "listwise_selected"
+        },
+        {
+          "conversation_id": "309dac78d2ccdd53f786",
+          "qa_id": "326",
+          "turn_index": 1,
+          "stage": "fine"
+        },
+        {
+          "conversation_id": "309dac78d2ccdd53f786",
+          "qa_id": "326",
+          "turn_index": 1,
+          "stage": "listwise_input"
+        },
+        {
+          "conversation_id": "309dac78d2ccdd53f786",
+          "qa_id": "326",
+          "turn_index": 1,
+          "stage": "listwise_selected"
+        },
+        {
+          "conversation_id": "309dac78d2ccdd53f786",
+          "qa_id": "326",
+          "turn_index": 1,
+          "stage": "packet"
+        },
+        {
+          "conversation_id": "309dac78d2ccdd53f786",
+          "qa_id": "326",
+          "turn_index": 1,
+          "stage": "catalog"
+        },
+        {
+          "conversation_id": "309dac78d2ccdd53f786",
+          "qa_id": "340",
+          "turn_index": 0,
+          "stage": "fine"
+        },
+        {
+          "conversation_id": "309dac78d2ccdd53f786",
+          "qa_id": "340",
+          "turn_index": 1,
+          "stage": "fine"
+        },
+        {
+          "conversation_id": "309dac78d2ccdd53f786",
+          "qa_id": "340",
+          "turn_index": 0,
+          "stage": "listwise_input"
+        },
+        {
+          "conversation_id": "309dac78d2ccdd53f786",
+          "qa_id": "340",
+          "turn_index": 1,
+          "stage": "listwise_input"
+        },
+        {
+          "conversation_id": "309dac78d2ccdd53f786",
+          "qa_id": "340",
+          "turn_index": 0,
+          "stage": "listwise_selected"
+        },
+        {
+          "conversation_id": "309dac78d2ccdd53f786",
+          "qa_id": "340",
+          "turn_index": 1,
+          "stage": "listwise_selected"
+        },
+        {
+          "conversation_id": "309dac78d2ccdd53f786",
+          "qa_id": "340",
+          "turn_index": 0,
+          "stage": "packet"
+        },
+        {
+          "conversation_id": "309dac78d2ccdd53f786",
+          "qa_id": "340",
+          "turn_index": 1,
+          "stage": "packet"
+        },
+        {
+          "conversation_id": "309dac78d2ccdd53f786",
+          "qa_id": "340",
+          "turn_index": 0,
+          "stage": "catalog"
+        },
+        {
+          "conversation_id": "309dac78d2ccdd53f786",
+          "qa_id": "340",
+          "turn_index": 1,
+          "stage": "catalog"
+        }
+      ],
+      "losses": [
+        {
+          "conversation_id": "160145517d81465ce456",
+          "qa_id": "283",
+          "turn_index": 0,
+          "stage": "listwise_input"
+        },
+        {
+          "conversation_id": "160145517d81465ce456",
+          "qa_id": "283",
+          "turn_index": 1,
+          "stage": "listwise_input"
+        },
+        {
+          "conversation_id": "160145517d81465ce456",
+          "qa_id": "283",
+          "turn_index": 0,
+          "stage": "listwise_selected"
+        },
+        {
+          "conversation_id": "160145517d81465ce456",
+          "qa_id": "283",
+          "turn_index": 1,
+          "stage": "listwise_selected"
+        },
+        {
+          "conversation_id": "160145517d81465ce456",
+          "qa_id": "298",
+          "turn_index": 0,
+          "stage": "listwise_selected"
+        },
+        {
+          "conversation_id": "160145517d81465ce456",
+          "qa_id": "307",
+          "turn_index": 0,
+          "stage": "fine"
+        },
+        {
+          "conversation_id": "160145517d81465ce456",
+          "qa_id": "307",
+          "turn_index": 0,
+          "stage": "listwise_input"
+        },
+        {
+          "conversation_id": "309dac78d2ccdd53f786",
+          "qa_id": "314",
+          "turn_index": 0,
+          "stage": "listwise_selected"
+        },
+        {
+          "conversation_id": "309dac78d2ccdd53f786",
+          "qa_id": "314",
+          "turn_index": 1,
+          "stage": "listwise_selected"
+        },
+        {
+          "conversation_id": "309dac78d2ccdd53f786",
+          "qa_id": "324",
+          "turn_index": 0,
+          "stage": "fine"
+        },
+        {
+          "conversation_id": "309dac78d2ccdd53f786",
+          "qa_id": "324",
+          "turn_index": 0,
+          "stage": "listwise_input"
+        },
+        {
+          "conversation_id": "309dac78d2ccdd53f786",
+          "qa_id": "324",
+          "turn_index": 0,
+          "stage": "listwise_selected"
+        },
+        {
+          "conversation_id": "309dac78d2ccdd53f786",
+          "qa_id": "324",
+          "turn_index": 0,
+          "stage": "packet"
+        },
+        {
+          "conversation_id": "309dac78d2ccdd53f786",
+          "qa_id": "324",
+          "turn_index": 0,
+          "stage": "catalog"
+        },
+        {
+          "conversation_id": "309dac78d2ccdd53f786",
+          "qa_id": "341",
+          "turn_index": 0,
+          "stage": "fine"
+        },
+        {
+          "conversation_id": "309dac78d2ccdd53f786",
+          "qa_id": "341",
+          "turn_index": 0,
+          "stage": "listwise_input"
+        },
+        {
+          "conversation_id": "309dac78d2ccdd53f786",
+          "qa_id": "341",
+          "turn_index": 0,
+          "stage": "packet"
+        },
+        {
+          "conversation_id": "309dac78d2ccdd53f786",
+          "qa_id": "341",
+          "turn_index": 0,
+          "stage": "catalog"
+        }
+      ],
+      "first_loss": {
+        "control": {
+          "listwise_input": 4,
+          "fine": 25,
+          "delivered_all_stages": 35,
+          "not_available_in_raw": 18,
+          "listwise_selected": 5,
+          "fused": 1
+        },
+        "treatment": {
+          "listwise_input": 6,
+          "fine": 20,
+          "not_available_in_raw": 18,
+          "delivered_all_stages": 36,
+          "listwise_selected": 7,
+          "fused": 1
+        }
+      }
+    }
+  },
+  "costs": {
+    "regression:control": {
+      "search": {
+        "totals": {
+          "calls": 451,
+          "accounted_tokens": 2203416,
+          "errors": 0,
+          "failed_calls_without_known_usage": 0
+        },
+        "stages": {
+          "search.embed_queries": {
+            "calls": 77,
+            "accounted_tokens": 12345,
+            "errors": 0,
+            "failed_calls_without_known_usage": 0
+          },
+          "search.cross_encoder.batch_2": {
+            "calls": 56,
+            "accounted_tokens": 535184,
+            "errors": 0,
+            "failed_calls_without_known_usage": 0
+          },
+          "search.cross_encoder.batch_1": {
+            "calls": 56,
+            "accounted_tokens": 613207,
+            "errors": 0,
+            "failed_calls_without_known_usage": 0
+          },
+          "search.cross_encoder.batch_3": {
+            "calls": 56,
+            "accounted_tokens": 182533,
+            "errors": 0,
+            "failed_calls_without_known_usage": 0
+          },
+          "search.listwise": {
+            "calls": 56,
+            "accounted_tokens": 354292,
+            "errors": 0,
+            "failed_calls_without_known_usage": 0
+          },
+          "search.listwise.overflow": {
+            "calls": 55,
+            "accounted_tokens": 185793,
+            "errors": 0,
+            "failed_calls_without_known_usage": 0
+          },
+          "search.listwise.recovery": {
+            "calls": 85,
+            "accounted_tokens": 267016,
+            "errors": 0,
+            "failed_calls_without_known_usage": 0
+          },
+          "search.listwise.repair": {
+            "calls": 10,
+            "accounted_tokens": 53046,
+            "errors": 0,
+            "failed_calls_without_known_usage": 0
+          }
+        }
+      },
+      "source": {
+        "questions": 56,
+        "statuses": {
+          "disabled": 56
+        }
+      },
+      "summary_calls": 451,
+      "summary_tokens": 2203416
+    },
+    "regression:treatment": {
+      "search": {
+        "totals": {
+          "calls": 597,
+          "accounted_tokens": 2743414,
+          "errors": 0,
+          "failed_calls_without_known_usage": 0
+        },
+        "stages": {
+          "search.embed_queries": {
+            "calls": 77,
+            "accounted_tokens": 12345,
+            "errors": 0,
+            "failed_calls_without_known_usage": 0
+          },
+          "search.cross_encoder.batch_2": {
+            "calls": 56,
+            "accounted_tokens": 535184,
+            "errors": 0,
+            "failed_calls_without_known_usage": 0
+          },
+          "search.cross_encoder.batch_1": {
+            "calls": 56,
+            "accounted_tokens": 613207,
+            "errors": 0,
+            "failed_calls_without_known_usage": 0
+          },
+          "search.cross_encoder.batch_3": {
+            "calls": 56,
+            "accounted_tokens": 182533,
+            "errors": 0,
+            "failed_calls_without_known_usage": 0
+          },
+          "search.fine_source_rrf": {
+            "calls": 145,
+            "accounted_tokens": 536952,
+            "errors": 0,
+            "failed_calls_without_known_usage": 0
+          },
+          "search.listwise": {
+            "calls": 56,
+            "accounted_tokens": 350796,
+            "errors": 0,
+            "failed_calls_without_known_usage": 0
+          },
+          "search.listwise.overflow": {
+            "calls": 55,
+            "accounted_tokens": 192913,
+            "errors": 0,
+            "failed_calls_without_known_usage": 0
+          },
+          "search.listwise.recovery": {
+            "calls": 89,
+            "accounted_tokens": 283259,
+            "errors": 0,
+            "failed_calls_without_known_usage": 0
+          },
+          "search.listwise.repair": {
+            "calls": 7,
+            "accounted_tokens": 36225,
+            "errors": 0,
+            "failed_calls_without_known_usage": 0
+          }
+        }
+      },
+      "source": {
+        "questions": 56,
+        "archived_source_responses": 145,
+        "started_source_batches": 145,
+        "accounted_source_tokens": 536952,
+        "provider_calls": 145,
+        "statuses": {
+          "selected": 34,
+          "fallback": 22
+        }
+      },
+      "summary_calls": 597,
+      "summary_tokens": 2743414
+    },
+    "regression:reader": {
+      "totals": {
+        "calls": 717,
+        "accounted_tokens": 3048134,
+        "errors": 5,
+        "failed_calls_without_known_usage": 2
+      },
+      "stages": {
+        "eval.choice_witness": {
+          "calls": 112,
+          "accounted_tokens": 461056,
+          "errors": 2,
+          "failed_calls_without_known_usage": 2
+        },
+        "eval.choice_support": {
+          "calls": 112,
+          "accounted_tokens": 947231,
+          "errors": 3,
+          "failed_calls_without_known_usage": 0
+        },
+        "eval.choice_support.repair": {
+          "calls": 88,
+          "accounted_tokens": 417200,
+          "errors": 0,
+          "failed_calls_without_known_usage": 0
+        },
+        "eval.choice_premise_scope": {
+          "calls": 101,
+          "accounted_tokens": 116234,
+          "errors": 0,
+          "failed_calls_without_known_usage": 0
+        },
+        "eval.choice_entailment": {
+          "calls": 112,
+          "accounted_tokens": 430350,
+          "errors": 0,
+          "failed_calls_without_known_usage": 0
+        },
+        "eval.choice_select": {
+          "calls": 52,
+          "accounted_tokens": 283220,
+          "errors": 0,
+          "failed_calls_without_known_usage": 0
+        },
+        "eval.choice_select_review": {
+          "calls": 24,
+          "accounted_tokens": 145172,
+          "errors": 0,
+          "failed_calls_without_known_usage": 0
+        },
+        "eval.choice_citation_recovery": {
+          "calls": 91,
+          "accounted_tokens": 227488,
+          "errors": 0,
+          "failed_calls_without_known_usage": 0
+        },
+        "eval.choice_constraints": {
+          "calls": 22,
+          "accounted_tokens": 13562,
+          "errors": 0,
+          "failed_calls_without_known_usage": 0
+        },
+        "eval.choice_premise_scope.repair": {
+          "calls": 3,
+          "accounted_tokens": 6621,
+          "errors": 0,
+          "failed_calls_without_known_usage": 0
+        }
+      }
+    },
+    "validation:control": {
+      "search": {
+        "totals": {
+          "calls": 502,
+          "accounted_tokens": 2569451,
+          "errors": 1,
+          "failed_calls_without_known_usage": 1
+        },
+        "stages": {
+          "search.embed_queries": {
+            "calls": 77,
+            "accounted_tokens": 14245,
+            "errors": 0,
+            "failed_calls_without_known_usage": 0
+          },
+          "search.cross_encoder.batch_1": {
+            "calls": 61,
+            "accounted_tokens": 727713,
+            "errors": 0,
+            "failed_calls_without_known_usage": 0
+          },
+          "search.cross_encoder.batch_2": {
+            "calls": 61,
+            "accounted_tokens": 596464,
+            "errors": 0,
+            "failed_calls_without_known_usage": 0
+          },
+          "search.cross_encoder.batch_3": {
+            "calls": 61,
+            "accounted_tokens": 222094,
+            "errors": 0,
+            "failed_calls_without_known_usage": 0
+          },
+          "search.listwise": {
+            "calls": 61,
+            "accounted_tokens": 384517,
+            "errors": 1,
+            "failed_calls_without_known_usage": 1
+          },
+          "search.listwise.overflow": {
+            "calls": 61,
+            "accounted_tokens": 206058,
+            "errors": 0,
+            "failed_calls_without_known_usage": 0
+          },
+          "search.listwise.repair": {
+            "calls": 13,
+            "accounted_tokens": 71208,
+            "errors": 0,
+            "failed_calls_without_known_usage": 0
+          },
+          "search.listwise.recovery": {
+            "calls": 105,
+            "accounted_tokens": 339032,
+            "errors": 0,
+            "failed_calls_without_known_usage": 0
+          },
+          "search.listwise.retry": {
+            "calls": 1,
+            "accounted_tokens": 6690,
+            "errors": 0,
+            "failed_calls_without_known_usage": 0
+          },
+          "search.cross_encoder.batch_4": {
+            "calls": 1,
+            "accounted_tokens": 1430,
+            "errors": 0,
+            "failed_calls_without_known_usage": 0
+          }
+        }
+      },
+      "source": {
+        "questions": 61,
+        "statuses": {
+          "disabled": 61
+        }
+      },
+      "summary_calls": 502,
+      "summary_tokens": 2569451
+    },
+    "validation:treatment": {
+      "search": {
+        "totals": {
+          "calls": 658,
+          "accounted_tokens": 3113260,
+          "errors": 0,
+          "failed_calls_without_known_usage": 0
+        },
+        "stages": {
+          "search.embed_queries": {
+            "calls": 77,
+            "accounted_tokens": 14245,
+            "errors": 0,
+            "failed_calls_without_known_usage": 0
+          },
+          "search.cross_encoder.batch_2": {
+            "calls": 61,
+            "accounted_tokens": 596464,
+            "errors": 0,
+            "failed_calls_without_known_usage": 0
+          },
+          "search.cross_encoder.batch_1": {
+            "calls": 61,
+            "accounted_tokens": 727713,
+            "errors": 0,
+            "failed_calls_without_known_usage": 0
+          },
+          "search.cross_encoder.batch_3": {
+            "calls": 61,
+            "accounted_tokens": 222094,
+            "errors": 0,
+            "failed_calls_without_known_usage": 0
+          },
+          "search.fine_source_rrf": {
+            "calls": 163,
+            "accounted_tokens": 565088,
+            "errors": 0,
+            "failed_calls_without_known_usage": 0
+          },
+          "search.listwise": {
+            "calls": 61,
+            "accounted_tokens": 387444,
+            "errors": 0,
+            "failed_calls_without_known_usage": 0
+          },
+          "search.listwise.recovery": {
+            "calls": 95,
+            "accounted_tokens": 295689,
+            "errors": 0,
+            "failed_calls_without_known_usage": 0
+          },
+          "search.listwise.overflow": {
+            "calls": 61,
+            "accounted_tokens": 211665,
+            "errors": 0,
+            "failed_calls_without_known_usage": 0
+          },
+          "search.listwise.repair": {
+            "calls": 17,
+            "accounted_tokens": 91428,
+            "errors": 0,
+            "failed_calls_without_known_usage": 0
+          },
+          "search.cross_encoder.batch_4": {
+            "calls": 1,
+            "accounted_tokens": 1430,
+            "errors": 0,
+            "failed_calls_without_known_usage": 0
+          }
+        }
+      },
+      "source": {
+        "questions": 61,
+        "archived_source_responses": 163,
+        "started_source_batches": 163,
+        "accounted_source_tokens": 565088,
+        "provider_calls": 163,
+        "statuses": {
+          "fallback": 21,
+          "selected": 35,
+          "skipped": 5
+        }
+      },
+      "summary_calls": 658,
+      "summary_tokens": 3113260
+    },
+    "validation:reader": {
+      "totals": {
+        "calls": 744,
+        "accounted_tokens": 3206884,
+        "errors": 0,
+        "failed_calls_without_known_usage": 0
+      },
+      "stages": {
+        "eval.choice_witness": {
+          "calls": 122,
+          "accounted_tokens": 510259,
+          "errors": 0,
+          "failed_calls_without_known_usage": 0
+        },
+        "eval.choice_support": {
+          "calls": 122,
+          "accounted_tokens": 1027194,
+          "errors": 0,
+          "failed_calls_without_known_usage": 0
+        },
+        "eval.choice_premise_scope": {
+          "calls": 109,
+          "accounted_tokens": 123266,
+          "errors": 0,
+          "failed_calls_without_known_usage": 0
+        },
+        "eval.choice_citation_recovery": {
+          "calls": 81,
+          "accounted_tokens": 201174,
+          "errors": 0,
+          "failed_calls_without_known_usage": 0
+        },
+        "eval.choice_entailment": {
+          "calls": 120,
+          "accounted_tokens": 456002,
+          "errors": 0,
+          "failed_calls_without_known_usage": 0
+        },
+        "eval.choice_select": {
+          "calls": 63,
+          "accounted_tokens": 341662,
+          "errors": 0,
+          "failed_calls_without_known_usage": 0
+        },
+        "eval.choice_select_review": {
+          "calls": 42,
+          "accounted_tokens": 248983,
+          "errors": 0,
+          "failed_calls_without_known_usage": 0
+        },
+        "eval.choice_premise_scope.repair": {
+          "calls": 2,
+          "accounted_tokens": 5554,
+          "errors": 0,
+          "failed_calls_without_known_usage": 0
+        },
+        "eval.choice_constraints": {
+          "calls": 16,
+          "accounted_tokens": 10248,
+          "errors": 0,
+          "failed_calls_without_known_usage": 0
+        },
+        "eval.choice_support.repair": {
+          "calls": 67,
+          "accounted_tokens": 282542,
+          "errors": 0,
+          "failed_calls_without_known_usage": 0
+        }
+      }
+    }
+  },
+  "input_sha256": {
+    "/root/aml/memory_system/runs/https-fine-source-rrf-visible-guard-v2-20261027/regression/control/completed/data/results/personamem-v2-32k.jsonl": "b8167e73987961286183f8943afabc116106178cae06743638e04929b6fc44bd",
+    "/root/aml/memory_system/runs/https-fine-source-rrf-visible-guard-v2-20261027/regression/control/summary.json": "0dd005a50b06fd92ebcaac93dba2229fc70e344d2ee8e0c9f91f28cea2db0cb2",
+    "/root/aml/memory_system/runs/https-fine-source-rrf-visible-guard-v2-20261027/regression/control/isolated-manifest.json": "c4f4f3094ae73c379e6beec8fd4891ccb276ff797acd96c9c6b04c233f72c9ab",
+    "/root/aml/memory_system/runs/https-fine-source-rrf-visible-guard-v2-20261027/regression/control/server-search-debug.jsonl": "8cb36923db9ef5ce7ec4c2cebc11a5ec7d2c4574970acedf5c5799ea25d66f75",
+    "/root/aml/memory_system/runs/https-fine-source-rrf-visible-guard-v2-20261027/regression/control/server.log": "185638778de903aecad19b44da07086c88d17c08d821ca7eeaf37b1e626625b5",
+    "/root/aml/memory_system/runs/https-fine-source-rrf-visible-guard-v2-20261027/regression/control/fine-source-rrf-audit.json": "ab3fda1ad7534f78dd54c2f327570923951c534c89fe56b88fb89ad1f39585be",
+    "/root/aml/memory_system/runs/https-fine-source-rrf-visible-guard-v2-20261027/regression/control/funnel/stage-transport.json": "d5f1b59b062cb9ba41fdfc3ee47678595e93f19a4ade89809512738ddeffe19a",
+    "/root/aml/memory_system/runs/https-fine-source-rrf-visible-guard-v2-20261027/regression/treatment/completed/data/results/personamem-v2-32k.jsonl": "554267ae89c1a77d7f306727e4abee28bedcadf59bd5ceddb924b34e6161ab81",
+    "/root/aml/memory_system/runs/https-fine-source-rrf-visible-guard-v2-20261027/regression/treatment/summary.json": "dacd6f1ea7a15a982b673282fd1628ecdfd9b82ccdab545cfe46227685ae3b0d",
+    "/root/aml/memory_system/runs/https-fine-source-rrf-visible-guard-v2-20261027/regression/treatment/isolated-manifest.json": "5ebde44e78a9e8c4f732ead5a5b8e5ebb7565fe20dbc4e95a1c146c1b356f036",
+    "/root/aml/memory_system/runs/https-fine-source-rrf-visible-guard-v2-20261027/regression/treatment/server-search-debug.jsonl": "b538c15b1885f473133a7ca9133158ffa2b398084336c81f4f3888acc0eb3535",
+    "/root/aml/memory_system/runs/https-fine-source-rrf-visible-guard-v2-20261027/regression/treatment/server.log": "ebc4c05c2594b5f04b611f5731295995f88e9e59803d63b33ee256e5a3547501",
+    "/root/aml/memory_system/runs/https-fine-source-rrf-visible-guard-v2-20261027/regression/treatment/fine-source-rrf-audit.json": "ee4d167ad288dd915b055bd5b07ae8287ba53d99e6b408c308211118e3323ed1",
+    "/root/aml/memory_system/runs/https-fine-source-rrf-visible-guard-v2-20261027/regression/treatment/funnel/stage-transport.json": "49572a4fcd478b3abf668da9f7915eb6e200b9b3212a5e6da55197c0a194d217",
+    "/root/aml/memory_system/runs/https-fine-source-rrf-visible-guard-v2-20261027/regression/reader-provider.log": "463866db556ae73d49c80fcd16bf328ba3e5b4d6f4f8fc5157e88166220b707f",
+    "/root/aml/memory_system/runs/https-fine-source-rrf-visible-guard-v2-20261027/validation/control/completed/data/results/personamem-v2-32k.jsonl": "5ca166183b161f83695617d513de86c0ef1f09dc31c6fc406242b77388bdc762",
+    "/root/aml/memory_system/runs/https-fine-source-rrf-visible-guard-v2-20261027/validation/control/summary.json": "61a4957c9de426fffe8b2103e742755d56a93221c82bd59098974d5c25836ba7",
+    "/root/aml/memory_system/runs/https-fine-source-rrf-visible-guard-v2-20261027/validation/control/isolated-manifest.json": "45417f2c359863f891014990bba0f3ae62fac4c5f7f8390334eb638d87d71f72",
+    "/root/aml/memory_system/runs/https-fine-source-rrf-visible-guard-v2-20261027/validation/control/server-search-debug.jsonl": "a30a56c2dff88576d30f1fd4ad6a163b3d456315e1d0c04bbd0a45ddcb5a7056",
+    "/root/aml/memory_system/runs/https-fine-source-rrf-visible-guard-v2-20261027/validation/control/server.log": "b5c89bbe4188d347876e44bfa0a0d2dd2157ba7e11d123b451ff7323251e1c5a",
+    "/root/aml/memory_system/runs/https-fine-source-rrf-visible-guard-v2-20261027/validation/control/fine-source-rrf-audit.json": "3f525154cb2a65f408bbc5da36976bf12c6462536edc32300de33e199ba9feaf",
+    "/root/aml/memory_system/runs/https-fine-source-rrf-visible-guard-v2-20261027/validation/control/funnel/stage-transport.json": "a4871224767f7c26272c4f42f64eea313611f4c9b42ae69d5f9da53c29e5aa2f",
+    "/root/aml/memory_system/runs/https-fine-source-rrf-visible-guard-v2-20261027/validation/treatment/completed/data/results/personamem-v2-32k.jsonl": "cdb75765c85ccc343396236b5254e3f8e8106114c24312e0b20d9897344b26c9",
+    "/root/aml/memory_system/runs/https-fine-source-rrf-visible-guard-v2-20261027/validation/treatment/summary.json": "23a0d12394af2508d48798f7eedd592666ee137868123516419eedd456d18a39",
+    "/root/aml/memory_system/runs/https-fine-source-rrf-visible-guard-v2-20261027/validation/treatment/isolated-manifest.json": "b255659939b5e0ee6cded1d866c400cec818a688a9afc9f4bcebe9dc207818fc",
+    "/root/aml/memory_system/runs/https-fine-source-rrf-visible-guard-v2-20261027/validation/treatment/server-search-debug.jsonl": "30c6e8bd2d763bf4a064d226bab1b3d98c2c94027f1c6c4714d3bc4630df4614",
+    "/root/aml/memory_system/runs/https-fine-source-rrf-visible-guard-v2-20261027/validation/treatment/server.log": "f54f833e46afee2276eb4405137c8b5c106848c376c94499a198e7f5dc3dd393",
+    "/root/aml/memory_system/runs/https-fine-source-rrf-visible-guard-v2-20261027/validation/treatment/fine-source-rrf-audit.json": "bebfeb61d6930ded4291f6640843c678cefafc7e4638a5c734e691b04382ab6c",
+    "/root/aml/memory_system/runs/https-fine-source-rrf-visible-guard-v2-20261027/validation/treatment/funnel/stage-transport.json": "05b0002f7ee33c620dd03d34075cf5cbe35824fd8d1af21b72cf7438f1040109",
+    "/root/aml/memory_system/runs/https-fine-source-rrf-visible-guard-v2-20261027/validation/reader-provider.log": "d2ed44f141549950fd3c25039f910b8e026a4e82d1dc951c6356aa31e613226c"
+  },
+  "limitation": "Same FastAPI HTTPS /search implementation on isolated servers, with frozen ingestion/planner/usage. Repeated development cohorts and one stochastic pair; not held-out accuracy or public end-to-end latency. Archived raw source responses were offline fixtures only; live requests use new provider calls. Guard-only preflight main coverage is100 vs97 within-request original and101 actual legacy RRF; fine118 vs111 original and116 legacy RRF. No claim of recall improvement over legacy RRF; this full run measures downstream effects of a semantically corrected guard.",
+  "next_step": "Analyze full final packet losses/gains and answer changes before the next general retrieval change."
+}

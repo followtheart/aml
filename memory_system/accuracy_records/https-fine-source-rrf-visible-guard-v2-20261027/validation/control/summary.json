@@ -1,0 +1,9 @@
+{
+  "questions": 61,
+  "score": 22.0,
+  "errors": 0,
+  "degraded": 34,
+  "search_calls": 502,
+  "search_tokens": 2569451,
+  "median_search_seconds": 16.138684222998563
+}

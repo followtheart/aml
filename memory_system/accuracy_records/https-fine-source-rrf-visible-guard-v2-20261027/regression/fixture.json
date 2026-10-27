@@ -1,0 +1,3004 @@
+{
+  "settings": {
+    "CE_FULL_OPTION_TEXT": false,
+    "SOURCE_CE_LATE_ADMISSION": false,
+    "JOINT_SOURCE_RANK_ADMISSION": false,
+    "OPTION_MARGIN_SOURCE_ADMISSION": false,
+    "FINE_NEW_COARSE_INSURANCE": false,
+    "FINE_NEW_COARSE_MISSING_ONLY": false,
+    "LISTWISE_OVERFLOW_BATCHED": false,
+    "PACKET_QUESTION_CONTEXT_CE": false,
+    "PACKET_ENDPOINT_FINE_COMPLETION": false,
+    "PACKET_SOURCE_FIRST_RESIDUAL": false,
+    "PACKET_MARGINAL_QUERY_CONTEXT": false,
+    "PACKET_QUERY_CONTEXT_COMBINED": false,
+    "PACKET_CORE_GAP_CONTEXT": false,
+    "PACKET_SPARSE_SOURCE_CONTEXT": false,
+    "PACKET_EXCLUSIVE_SHARED_CONTEXT": false,
+    "PACKET_UNMATCHED_NOUN_CONTEXT": false,
+    "CHOICE_WITNESS_KEYED_OUTPUT": false,
+    "CHOICE_WITNESS_LEXICAL_FILL": false,
+    "PACKET_SOURCE_QUERY_CONTEXT": false,
+    "CORE_PROFILE_MAX_ITEMS": 12,
+    "PROFILE_REQUIRE_USER_SUPPORT": false,
+    "QUERY_PROFILE_DIGEST": true,
+    "CHOICE_QUERY_CONTEXT": false,
+    "CHOICE_PRESERVE_REPAIR_PREMISES": false,
+    "CHOICE_CURRENT_QUESTION_SOURCE": false,
+    "CHOICE_SOURCE_SCOPE": false,
+    "CHOICE_CONSTRAINT_CONTENT_TERMS": false,
+    "CHOICE_CONSTRAINT_TERM_FORMS": false,
+    "CHOICE_VERIFICATION_SCOPE": false,
+    "EXTRACT_SPAN_REFS": false,
+    "EXTRACT_TRIPLE_ISOLATION": false,
+    "EXTRACT_COVERAGE_RETRY": false,
+    "SEARCH_SOURCE_EXCERPT_CHARS": 800,
+    "SEARCH_SOURCE_MESSAGES_PER_ITEM": 3,
+    "SEARCH_DEADLINE_SECONDS": 300.0,
+    "RERANK_MAX_PROMPT_BYTES": 24000,
+    "LISTWISE_SHARED_SOURCES": true,
+    "CHOICE_SCOPE_ROLES": false,
+    "CHOICE_GROUPED_ENTAILMENT": false,
+    "CHOICE_REVIEW_REQUEST_TERMS": false,
+    "CHOICE_CONDITIONAL_LIST_SCOPE": true,
+    "CHOICE_TEMPLATE_PATH_SCOPE": false,
+    "CHOICE_EXISTING_STATE_GUARD": false,
+    "CHOICE_REPAIR_VALID_CLAIMS": false,
+    "CHOICE_CITED_SCOPE": false,
+    "RERANK_CONCURRENCY": 2,
+    "RERANK_DEADLINE_SECONDS": 45.0,
+    "RERANK_REPAIR_MAX_CALLS": 2,
+    "LISTWISE_KEYED_OUTPUT": true,
+    "LISTWISE_REVIEW_MAX_BATCHES": 3,
+    "LISTWISE_OVERFLOW_REVIEW": true,
+    "LISTWISE_OVERFLOW_EXTEND": false,
+    "LISTWISE_ROLE_BOUND_REFS": false,
+    "LISTWISE_TRANSFORM_CONTEXT": false,
+    "LISTWISE_TOPIC_INTEREST": false,
+    "PACKET_ADJACENT_CONTEXT": false,
+    "PACKET_FINE_CONTEXT_RESERVE": true,
+    "PACKET_FINE_CONTEXT_5K": true,
+    "PACKET_FINE_CONTEXT_LEXICAL": true,
+    "PACKET_FINE_CONTEXT_FILL": false,
+    "LISTWISE_ABBREVIATION_PARTS": false,
+    "LISTWISE_STAGED": false,
+    "LISTWISE_PURPOSE_BATCH_SIZE": 10,
+    "LISTWISE_CONTEXT_REVIEW_LIMIT": 2,
+    "LISTWISE_STAGED_MAX_PROMPT_BYTES": 48000,
+    "LISTWISE_CONTEXT_MAX_BYTES": 12000,
+    "CHOICE_RECOVERY_CLAIM_ONLY": false,
+    "CHOICE_RECOVERY_BEFORE_SCOPE": false,
+    "CASCADE_COARSE_LIMIT": 50,
+    "COARSE_EVIDENCE_EXTEND": true,
+    "FINE_COARSE_CORE_QUOTA": true,
+    "FINE_WEAK_PROMOTION_ONE": false,
+    "FINE_SEMANTIC_RESERVE": false,
+    "CASCADE_FINE_LIMIT": 16,
+    "CASCADE_LLM_LIMIT": 16,
+    "FINE_EVIDENCE_ADAPTIVE": true,
+    "FINE_TOPIC_CONTEXT": false,
+    "FINE_EXTRA_LIMIT": 8,
+    "LISTWISE_UNREVIEWED_LIMIT": 0,
+    "CHOICE_ALLOW_INFERRED": true,
+    "CHOICE_COVERAGE_WITNESSES": true,
+    "CHOICE_BOUNDED_SUPPORT_SPANS": false,
+    "CHOICE_TYPOGRAPHIC_QUOTES": false,
+    "CHOICE_REPAIR_CONTEXT": false,
+    "CHOICE_REPAIR_SPAN_REFS": false,
+    "CHOICE_ADAPTIVE_INTEREST_RETRY": false,
+    "CHOICE_ENTAILMENT_REVIEW": false,
+    "CHOICE_SEMANTIC_WITNESSES": true,
+    "CHOICE_WITNESS_SPAN_REFS": false,
+    "CHOICE_INDEPENDENT_SELECTION_REVIEW": false,
+    "CHOICE_TYPED_SCOPE_CONSISTENCY": false,
+    "CHOICE_DIRECT_REQUEST_SELECTION": false,
+    "CHOICE_STRUCTURED_REQUEST_SELECTION": false,
+    "CHOICE_SOURCE_NOTES_SELECTION": false,
+    "CHOICE_DIRECT_CATALOG_READER": false,
+    "LISTWISE_SPAN_REFS": true,
+    "CE_BATCH_SIZE": 24,
+    "CE_TIMEOUT_SECONDS": 20.0,
+    "CE_DEADLINE_SECONDS": 45.0,
+    "CE_RETRY_BATCHES": 2,
+    "CE_RETRY_BATCH_SIZE": 4,
+    "CE_MAX_DOCUMENT_BYTES": 4000,
+    "CE_MAX_REQUEST_BYTES": 90000,
+    "CE_API_FORMAT": "cohere",
+    "GRAPH_FUSION_ENABLED": true,
+    "GRAPH_FUSION_MAX_CANDIDATES": 256,
+    "SEARCH_FOLLOWUP_QUERIES": 2,
+    "SEARCH_FOLLOWUP_SECONDS": 8.0,
+    "SEARCH_ITEM_MAX_BYTES": 6000,
+    "SEARCH_LOCAL_CONCURRENCY": 4,
+    "VECTOR_CHUNK_SIZE": 2048,
+    "VECTOR_CACHE_BYTES": 134217728,
+    "VECTOR_APPROXIMATE": false,
+    "VECTOR_EXACT_LIMIT": 20000,
+    "VECTOR_CANDIDATE_LIMIT": 8192,
+    "SEARCH_MAX_CALLS": 20,
+    "SEARCH_MAX_TOKENS": 128000,
+    "EVIDENCE_FALLBACK_ITEMS": 8,
+    "RECALL_VECTOR_LIMIT": 40,
+    "RECALL_SOURCE_LIMIT": 40,
+    "RECALL_FTS_LIMIT": 20,
+    "SOURCE_RECALL_DIVERSITY": true,
+    "SOURCE_RECALL_NOVELTY": false,
+    "RECALL_PORTER_SUPPLEMENT": false,
+    "SENSITIVE_RECALL_ENABLED": true,
+    "RECALL_TOPIC_ANCHORS": true,
+    "RECALL_TOPIC_ANCHOR_LIMIT": 4,
+    "LISTWISE_CONTEXT_LABEL": true,
+    "RECALL_PROFILE_LIMIT": 8,
+    "RECALL_EXPANSION_LIMIT": 12,
+    "RECALL_EXPANSION_MIN_DIRECT": 3
+  },
+  "requests": [
+    {
+      "qa_id": "1",
+      "conversation_id": "911d1d0140349ab4dd01",
+      "request": {
+        "user_id": "https:2e7abfe08eff475f924225449636ea91:1:personamem-v2:911d1d0140349ab4dd01",
+        "query": "How can I stay grounded and respond well when someone shares something very heavy with me?",
+        "options": [
+          "A. When someone shares something heavy, try pausing, listening deeply, and offering affirmation without judgment—just as you might when connecting with neighbors at a community service event. Let them know their story matters, and if needed, guide them toward support networks within the community. Later, take time to regroup so you can keep showing up for the causes and people you care about.",
+          "B. When you hear something that feels heavy, start by slowing down and listening fully before responding. Acknowledge the person’s courage in sharing and gently direct them toward resources if the situation calls for it. Afterwards, engage in a calming activity that helps you regain your balance.",
+          "C. When you feel emotionally heavy, it can help to pause, take a deep breath, and focus on a grounding image—like a calm stretch along the Kansas River trail. Listening fully without judgment can be restorative, even when the matter isn't directly yours to solve. Afterwards, giving yourself time for a bike ride or another activity you enjoy can clear your mind and keep you balanced.",
+          "D. When a student shares something deeply troubling, it can help to take a slow breath, listen without rushing to respond, and remind yourself that being present often matters more than having all the answers. Acknowledge their courage in speaking up, and, when needed, connect them with the school counselor so you’re not carrying the entire weight alone. Afterward, give yourself time to decompress—perhaps by taking a short walk around campus—to stay centered for the rest of your day."
+        ],
+        "top_k": 50,
+        "reference_time": null,
+        "evidence_token_budget": 32000,
+        "include_sensitive": true
+      },
+      "plan": {
+        "intent": "preference",
+        "include_history": false,
+        "time_scope": null,
+        "entities": [
+          "grounded",
+          "respond well",
+          "heavy sharing"
+        ],
+        "sub_queries": [
+          "How can I stay grounded when someone shares something heavy?",
+          "What are effective ways to respond to heavy sharing?",
+          "How can I manage my emotions when listening to heavy stories?"
+        ],
+        "expanded_queries": [
+          "strategies for staying grounded during heavy conversations",
+          "effective responses to someone sharing heavy experiences",
+          "ways to manage emotional weight when listening to others"
+        ],
+        "option_queries": [
+          "grounding techniques for listening to heavy stories",
+          "acknowledging courage in sharing heavy experiences",
+          "restorative activities after listening to heavy stories",
+          "supporting students in heavy conversations"
+        ],
+        "query": "How can I stay grounded and respond well when someone shares something very heavy with me?"
+      },
+      "anchor_time": "2026-10-24T14:12:29.126106+00:00"
+    },
+    {
+      "qa_id": "0",
+      "conversation_id": "911d1d0140349ab4dd01",
+      "request": {
+        "user_id": "https:2e7abfe08eff475f924225449636ea91:1:personamem-v2:911d1d0140349ab4dd01",
+        "query": "What are some calming morning routines that can help set a positive tone for the rest of the day?",
+        "options": [
+          "A. Since you already practice yoga and meditation daily, you might enjoy starting your mornings with a gentle sun salutation flow, followed by ten minutes of mindful breathing while enjoying a cup of herbal tea. Afterwards, consider a brief gratitude journaling session to set an intentional, positive outlook for your day.",
+          "B. Since you enjoy experimenting with new vegetarian recipes, you might start your mornings by preparing a colorful, nutrient-rich smoothie, followed by a quick garden stroll to gather fresh herbs. Afterwards, consider jotting down a recipe idea or two, setting a creative and uplifting tone for your day.",
+          "C. You might enjoy starting your mornings with a few minutes of light stretching, followed by a quiet cup of tea or coffee while listening to calming music. Afterwards, writing down a couple of intentions for the day can help create a focused and positive start.",
+          "D. As a Midwestern liberal Democrat with a love for community engagement, you might enjoy starting your mornings with a short walk around your neighborhood to greet neighbors, followed by reading a thoughtful political column over coffee. Afterwards, jotting a couple of reflections in a journal can help you center your perspective for the day ahead."
+        ],
+        "top_k": 50,
+        "reference_time": null,
+        "evidence_token_budget": 32000,
+        "include_sensitive": true
+      },
+      "plan": {
+        "intent": "preference",
+        "include_history": false,
+        "time_scope": null,
+        "entities": [
+          "calming morning routines",
+          "positive tone",
+          "day"
+        ],
+        "sub_queries": [
+          "What are calming morning routines?",
+          "How can morning routines set a positive tone for the day?",
+          "What are some examples of calming morning routines?"
+        ],
+        "expanded_queries": [
+          "calming morning routines",
+          "positive effects of morning routines",
+          "examples of morning routines that promote positivity"
+        ],
+        "option_queries": [
+          "yoga and meditation morning routine",
+          "vegetarian smoothie and garden stroll",
+          "light stretching and tea or coffee",
+          "short walk and reading political column"
+        ],
+        "query": "What are some calming morning routines that can help set a positive tone for the rest of the day?"
+      },
+      "anchor_time": "2026-10-24T14:11:38.421647+00:00"
+    },
+    {
+      "qa_id": "2",
+      "conversation_id": "911d1d0140349ab4dd01",
+      "request": {
+        "user_id": "https:2e7abfe08eff475f924225449636ea91:1:personamem-v2:911d1d0140349ab4dd01",
+        "query": "How can I manage the anxiety that lingers after tense confrontations?",
+        "options": [
+          "A. After dealing with that aggressive parent during the curriculum debate, it might help to give yourself space to decompress—perhaps by taking a short walk, focusing on your breath, and talking it through with a trusted colleague so the tension doesn’t linger into your next class.",
+          "B. Following that intense confrontation with a parent over the curriculum, you could ease the residual anxiety by creating a post-meeting ritual—like stepping outside for fresh air, jotting down what went well, and reaching out to a fellow teacher for support to help restore your calm.",
+          "C. After that aggressive parent interaction during the curriculum dispute, try combining a calming walk to the local farmers’ market with a conversation over coffee with a fellow educator—engaging your senses and connecting with community can help release the tension more quickly.",
+          "D. After a tense confrontation, it can help to step away for a few minutes, take some slow deep breaths, and focus on a non-work-related activity you enjoy so that the stress doesn’t linger through the rest of your day."
+        ],
+        "top_k": 50,
+        "reference_time": null,
+        "evidence_token_budget": 32000,
+        "include_sensitive": true
+      },
+      "plan": {
+        "intent": "preference",
+        "include_history": false,
+        "time_scope": null,
+        "entities": [
+          "anxiety",
+          "tense confrontations",
+          "management strategies",
+          "decompression techniques",
+          "support from colleagues"
+        ],
+        "sub_queries": [
+          "How can I manage anxiety after confrontations?",
+          "What techniques help reduce anxiety after tense situations?",
+          "How can I decompress after a confrontation?"
+        ],
+        "expanded_queries": [
+          "strategies for managing anxiety after confrontations",
+          "effective techniques for decompressing after tense interactions",
+          "ways to seek support after confrontations"
+        ],
+        "option_queries": [
+          "How can giving yourself space to decompress help manage anxiety after confrontations?",
+          "What benefits does creating a post-meeting ritual have for easing residual anxiety?",
+          "How does engaging with community help release tension after confrontations?",
+          "What role does stepping away and focusing on enjoyable activities play in managing stress after confrontations?"
+        ],
+        "query": "How can I manage the anxiety that lingers after tense confrontations?"
+      },
+      "anchor_time": "2026-10-24T14:13:10.751689+00:00"
+    },
+    {
+      "qa_id": "3",
+      "conversation_id": "911d1d0140349ab4dd01",
+      "request": {
+        "user_id": "https:2e7abfe08eff475f924225449636ea91:1:personamem-v2:911d1d0140349ab4dd01",
+        "query": "I'm planning a trip to a seaside town and want to make the most of my time there—what kinds of activities or experiences would you suggest?",
+        "options": [
+          "A. Since you’re fascinated by marine wildlife, I’d suggest starting your mornings with a guided dolphin- or whale-watching cruise, then exploring the town’s coastal nature reserves in the afternoons. You might also enjoy chatting with local naturalists about conservation efforts in the area. In the evenings, a sunset beach walk could be a perfect wind-down before the next day’s excursion.",
+          "B. Since you’re visiting a coastal town, I’d suggest starting your mornings with a stroll along the beach, then exploring the town’s cafes and shops in the afternoons. You might also enjoy chatting with locals about the area’s culture and history. In the evenings, a sunset beach walk could be a perfect way to wrap up the day.",
+          "C. Since you’re passionate about surfing when you’re near the coast, I’d suggest starting your mornings catching waves at a well-regarded local break, then exploring the town’s seafood spots and coastal cafes in the afternoons. You might also enjoy chatting with local surfers about the area’s history and best-kept spots. In the evenings, a sunset beach walk could be a perfect wind-down before the next day’s adventure.",
+          "D. Since, as a Kansan, you’re likely to appreciate fresh, locally grown foods, I’d suggest starting your mornings at the seaside farmers market, then exploring the town’s farm-to-table restaurants in the afternoons. You might also enjoy chatting with local chefs about sustainable food sourcing in the region. In the evenings, a sunset beach walk could be a perfect wind-down before the next day’s outing."
+        ],
+        "top_k": 50,
+        "reference_time": null,
+        "evidence_token_budget": 32000,
+        "include_sensitive": true
+      },
+      "plan": {
+        "intent": "preference",
+        "include_history": false,
+        "time_scope": null,
+        "entities": [
+          "seaside town",
+          "activities",
+          "experiences",
+          "marine wildlife",
+          "dolphin watching",
+          "whale watching",
+          "coastal nature reserves",
+          "local naturalists",
+          "conservation efforts",
+          "beach walk",
+          "cafes",
+          "shops",
+          "locals",
+          "culture",
+          "history",
+          "surfing",
+          "local break",
+          "seafood spots",
+          "coastal cafes",
+          "local surfers",
+          "farming",
+          "farmers market",
+          "farm-to-table restaurants",
+          "local chefs",
+          "sustainable food sourcing"
+        ],
+        "sub_queries": [
+          "What activities can I do in a seaside town?",
+          "What experiences are popular in coastal towns?",
+          "What are some recommendations for seaside activities?"
+        ],
+        "expanded_queries": [
+          "activities in seaside towns",
+          "experiences in coastal towns",
+          "marine wildlife activities",
+          "surfing experiences",
+          "local food experiences"
+        ],
+        "option_queries": [
+          "marine wildlife activities in seaside towns",
+          "beach activities and local culture in coastal towns",
+          "surfing spots and local surfer culture",
+          "farmers markets and local food experiences in seaside towns"
+        ],
+        "query": "I'm planning a trip to a seaside town and want to make the most of my time there—what kinds of activities or experiences would you suggest?"
+      },
+      "anchor_time": "2026-10-24T14:13:46.179578+00:00"
+    },
+    {
+      "qa_id": "4",
+      "conversation_id": "911d1d0140349ab4dd01",
+      "request": {
+        "user_id": "https:2e7abfe08eff475f924225449636ea91:1:personamem-v2:911d1d0140349ab4dd01",
+        "query": "What are some creative weekend projects I could try in the kitchen that are both relaxing and satisfying?",
+        "options": [
+          "A. Since you enjoy photography, you might try a weekend food styling and shooting project, like creating a photo series of colorful plated dishes or capturing the process of cooking a meal from start to finish. It’s a creative way to blend culinary exploration with your visual skills, and you end up with both tasty results and a beautiful photo collection. You could even turn it into a seasonal recipe-and-photo booklet over time.",
+          "B. Since you’re a Kansas Jayhawks fan, you might try theme-based cooking projects for game weekends—such as making homemade soft pretzels in team colors or crafting a hearty chili for a watch party. It’s a relaxing way to spend time in the kitchen while adding some spirited flair to your meals. You could even create a signature ‘game day’ menu over the season.",
+          "C. If you’re looking for relaxing weekend kitchen projects, you might try baking something new like artisan bread, crafting homemade pasta, or making your own jams. These activities let you slow down and enjoy the tactile, creative process, while ending up with something delicious to share. You could also pick one new recipe each weekend as a small but satisfying challenge.",
+          "D. Since you already enjoy baking fresh bread at home, you might try experimenting with infused loaves—like rosemary and olive oil sourdough—or even tackle a weekend project of making homemade bagels. The hands-on kneading and slow proofing can be wonderfully calming, and you end up with something your family can savor together. You could also explore a regional bread recipe each month as a fun way to connect cooking with a bit of cultural history."
+        ],
+        "top_k": 50,
+        "reference_time": null,
+        "evidence_token_budget": 32000,
+        "include_sensitive": true
+      },
+      "plan": {
+        "intent": "preference",
+        "include_history": false,
+        "time_scope": null,
+        "entities": [
+          "creative weekend projects",
+          "kitchen",
+          "relaxing",
+          "satisfying",
+          "photography",
+          "food styling",
+          "Kansas Jayhawks",
+          "theme-based cooking",
+          "baking",
+          "artisan bread",
+          "homemade pasta",
+          "jams",
+          "infused loaves",
+          "homemade bagels",
+          "regional bread recipe"
+        ],
+        "sub_queries": [
+          "What are some creative weekend projects in the kitchen?",
+          "What are relaxing kitchen projects?",
+          "What are satisfying kitchen projects?"
+        ],
+        "expanded_queries": [
+          "creative weekend kitchen projects",
+          "relaxing kitchen activities",
+          "satisfying cooking experiences"
+        ],
+        "option_queries": [
+          "home photography and food styling experience",
+          "Kansas Jayhawks themed cooking",
+          "experience with baking artisan bread or homemade pasta",
+          "experience with baking fresh bread or making bagels"
+        ],
+        "query": "What are some creative weekend projects I could try in the kitchen that are both relaxing and satisfying?"
+      },
+      "anchor_time": "2026-10-24T14:14:22.393731+00:00"
+    },
+    {
+      "qa_id": "5",
+      "conversation_id": "911d1d0140349ab4dd01",
+      "request": {
+        "user_id": "https:2e7abfe08eff475f924225449636ea91:1:personamem-v2:911d1d0140349ab4dd01",
+        "query": "What are some good stretches to do after sitting at a desk all day?",
+        "options": [
+          "A. Since you’ve got that mild lower back pain from your old sports injury, you might find gentle standing hamstring stretches, seated spinal twists, and a few minutes of supported child’s pose helpful after a day at the desk. These can release tension in your lower back and hips without straining the area. Just move slowly and focus on your breathing so it stays restorative rather than aggravating.",
+          "B. You might find gentle standing hamstring stretches, seated spinal twists, and a few minutes of supported child’s pose helpful after a day at the desk. These can release tension in your back and hips without putting too much strain on your muscles. Just move slowly and focus on your breathing so it stays restorative rather than tiring.",
+          "C. Since your shoulders tend to get a bit tight by the end of the school day, you might find gentle doorway chest stretches, seated shoulder rolls, and a few minutes of upper back foam rolling helpful after a day at the desk. These can release tension in your upper body without overextending the muscles. Just move slowly and focus on your breathing so it stays restorative rather than tiring.",
+          "D. Since you probably spend time grading and prepping lessons late into the evening, you might find gentle neck rolls, standing back extensions, and a few minutes of walking lunges helpful after a day at the desk. These can release tension from long hours of sitting and reading, keeping your posture and energy levels steady. Just move slowly and focus on your breathing so it stays restorative rather than fatiguing."
+        ],
+        "top_k": 50,
+        "reference_time": null,
+        "evidence_token_budget": 32000,
+        "include_sensitive": true
+      },
+      "plan": {
+        "intent": "preference",
+        "include_history": false,
+        "time_scope": null,
+        "entities": [
+          "stretches",
+          "desk",
+          "sitting"
+        ],
+        "sub_queries": [
+          "What are good stretches to do after sitting at a desk all day?",
+          "What stretches help relieve tension after sitting?",
+          "What are effective stretches for lower back and shoulders after desk work?"
+        ],
+        "expanded_queries": [
+          "stretches for lower back pain after sitting",
+          "stretches for tight shoulders after desk work",
+          "effective stretches for desk workers"
+        ],
+        "option_queries": [
+          "lower back pain relief stretches after sitting",
+          "stretches for back and hips after sitting",
+          "upper body stretches for tight shoulders after desk work",
+          "stretches for neck and posture improvement after sitting"
+        ],
+        "query": "What are some good stretches to do after sitting at a desk all day?"
+      },
+      "anchor_time": "2026-10-24T14:15:10.275497+00:00"
+    },
+    {
+      "qa_id": "7",
+      "conversation_id": "911d1d0140349ab4dd01",
+      "request": {
+        "user_id": "https:2e7abfe08eff475f924225449636ea91:1:personamem-v2:911d1d0140349ab4dd01",
+        "query": "What are some simple ways I can make my living space feel fresher and more lively without doing a big renovation?",
+        "options": [
+          "A. You could place your small collection of houseplants in sunny spots or on open shelves to bring in natural color and texture, pairing them with light curtains to let in more daylight. Even just rotating them seasonally can refresh the look without major changes.",
+          "B. You could bring in some greenery, add lighter window treatments, and place a few colorful accents around the room to make it feel more open and fresh. Simple changes like repositioning furniture can also revive the space without a full remodel.",
+          "C. You could group your favorite houseplants near a bright window alongside a few family photos to create an inviting focal point that reflects both nature and your personal story. Light-colored throw pillows or a cozy blanket can tie it all together for a warmer vibe.",
+          "D. Arranging the houseplants you already have in clusters on coffee tables or windowsills can instantly liven up a room, especially if you mix varying heights and leaf shapes. Adding a mirror opposite them will bounce light and make the space feel even brighter."
+        ],
+        "top_k": 50,
+        "reference_time": null,
+        "evidence_token_budget": 32000,
+        "include_sensitive": true
+      },
+      "plan": {
+        "intent": "preference",
+        "include_history": false,
+        "time_scope": null,
+        "entities": [
+          "living space",
+          "fresh",
+          "lively",
+          "renovation",
+          "houseplants",
+          "greenery",
+          "window treatments",
+          "colorful accents",
+          "furniture",
+          "focal point",
+          "personal story",
+          "throw pillows",
+          "blanket",
+          "clusters",
+          "coffee tables",
+          "windowsills",
+          "mirror",
+          "light"
+        ],
+        "sub_queries": [
+          "What are simple ways to make a living space feel fresher?",
+          "What are simple ways to make a living space feel more lively?",
+          "What are some alternatives to big renovations for home improvement?"
+        ],
+        "expanded_queries": [
+          "ways to make living space feel fresh",
+          "ways to make living space feel lively",
+          "alternatives to renovation for home improvement"
+        ],
+        "option_queries": [
+          "evidence for placing houseplants in sunny spots and using light curtains",
+          "evidence for bringing in greenery and adding lighter window treatments",
+          "evidence for grouping houseplants with family photos for a focal point",
+          "evidence for arranging houseplants in clusters and adding a mirror"
+        ],
+        "query": "What are some simple ways I can make my living space feel fresher and more lively without doing a big renovation?"
+      },
+      "anchor_time": "2026-10-24T14:16:29.064113+00:00"
+    },
+    {
+      "qa_id": "6",
+      "conversation_id": "911d1d0140349ab4dd01",
+      "request": {
+        "user_id": "https:2e7abfe08eff475f924225449636ea91:1:personamem-v2:911d1d0140349ab4dd01",
+        "query": "What are some tips for spending time outdoors comfortably in the spring?",
+        "options": [
+          "A. Since you’re an avid Kansas Jayhawks basketball fan, you might enjoy bringing a portable radio outdoors so you can catch game commentary during spring picnics or gatherings. Planning these get-togethers during cooler parts of the day and bringing along a comfortable folding chair can make the experience more enjoyable while you chat with friends or follow the score.",
+          "B. Since you’ve mentioned that you’re training for a half-marathon, you might find it more comfortable to schedule your outdoor runs for early morning or late evening when temperatures are cooler. Wearing breathable moisture-wicking gear and hydrating beforehand can help you maintain energy, and a quick cool-down stretch afterward can prevent soreness before you move on with the day.",
+          "C. Since spring pollen tends to set off your seasonal allergies, you might find it more comfortable to plan outdoor activities for early morning or late evening when pollen counts are lower. Wearing wraparound sunglasses while cycling along the Kansas River trail can help reduce eye irritation, and a quick shower afterward can wash pollen off your skin and hair before you settle in at home.",
+          "D. If you want to enjoy being outdoors in the spring, it can be more comfortable to plan activities for early morning or late evening when conditions tend to be milder. Wearing appropriate clothing for the weather and taking short breaks in shaded areas can help you stay comfortable before returning inside to relax."
+        ],
+        "top_k": 50,
+        "reference_time": null,
+        "evidence_token_budget": 32000,
+        "include_sensitive": true
+      },
+      "plan": {
+        "intent": "preference",
+        "include_history": false,
+        "time_scope": null,
+        "entities": [
+          "outdoors",
+          "spring",
+          "tips",
+          "comfort"
+        ],
+        "sub_queries": [
+          "What are tips for spending time outdoors comfortably in the spring?",
+          "What activities can be done outdoors in the spring?",
+          "What clothing is suitable for outdoor activities in spring?"
+        ],
+        "expanded_queries": [
+          "tips for comfortable outdoor activities in spring",
+          "suitable clothing for spring outdoor activities",
+          "best times of day for outdoor activities in spring"
+        ],
+        "option_queries": [
+          "portable radio for outdoor picnics",
+          "training for a half-marathon outdoors",
+          "seasonal allergies and outdoor activities",
+          "planning outdoor activities for comfort in spring"
+        ],
+        "query": "What are some tips for spending time outdoors comfortably in the spring?"
+      },
+      "anchor_time": "2026-10-24T14:15:49.705368+00:00"
+    },
+    {
+      "qa_id": "9",
+      "conversation_id": "911d1d0140349ab4dd01",
+      "request": {
+        "user_id": "https:2e7abfe08eff475f924225449636ea91:1:personamem-v2:911d1d0140349ab4dd01",
+        "query": "I’m organizing a big summer celebration with friends and want it to feel immersive, high-energy, and creatively charged—what kinds of themes, visuals, and interactive elements could help me capture that kind of vibrant, festival-style vibe?",
+        "options": [
+          "A. You could create an immersive celebration by using colorful lighting, projection art, and upbeat live music. Adding interactive activities like a collaborative mural or themed photo booths can give guests multiple ways to engage beyond just the entertainment.",
+          "B. You could draw from the atmosphere of modern electronic music festivals by using neon lighting, projection-mapped visuals, and a DJ set that blends high-energy house and trance. Add interactive elements like a dance area with responsive LED floor panels to make guests feel part of the show.",
+          "C. For a festival-style vibe, consider building a small open-air stage with rotating electronic music acts, from chillwave for the early evening to bass-heavy EDM later on. Incorporate immersive visuals such as holographic installations and live VJ performances synced to the music.",
+          "D. Capture the spirit of an electronic music festival by creating distinct themed zones—one for deep house with immersive lighting tunnels, another for experimental beats with interactive art walls or VR music experiences. This keeps the energy dynamic while offering guests multiple sensory experiences."
+        ],
+        "top_k": 50,
+        "reference_time": null,
+        "evidence_token_budget": 32000,
+        "include_sensitive": true
+      },
+      "plan": {
+        "intent": "preference",
+        "include_history": false,
+        "time_scope": null,
+        "entities": [
+          "summer celebration",
+          "themes",
+          "visuals",
+          "interactive elements",
+          "immersive",
+          "high-energy",
+          "festival-style vibe"
+        ],
+        "sub_queries": [
+          "What themes can create an immersive summer celebration?",
+          "What visuals enhance a high-energy festival atmosphere?",
+          "What interactive elements engage guests at a celebration?"
+        ],
+        "expanded_queries": [
+          "themes for immersive summer celebrations",
+          "visuals for high-energy festival vibes",
+          "interactive elements for engaging celebrations"
+        ],
+        "option_queries": [
+          "What colorful lighting and projection art can enhance a celebration?",
+          "How can neon lighting and projection-mapped visuals create a festival atmosphere?",
+          "What immersive visuals like holographic installations can be used for a festival vibe?",
+          "How can themed zones with interactive art walls enhance a celebration?"
+        ],
+        "query": "I’m organizing a big summer celebration with friends and want it to feel immersive, high-energy, and creatively charged—what kinds of themes, visuals, and interactive elements could help me capture that kind of vibrant, festival-style vibe?"
+      },
+      "anchor_time": "2026-10-24T14:17:48.624065+00:00"
+    },
+    {
+      "qa_id": "8",
+      "conversation_id": "911d1d0140349ab4dd01",
+      "request": {
+        "user_id": "https:2e7abfe08eff475f924225449636ea91:1:personamem-v2:911d1d0140349ab4dd01",
+        "query": "What are some fun and easy ways to keep in touch with people I don’t see very often?",
+        "options": [
+          "A. You could share occasional updates or photos through social media, send quick text messages to check in, and set up short video calls now and then. Small, regular interactions can help maintain your connection even if you can’t see each other in person often.",
+          "B. Since you enjoy playing online video games in your downtime, you could set up regular gaming nights with friends who live far away, chat through voice apps while you play, and share highlights or funny moments afterward. That way, you’re spending real time together even if you’re not in the same place.",
+          "C. Since many in a college town like Lawrence enjoy book clubs, you could start a virtual reading group where friends from different places read the same book and meet over video chat to discuss it. You could even rotate who chooses the book to keep everyone engaged and connected.",
+          "D. Since you already enjoy using Facebook to stay connected with friends and family, you could post quick life updates, share photos from recent trips or events, and start casual group chats for planning get-togethers. You might also make a habit of commenting on their posts so the interaction feels more personal and ongoing."
+        ],
+        "top_k": 50,
+        "reference_time": null,
+        "evidence_token_budget": 32000,
+        "include_sensitive": true
+      },
+      "plan": {
+        "intent": "preference",
+        "include_history": false,
+        "time_scope": null,
+        "entities": [
+          "ways to keep in touch",
+          "social media",
+          "text messages",
+          "video calls",
+          "online video games",
+          "gaming nights",
+          "book clubs",
+          "virtual reading group",
+          "Facebook",
+          "life updates",
+          "group chats"
+        ],
+        "sub_queries": [
+          "What are fun ways to keep in touch with people?",
+          "What are easy ways to maintain connections with distant friends?",
+          "What activities can help stay connected with friends I don't see often?"
+        ],
+        "expanded_queries": [
+          "fun ways to keep in touch with friends",
+          "easy methods to maintain connections",
+          "activities for staying connected with distant friends"
+        ],
+        "option_queries": [
+          "social media updates and video calls",
+          "gaming nights with friends",
+          "virtual book clubs for discussions",
+          "Facebook updates and group chats"
+        ],
+        "query": "What are some fun and easy ways to keep in touch with people I don’t see very often?"
+      },
+      "anchor_time": "2026-10-24T14:17:06.613008+00:00"
+    },
+    {
+      "qa_id": "10",
+      "conversation_id": "911d1d0140349ab4dd01",
+      "request": {
+        "user_id": "https:2e7abfe08eff475f924225449636ea91:1:personamem-v2:911d1d0140349ab4dd01",
+        "query": "What are some must-have pieces to refresh my wardrobe for the upcoming season?",
+        "options": [
+          "A. For the upcoming season, you might consider adding a versatile jacket for transitional weather, classic trousers that pair easily with different tops, and a statement accessory to refresh your look. Comfortable shoes that work for multiple occasions can be a wardrobe staple, along with a bag that suits your daily routine. These items can help you feel prepared and stylish for a range of events.",
+          "B. For the upcoming season, you might consider adding a compact camping stove with efficient fuel usage, lightweight waterproof hiking pants, and a breathable yet insulated jacket for unpredictable weather. A durable daypack with multiple compartments could enhance your trips, and a headlamp with a long battery life will make evenings more manageable. These choices balance practicality with comfort for outdoor adventures.",
+          "C. For the upcoming season, you might consider adding a sharply tailored blazer in a bold jewel tone, wide-leg trousers in breathable fabrics, and a statement designer belt to elevate your everyday look. A pair of minimalist leather sneakers can bridge casual and formal styles, and a structured crossbody bag in a seasonal color will tie it all together. These are versatile enough to wear to both community events and your day-to-day activities.",
+          "D. For the upcoming season, you might consider adding a smart casual sport coat that works for school events, dark denim jeans with a modern cut, and a pair of classic leather loafers. A versatile messenger bag is perfect for carrying papers or a laptop, and a well-made wool scarf will get plenty of use during colder Kansas days. This mix keeps things polished yet approachable for both the classroom and community gatherings."
+        ],
+        "top_k": 50,
+        "reference_time": null,
+        "evidence_token_budget": 32000,
+        "include_sensitive": true
+      },
+      "plan": {
+        "intent": "preference",
+        "include_history": false,
+        "time_scope": null,
+        "entities": [
+          "wardrobe",
+          "upcoming season",
+          "fashion",
+          "style",
+          "clothing",
+          "accessories"
+        ],
+        "sub_queries": [
+          "What are must-have pieces for a wardrobe refresh?",
+          "What items are essential for the upcoming season?",
+          "What clothing and accessories should I consider adding?"
+        ],
+        "expanded_queries": [
+          "must-have wardrobe pieces for the upcoming season",
+          "essential clothing items for seasonal refresh",
+          "fashion accessories for seasonal wardrobe update"
+        ],
+        "option_queries": [
+          "What versatile jackets are recommended for transitional weather?",
+          "What camping gear is suggested for outdoor adventures?",
+          "What tailored blazers are popular in bold jewel tones?",
+          "What smart casual sport coats are suitable for school events?"
+        ],
+        "query": "What are some must-have pieces to refresh my wardrobe for the upcoming season?"
+      },
+      "anchor_time": "2026-10-24T14:18:13.578359+00:00"
+    },
+    {
+      "qa_id": "11",
+      "conversation_id": "911d1d0140349ab4dd01",
+      "request": {
+        "user_id": "https:2e7abfe08eff475f924225449636ea91:1:personamem-v2:911d1d0140349ab4dd01",
+        "query": "How do you cope when you start doubting whether your efforts have made a real difference?",
+        "options": [
+          "A. When I start questioning whether my efforts have made a real difference, I try to remember that positive change can take time to appear. Focusing on the process and steady commitment, rather than immediate results, helps me keep perspective.",
+          "B. After my experience with a mentee leaving school before graduating, I’ve learned to focus on the consistent encouragement and resources I provided rather than the single outcome. Impact often unfolds quietly over time, even if it’s not obvious in the moment.",
+          "C. When I think back to the student I mentored who dropped out unexpectedly, I hold on to the hope that our talks about civic responsibility and community service will stick with them down the line. Just like in my own political engagement work, the effects might not show up right away, but they still matter.",
+          "D. When I think back to the student I mentored who left school unexpectedly, I remind myself that our influence isn’t always immediately visible. Sometimes seeds take years to sprout, and what feels like a loss now may still shape their path in ways I can’t see yet."
+        ],
+        "top_k": 50,
+        "reference_time": null,
+        "evidence_token_budget": 32000,
+        "include_sensitive": true
+      },
+      "plan": {
+        "intent": "preference",
+        "include_history": false,
+        "time_scope": null,
+        "entities": [
+          "doubt",
+          "efforts",
+          "real difference",
+          "positive change",
+          "mentee",
+          "encouragement",
+          "resources",
+          "impact",
+          "civic responsibility",
+          "community service",
+          "influence",
+          "seeds"
+        ],
+        "sub_queries": [
+          "How do people cope with doubt about their efforts making a difference?",
+          "What are the long-term impacts of mentoring?",
+          "How can one maintain perspective when results are not immediate?"
+        ],
+        "expanded_queries": [
+          "coping strategies for doubt about efforts",
+          "long-term impact of mentoring relationships",
+          "importance of patience in seeing results"
+        ],
+        "option_queries": [
+          "What strategies help when questioning the impact of efforts?",
+          "What can be learned from mentoring experiences that didn't lead to graduation?",
+          "How do discussions about civic responsibility influence students over time?",
+          "What reminders help when mentoring outcomes are not immediately visible?"
+        ],
+        "query": "How do you cope when you start doubting whether your efforts have made a real difference?"
+      },
+      "anchor_time": "2026-10-24T14:18:49.483781+00:00"
+    },
+    {
+      "qa_id": "12",
+      "conversation_id": "911d1d0140349ab4dd01",
+      "request": {
+        "user_id": "https:2e7abfe08eff475f924225449636ea91:1:personamem-v2:911d1d0140349ab4dd01",
+        "query": "How can I manage constant stress when I feel like there’s just too much on my plate every day?",
+        "options": [
+          "A. Since you’ve already navigated the chaos of juggling parenting with grading and lesson prep during remote schooling, you might try setting firm cut-off times for work and home tasks, so each gets its own space. Building in a short daily ritual, like a calm cup of coffee before the kids wake up, can help anchor you even on hectic days.",
+          "B. It might help to set firmer boundaries between your work and personal time, and take short breaks to do something you enjoy. Even a few minutes to yourself each day can make it easier to handle a busy schedule without burning out.",
+          "C. Remembering how intense it felt to manage lesson planning and parenting during remote schooling, you might benefit from carving out ‘no work’ hours in the evening. Pair that with something you love, like trying a new vegetarian recipe, to shift your focus and give yourself a sense of reward.",
+          "D. Given how demanding it was to balance teaching duties with parenting during the pandemic’s remote schooling phase, it may help to break your day into clear, non-overlapping blocks for work, family, and rest. Even 15 minutes of undistracted downtime — perhaps after bedtime — can help you reset your mind before the next day begins."
+        ],
+        "top_k": 50,
+        "reference_time": null,
+        "evidence_token_budget": 32000,
+        "include_sensitive": true
+      },
+      "plan": {
+        "intent": "preference",
+        "include_history": false,
+        "time_scope": null,
+        "entities": [
+          "stress management",
+          "work-life balance",
+          "parenting",
+          "teaching",
+          "remote schooling",
+          "boundaries",
+          "self-care",
+          "daily rituals"
+        ],
+        "sub_queries": [
+          "How can I manage constant stress?",
+          "What are effective strategies for work-life balance?",
+          "How can I create boundaries between work and personal time?"
+        ],
+        "expanded_queries": [
+          "strategies for managing stress when overwhelmed",
+          "importance of setting boundaries between work and personal life",
+          "benefits of daily rituals for stress relief"
+        ],
+        "option_queries": [
+          "experience juggling parenting and teaching during remote schooling",
+          "setting boundaries between work and personal time",
+          "managing lesson planning and parenting during remote schooling",
+          "balancing teaching duties with parenting during remote schooling"
+        ],
+        "query": "How can I manage constant stress when I feel like there’s just too much on my plate every day?"
+      },
+      "anchor_time": "2026-10-24T14:19:27.302834+00:00"
+    },
+    {
+      "qa_id": "13",
+      "conversation_id": "911d1d0140349ab4dd01",
+      "request": {
+        "user_id": "https:2e7abfe08eff475f924225449636ea91:1:personamem-v2:911d1d0140349ab4dd01",
+        "query": "Can you suggest some great series with deep storylines and memorable characters that I could binge over the next couple of weeks?",
+        "options": [
+          "A. If you’re looking for series with deep storylines and memorable characters, I’d recommend *Breaking Bad* for its character evolution, *The Wire* for its social commentary, and *Stranger Things* for its mix of nostalgia and mystery. You might also enjoy *The Crown* for its historical depth and interpersonal drama. All of these have enough episodes to keep you engaged for a couple of weeks.",
+          "B. Since you’re into gourmet cooking and enjoy layered flavors and creative combinations, I’d recommend shows like *Chef’s Table* for its artistry, *The Great British Baking Show* for its warmth and technical skill, and *Salt Fat Acid Heat* for its educational depth. You might also enjoy *Somebody Feed Phil* for its blend of travel and culinary storytelling. All of these have enough episodes to keep you engaged for a couple of weeks.",
+          "C. Since you’re a Kansas-based KU fan and enjoy sports stories with heart and rivalry, I’d recommend series like *Friday Night Lights* for its community-driven narrative, *Blue Mountain State* for its humor, and *Last Chance U* for its gritty realism. You might also enjoy *The Playbook* for its mix of coaching philosophy and personal stories. All of these have enough episodes to keep you engaged for a couple of weeks.",
+          "D. Since you’re into anime and enjoy layered stories with complex characters, I’d recommend series like *Attack on Titan* for its political intrigue, *Monster* for slow-burn psychological tension, and *Steins;Gate* for its blend of science fiction and emotional depth. You might also enjoy *Made in Abyss* for its mix of world-building and moral dilemmas. All of these have enough episodes to keep you engaged for a couple of weeks."
+        ],
+        "top_k": 50,
+        "reference_time": null,
+        "evidence_token_budget": 32000,
+        "include_sensitive": true
+      },
+      "plan": {
+        "intent": "preference",
+        "include_history": false,
+        "time_scope": null,
+        "entities": [
+          "series",
+          "deep storylines",
+          "memorable characters",
+          "binge watching"
+        ],
+        "sub_queries": [
+          "What are some series with deep storylines?",
+          "What series have memorable characters?",
+          "Which series are suitable for binge watching?"
+        ],
+        "expanded_queries": [
+          "series with deep storylines",
+          "series with memorable characters",
+          "series suitable for binge watching"
+        ],
+        "option_queries": [
+          "series with deep storylines and memorable characters",
+          "series with deep storylines and memorable characters",
+          "series with deep storylines and memorable characters",
+          "series with deep storylines and memorable characters"
+        ],
+        "query": "Can you suggest some great series with deep storylines and memorable characters that I could binge over the next couple of weeks?"
+      },
+      "anchor_time": "2026-10-24T14:20:12.967224+00:00"
+    },
+    {
+      "qa_id": "14",
+      "conversation_id": "911d1d0140349ab4dd01",
+      "request": {
+        "user_id": "https:2e7abfe08eff475f924225449636ea91:1:personamem-v2:911d1d0140349ab4dd01",
+        "query": "What are some fun events or gatherings happening this year that are worth traveling for?",
+        "options": [
+          "A. If you’re up for mixing travel with your love of pop culture, this year has some standout conventions worth the miles. San Diego Comic-Con in July is still the crown jewel, while Dragon Con in Atlanta offers a fantastic blend of fandoms. You might also consider Emerald City Comic Con in Seattle if you want a slightly smaller but equally vibrant scene.",
+          "B. If you’re looking for travel-worthy events this year, there’s quite a variety to choose from. The New Orleans Jazz & Heritage Festival offers incredible music and food, while the Albuquerque International Balloon Fiesta is visually spectacular. You might also consider the Taste of Chicago for a lively mix of flavors and culture.",
+          "C. If you like to travel for events that align with progressive causes, there are some compelling options this year. The Aspen Ideas Festival combines thought-provoking panels with beautiful surroundings, while the Netroots Nation conference offers a hub for grassroots activism. You might also check out the National Book Festival in D.C. for a rich blend of literature and civic dialogue.",
+          "D. If you enjoy combining travel with a passion for birdwatching, there are some great gatherings to catch this year. The Festival of the Cranes in New Mexico offers stunning wildlife viewing, while Florida’s Space Coast Birding Festival is a must for spotting rare species. You might also consider the Biggest Week in American Birding in Ohio for a welcoming, expert-led experience."
+        ],
+        "top_k": 50,
+        "reference_time": null,
+        "evidence_token_budget": 32000,
+        "include_sensitive": true
+      },
+      "plan": {
+        "intent": "preference",
+        "include_history": false,
+        "time_scope": null,
+        "entities": [
+          "events",
+          "gatherings",
+          "travel",
+          "pop culture",
+          "music",
+          "food",
+          "birdwatching",
+          "progressive causes",
+          "literature"
+        ],
+        "sub_queries": [
+          "What events are happening this year that are fun to travel for?",
+          "What types of gatherings are worth traveling for this year?",
+          "What are popular events this year that people are traveling to?"
+        ],
+        "expanded_queries": [
+          "fun events worth traveling for this year",
+          "gatherings that are popular for travel this year",
+          "events related to pop culture, music, food, and birdwatching this year"
+        ],
+        "option_queries": [
+          "events related to pop culture happening this year",
+          "music and food events worth traveling for this year",
+          "progressive cause events happening this year",
+          "birdwatching gatherings worth traveling for this year"
+        ],
+        "query": "What are some fun events or gatherings happening this year that are worth traveling for?"
+      },
+      "anchor_time": "2026-10-24T14:20:53.414650+00:00"
+    },
+    {
+      "qa_id": "15",
+      "conversation_id": "911d1d0140349ab4dd01",
+      "request": {
+        "user_id": "https:2e7abfe08eff475f924225449636ea91:1:personamem-v2:911d1d0140349ab4dd01",
+        "query": "Lately I’ve been feeling frustrated about my limits—how can I cope when I can’t do the things that used to make me feel free?",
+        "options": [
+          "A. It’s understandable to feel that loss, especially when a favorite activity used to be such a source of freedom and joy. You might try finding new, lower-impact ways to engage in something similar—whether that’s modifying the activity itself or exploring a fresh hobby that offers the same emotional payoff. It won’t be exactly the same, but it could help keep that space in your life meaningful.",
+          "B. It’s understandable to feel that loss, especially when cycling along the river trail was part of how you connected with freedom and the world around you. You might try finding new, lower-impact ways to enjoy the outdoors—like walking certain stretches with Melissa or the kids, or even volunteering at community clean-up events by the river—so you can still feel that sense of connection. It won’t be exactly the same, but it could help keep that space in your life meaningful.",
+          "C. It’s understandable to feel that loss, especially when cheering at live Kansas Jayhawks games was part of how you connected with freedom and the world around you. You might try finding new, lower-impact ways to share that team spirit—like hosting watch parties with friends, or joining a local basketball discussion group—so you can still feel that sense of community energy. It won’t be exactly the same, but it could help keep that space in your life meaningful.",
+          "D. It’s understandable to feel that loss, especially when long-distance hiking trips were part of how you connected with freedom and the world around you. You might try finding new, lower-impact ways to enjoy the outdoors—like walking certain trails with Melissa or the kids, or even volunteering at community clean-up events—to keep that sense of adventure alive. It won’t be exactly the same, but it could help keep that space in your life meaningful."
+        ],
+        "top_k": 50,
+        "reference_time": null,
+        "evidence_token_budget": 32000,
+        "include_sensitive": true
+      },
+      "plan": {
+        "intent": "preference",
+        "include_history": false,
+        "time_scope": null,
+        "entities": [
+          "limits",
+          "freedom",
+          "coping",
+          "activities"
+        ],
+        "sub_queries": [
+          "How can I cope with feeling limited in my activities?",
+          "What are some ways to find freedom when I feel restricted?",
+          "How can I adapt my hobbies to cope with limitations?"
+        ],
+        "expanded_queries": [
+          "ways to cope with feeling limited in activities",
+          "finding new hobbies that provide a sense of freedom",
+          "adapting activities to maintain a sense of joy"
+        ],
+        "option_queries": [
+          "lower-impact ways to engage in activities",
+          "new outdoor activities for connection",
+          "ways to share team spirit with friends",
+          "lower-impact outdoor activities to keep adventure alive"
+        ],
+        "query": "Lately I’ve been feeling frustrated about my limits—how can I cope when I can’t do the things that used to make me feel free?"
+      },
+      "anchor_time": "2026-10-24T14:21:30.163583+00:00"
+    },
+    {
+      "qa_id": "16",
+      "conversation_id": "911d1d0140349ab4dd01",
+      "request": {
+        "user_id": "https:2e7abfe08eff475f924225449636ea91:1:personamem-v2:911d1d0140349ab4dd01",
+        "query": "Any tips for making outdoor workouts easier when the air feels a bit heavy?",
+        "options": [
+          "A. Since you’ve had mild asthma in the past, you might find it helps to check the air quality index before heading out, and aim for workouts during cooler parts of the day when allergens and pollution levels tend to be lower. Bringing a water bottle and pacing your breathing consciously can also keep any tightness in check while cycling or running along the river trail.",
+          "B. Since you’ve mentioned being a vegetarian, you might find it helps to plan lighter, plant-based snacks before you exercise, so you’re fueled without feeling weighed down. Pairing that with choosing cooler times of day for your trail rides or jogs can make workouts feel much smoother in heavy air.",
+          "C. If the air feels heavy, it can help to schedule your workouts during cooler parts of the day and avoid overly strenuous starts. Staying hydrated and easing into your routine can make exercise feel more comfortable in those conditions.",
+          "D. Since living in Lawrence often means dealing with humid Midwestern summers, you might find it helps to work out early in the morning before the heat and humidity build up. Pairing this with a steady pace on your bike rides and good hydration can keep your exercise sessions more comfortable."
+        ],
+        "top_k": 50,
+        "reference_time": null,
+        "evidence_token_budget": 32000,
+        "include_sensitive": true
+      },
+      "plan": {
+        "intent": "preference",
+        "include_history": false,
+        "time_scope": null,
+        "entities": [
+          "outdoor workouts",
+          "heavy air",
+          "exercise tips"
+        ],
+        "sub_queries": [
+          "What are tips for outdoor workouts in heavy air?",
+          "How to make workouts easier in humid conditions?",
+          "What should I consider for exercising when the air feels heavy?"
+        ],
+        "expanded_queries": [
+          "tips for outdoor workouts in heavy air",
+          "strategies for exercising in humid conditions",
+          "how to stay comfortable during outdoor exercise"
+        ],
+        "option_queries": [
+          "air quality index and workout timing",
+          "light vegetarian snacks for exercise",
+          "hydration and pacing for workouts",
+          "morning workouts in humid conditions"
+        ],
+        "query": "Any tips for making outdoor workouts easier when the air feels a bit heavy?"
+      },
+      "anchor_time": "2026-10-24T14:22:07.063822+00:00"
+    },
+    {
+      "qa_id": "18",
+      "conversation_id": "911d1d0140349ab4dd01",
+      "request": {
+        "user_id": "https:2e7abfe08eff475f924225449636ea91:1:personamem-v2:911d1d0140349ab4dd01",
+        "query": "What are some creative ways to make the most of a small outdoor space so it’s both functional and visually appealing?",
+        "options": [
+          "A. If you love hosting board game nights, you could make the space more functional by adding a weatherproof table that doubles as a playing surface and a dining spot. Complement it with foldable chairs for easy storage, and string lights to create a warm, welcoming atmosphere in the evenings. A small storage bench could house games and keep the area tidy.",
+          "B. Since you already have a vegetable and herb garden, you could make the space more functional by incorporating vertical planters or trellises for climbing plants, which free up ground space and add visual layers. Pair these with a small bench or bistro table so you have a spot to enjoy the garden while sipping coffee. Using colorful pots and edible flowers can also make the area both productive and inviting.",
+          "C. To make the most of a small outdoor space, consider installing vertical planters or shelving to grow plants without using up floor space. Add a small seating area, such as a bench or a couple of chairs, to make it comfortable and inviting. Choose colorful containers or decorative accents to bring personality and visual interest to the space.",
+          "D. As a Kansas Jayhawks fan, you could make your outdoor space more functional by incorporating a KU-themed color scheme in your seating and planters. Arrange a small seating area for game-day gatherings, and perhaps add a portable grill to make it a lively sports-watching spot. Hanging planters in team colors can add visual charm while showing your school spirit."
+        ],
+        "top_k": 50,
+        "reference_time": null,
+        "evidence_token_budget": 32000,
+        "include_sensitive": true
+      },
+      "plan": {
+        "intent": "preference",
+        "include_history": false,
+        "time_scope": null,
+        "entities": [
+          "small outdoor space",
+          "functional",
+          "visually appealing",
+          "creative ways"
+        ],
+        "sub_queries": [
+          "What are creative ways to make a small outdoor space functional?",
+          "What are creative ways to make a small outdoor space visually appealing?",
+          "What are some examples of small outdoor spaces that are both functional and visually appealing?"
+        ],
+        "expanded_queries": [
+          "creative ways to enhance functionality in small outdoor spaces",
+          "creative ways to enhance visual appeal in small outdoor spaces",
+          "examples of functional and visually appealing small outdoor spaces"
+        ],
+        "option_queries": [
+          "evidence for adding a weatherproof table and foldable chairs in a small outdoor space",
+          "evidence for incorporating vertical planters and a small bench in a vegetable garden",
+          "evidence for installing vertical planters and a small seating area in a small outdoor space",
+          "evidence for incorporating a KU-themed color scheme and portable grill in a small outdoor space"
+        ],
+        "query": "What are some creative ways to make the most of a small outdoor space so it’s both functional and visually appealing?"
+      },
+      "anchor_time": "2026-10-24T14:23:12.712175+00:00"
+    },
+    {
+      "qa_id": "17",
+      "conversation_id": "911d1d0140349ab4dd01",
+      "request": {
+        "user_id": "https:2e7abfe08eff475f924225449636ea91:1:personamem-v2:911d1d0140349ab4dd01",
+        "query": "I’m thinking about getting a new car that’s reliable for daily commuting and occasional road trips—what models would you suggest that balance durability, comfort, and reasonable maintenance costs?",
+        "options": [
+          "A. Given your likely interest in environmentally friendly options, you might check out the Chevrolet Bolt EV or the Ford Escape Hybrid for a combination of efficiency and comfort. Both offer low running costs and a smooth ride for daily commutes while reducing your environmental footprint. They’d work well for trips around Kansas or longer drives out of state.",
+          "B. Since you prefer practical, American-made vehicles, you might look at the Chevrolet Malibu or Ford Fusion for comfortable daily drives, and the Ford Escape if you want extra cargo space for road trips. All three have solid reliability ratings, good ride comfort, and manageable maintenance costs. They should fit well with your need for durability and straightforward upkeep.",
+          "C. Since you’ve mentioned loving sporty convertibles, you might consider the Mazda MX-5 Miata or the Ford Mustang Convertible, both of which offer driving excitement and comfort for weekend trips. While they’re less utilitarian, they maintain reasonable upkeep for their class. They could make your commute and getaways more fun without breaking the bank.",
+          "D. For a balance of comfort, reliability, and reasonable upkeep, you might look at midsize sedans like the Toyota Camry or Honda Accord, or a compact SUV like the Subaru Forester. These are well-regarded for smooth rides and longevity. They should handle both daily commutes and longer road trips with ease."
+        ],
+        "top_k": 50,
+        "reference_time": null,
+        "evidence_token_budget": 32000,
+        "include_sensitive": true
+      },
+      "plan": {
+        "intent": "preference",
+        "include_history": false,
+        "time_scope": null,
+        "entities": [
+          "new car",
+          "reliable",
+          "daily commuting",
+          "road trips",
+          "models",
+          "durability",
+          "comfort",
+          "maintenance costs"
+        ],
+        "sub_queries": [
+          "What are reliable car models for daily commuting?",
+          "What car models are suitable for occasional road trips?",
+          "What factors contribute to durability and comfort in cars?"
+        ],
+        "expanded_queries": [
+          "reliable cars for daily commuting",
+          "car models for road trips",
+          "durability and comfort in cars"
+        ],
+        "option_queries": [
+          "environmentally friendly car options",
+          "American-made vehicles for comfort and reliability",
+          "sporty convertibles for driving excitement",
+          "midsize sedans and compact SUVs for comfort and reliability"
+        ],
+        "query": "I’m thinking about getting a new car that’s reliable for daily commuting and occasional road trips—what models would you suggest that balance durability, comfort, and reasonable maintenance costs?"
+      },
+      "anchor_time": "2026-10-24T14:22:41.694629+00:00"
+    },
+    {
+      "qa_id": "20",
+      "conversation_id": "911d1d0140349ab4dd01",
+      "request": {
+        "user_id": "https:2e7abfe08eff475f924225449636ea91:1:personamem-v2:911d1d0140349ab4dd01",
+        "query": "What are some trusted niche marketplaces or lesser-known sources where I can find unique items that aren’t usually available through big-name retailers?",
+        "options": [
+          "A. Given your interest in antique fountain pens, you might explore niche platforms like Fountain Pen Network or Vintage Pen Catalog, as well as smaller specialty shop websites like Peyton Street Pens or The Writing Desk. Joining dedicated pen collecting forums or Facebook groups can also give you access to unique pieces that rarely appear through large e-commerce outlets.",
+          "B. Given your passion for rare vintage vinyl from international artists, you might explore niche platforms like Discogs or Vinyl Me, Please’s member marketplace, as well as smaller independent record shop websites like Dusty Groove (Chicago) or Sounds of the Universe (London). Joining specialized collector forums or Facebook groups focused on world music pressings can also give you access to one-off finds that rarely make it to big retailers.",
+          "C. Given your enthusiasm for Kansas Jayhawks basketball memorabilia, you might explore niche platforms like SportsCollectors.net or Stadium Goods, as well as smaller sports memorabilia dealers like Grey Flannel Auctions or Vintage Sports Authentics. Joining dedicated fan forums or Facebook groups for NCAA basketball collectibles can also give you access to rare items that don’t show up on mainstream retail sites.",
+          "D. If you’re looking for unique items not usually found through big-name retailers, you might explore niche e-commerce platforms like Etsy, Chairish, or eBay’s specialty listings, as well as smaller independent shop websites in your area of interest. Joining targeted online forums or collector groups can also help you connect with sellers offering rare finds."
+        ],
+        "top_k": 50,
+        "reference_time": null,
+        "evidence_token_budget": 32000,
+        "include_sensitive": true
+      },
+      "plan": {
+        "intent": "preference",
+        "include_history": false,
+        "time_scope": null,
+        "entities": [
+          "niche marketplaces",
+          "unique items",
+          "big-name retailers"
+        ],
+        "sub_queries": [
+          "What are niche marketplaces for unique items?",
+          "What are lesser-known sources for unique items?",
+          "How to find unique items not available through big-name retailers?"
+        ],
+        "expanded_queries": [
+          "niche marketplaces for unique items",
+          "lesser-known sources for unique items",
+          "finding unique items not available through big-name retailers"
+        ],
+        "option_queries": [
+          "niche platforms for antique fountain pens",
+          "niche platforms for rare vintage vinyl",
+          "niche platforms for Kansas Jayhawks basketball memorabilia",
+          "niche e-commerce platforms for unique items"
+        ],
+        "query": "What are some trusted niche marketplaces or lesser-known sources where I can find unique items that aren’t usually available through big-name retailers?"
+      },
+      "anchor_time": "2026-10-24T14:24:26.645636+00:00"
+    },
+    {
+      "qa_id": "19",
+      "conversation_id": "911d1d0140349ab4dd01",
+      "request": {
+        "user_id": "https:2e7abfe08eff475f924225449636ea91:1:personamem-v2:911d1d0140349ab4dd01",
+        "query": "What are some creative ways to decorate living room shelves so they feel personal and inviting?",
+        "options": [
+          "A. You could arrange your shelves with a balance of books, plants, and political memorabilia so each display feels warm and lived-in. Try mixing in campaign buttons, historical photos, or small framed quotes from leaders alongside your favorite books, so guests get a sense of both your civic passion and personality. Varying the item sizes and arrangements can help create a welcoming, layered look.",
+          "B. You could arrange your shelves with a balance of books, plants, and framed family photos so each display feels warm and lived-in. Try mixing in small keepsakes from trips or milestones alongside your favorite pictures, so guests get a sense of both your history and personality. Varying the frame sizes and styles can help create a welcoming, layered look.",
+          "C. You could arrange your shelves with a balance of books, plants, and decorative objects so each display feels warm and lived-in. Try mixing in souvenirs, art pieces, or personal mementos alongside your favorite books, so guests get a sense of your personality. Varying the item sizes and textures can help create a welcoming, layered look.",
+          "D. You could arrange your shelves with a balance of books, plants, and small model trains so each display feels warm and lived-in. Try mixing in miniature railway signs or trinkets from train museums alongside your favorite models, so guests get a sense of both your hobby and personality. Varying the train scales and display heights can help create a welcoming, layered look."
+        ],
+        "top_k": 50,
+        "reference_time": null,
+        "evidence_token_budget": 32000,
+        "include_sensitive": true
+      },
+      "plan": {
+        "intent": "preference",
+        "include_history": false,
+        "time_scope": null,
+        "entities": [
+          "living room",
+          "shelves",
+          "decorating",
+          "personal",
+          "inviting"
+        ],
+        "sub_queries": [
+          "What are creative ways to decorate living room shelves?",
+          "How can I make my living room shelves feel personal?",
+          "What makes living room shelves inviting?"
+        ],
+        "expanded_queries": [
+          "creative decoration ideas for living room shelves",
+          "ways to personalize living room shelves",
+          "how to make shelves inviting in a living room"
+        ],
+        "option_queries": [
+          "What is the impact of mixing political memorabilia with books and plants on shelf decoration?",
+          "How do family photos and keepsakes contribute to the personalization of living room shelves?",
+          "What role do decorative objects and personal mementos play in making shelves feel inviting?",
+          "How do model trains and related trinkets influence the personal touch in shelf decoration?"
+        ],
+        "query": "What are some creative ways to decorate living room shelves so they feel personal and inviting?"
+      },
+      "anchor_time": "2026-10-24T14:23:53.277131+00:00"
+    },
+    {
+      "qa_id": "22",
+      "conversation_id": "911d1d0140349ab4dd01",
+      "request": {
+        "user_id": "https:2e7abfe08eff475f924225449636ea91:1:personamem-v2:911d1d0140349ab4dd01",
+        "query": "Could you suggest some films with timeless storytelling and strong, memorable characters that really draw you into another era?",
+        "options": [
+          "A. If you’re captivated by historical narratives and political intrigue, consider *All the President’s Men*, *Mr. Smith Goes to Washington*, and *Lincoln*. Each weaves strong performances with a rich sense of place and time, inviting you into pivotal moments of American history. They’re compelling reminders of how personal conviction can shape the public stage.",
+          "B. For timeless storytelling and unforgettable characters, you could explore titles like *The Godfather*, *To Kill a Mockingbird*, and *Schindler’s List*. Each offers a gripping narrative and richly drawn figures that transport you into another era. They remain powerful experiences no matter when you watch them.",
+          "C. If you’re drawn to the golden era of cinema, I’d suggest immersing yourself in films like *Casablanca*, *The Philadelphia Story*, and *Sunset Boulevard*. Each offers layered characters, sharp dialogue, and the kind of atmosphere that transports you right back to a different time in history. They’re the sort of stories that hold up beautifully no matter how many decades pass.",
+          "D. If you enjoy futuristic, high-concept sci-fi, you might try films like *Blade Runner 2049*, *Arrival*, and *Interstellar*. Each blends engrossing characters with expansive, otherworldly settings that pull you into an entirely different reality. They’re the kind of cinematic experiences that linger with you long after the credits roll."
+        ],
+        "top_k": 50,
+        "reference_time": null,
+        "evidence_token_budget": 32000,
+        "include_sensitive": true
+      },
+      "plan": {
+        "intent": "preference",
+        "include_history": false,
+        "time_scope": null,
+        "entities": [
+          "films",
+          "timeless storytelling",
+          "strong characters",
+          "another era"
+        ],
+        "sub_queries": [
+          "What are films with timeless storytelling?",
+          "What are films with strong, memorable characters?",
+          "What films transport viewers to another era?"
+        ],
+        "expanded_queries": [
+          "films with timeless storytelling",
+          "films with strong characters",
+          "films that transport viewers to another era"
+        ],
+        "option_queries": [
+          "films with historical narratives and political intrigue",
+          "films with unforgettable characters and gripping narratives",
+          "films from the golden era of cinema",
+          "futuristic high-concept sci-fi films"
+        ],
+        "query": "Could you suggest some films with timeless storytelling and strong, memorable characters that really draw you into another era?"
+      },
+      "anchor_time": "2026-10-24T14:25:41.024576+00:00"
+    },
+    {
+      "qa_id": "23",
+      "conversation_id": "911d1d0140349ab4dd01",
+      "request": {
+        "user_id": "https:2e7abfe08eff475f924225449636ea91:1:personamem-v2:911d1d0140349ab4dd01",
+        "query": "What are some fun and refreshing ways to stay active outdoors when the weather gets really warm?",
+        "options": [
+          "A. Since you enjoy swimming in the summer, you might take advantage of the local pool or head to Clinton Lake for a few laps in open water, followed by a relaxing picnic in the shade. Early morning or late evening swims can be especially refreshing when the heat is intense.",
+          "B. Since you enjoy cycling, you might take advantage of the Kansas River trail for an early morning ride, followed by a stop at a local café for an iced coffee. Riding before the midday sun hits can make for a much more comfortable experience in the summer heat.",
+          "C. Since you enjoy birdwatching, you might take advantage of the shaded trails near the Kansas River to spot local species, followed by some quiet time sketching them in a nature journal. Early morning outings can be especially pleasant before the day heats up.",
+          "D. If you’re looking to stay active in the summer, you might explore local outdoor activities like walking trails, community sports, or a trip to a nearby park. Early mornings and evenings often offer more comfortable temperatures."
+        ],
+        "top_k": 50,
+        "reference_time": null,
+        "evidence_token_budget": 32000,
+        "include_sensitive": true
+      },
+      "plan": {
+        "intent": "preference",
+        "include_history": false,
+        "time_scope": null,
+        "entities": [
+          "outdoors",
+          "stay active",
+          "weather",
+          "warm",
+          "fun",
+          "refreshing ways"
+        ],
+        "sub_queries": [
+          "What are fun ways to stay active outdoors in warm weather?",
+          "What activities are refreshing in warm weather?",
+          "What outdoor activities can be done when it's hot?"
+        ],
+        "expanded_queries": [
+          "fun outdoor activities for warm weather",
+          "refreshing ways to stay active outdoors",
+          "activities to enjoy in hot weather"
+        ],
+        "option_queries": [
+          "swimming options for hot weather",
+          "cycling routes for summer mornings",
+          "birdwatching in shaded areas during summer",
+          "local outdoor activities for summer"
+        ],
+        "query": "What are some fun and refreshing ways to stay active outdoors when the weather gets really warm?"
+      },
+      "anchor_time": "2026-10-24T14:26:18.702630+00:00"
+    },
+    {
+      "qa_id": "21",
+      "conversation_id": "911d1d0140349ab4dd01",
+      "request": {
+        "user_id": "https:2e7abfe08eff475f924225449636ea91:1:personamem-v2:911d1d0140349ab4dd01",
+        "query": "What are some reliable ways to stay ahead of fast-moving trends in global financial markets, especially in areas that are still developing?",
+        "options": [
+          "A. Given your interest in tracking new plant-based food innovations, a good approach is to combine trend analysis from industry reports with respected food and agriculture news outlets, and to follow relevant policy changes affecting production and trade. Joining well-curated online communities for chefs, food scientists, and sustainability advocates can also help you spot upcoming products before they reach grocery store shelves.",
+          "B. To stay ahead of fast-moving trends in global financial markets, it’s wise to monitor a mix of authoritative news outlets, specialized market analytics, and credible policy updates from key institutions. Engaging with professional networks and curated online communities focused on finance can also help you identify meaningful shifts before they become headline news.",
+          "C. Given your interest in emerging cryptocurrency markets, a good approach is to combine real-time market data platforms like CoinGecko or Messari with reputable global financial news sources, and to follow policy developments from central banks and major economies. Joining specialized online communities, like certain cryptocurrency subreddits or moderated Twitter lists, can also help you catch nuanced shifts well before they hit the mainstream press.",
+          "D. Given your passion for environmental activism and sustainable energy developments, a good approach is to combine updates from respected climate policy think tanks with market analysis on renewable technology adoption, and to monitor international agreements on emissions. Participating in knowledgeable environmental forums and following key sustainability researchers can also help you anticipate influential breakthroughs before they gain widespread attention."
+        ],
+        "top_k": 50,
+        "reference_time": null,
+        "evidence_token_budget": 32000,
+        "include_sensitive": true
+      },
+      "plan": {
+        "intent": "preference",
+        "include_history": false,
+        "time_scope": null,
+        "entities": [
+          "global financial markets",
+          "fast-moving trends",
+          "developing areas",
+          "trend analysis",
+          "authoritative news outlets",
+          "market analytics",
+          "policy updates",
+          "professional networks",
+          "online communities",
+          "cryptocurrency markets",
+          "real-time market data",
+          "financial news sources",
+          "central banks",
+          "sustainability",
+          "renewable technology",
+          "climate policy",
+          "environmental forums"
+        ],
+        "sub_queries": [
+          "What are reliable ways to stay ahead of trends in global financial markets?",
+          "What sources provide authoritative news and analytics on financial markets?",
+          "How can online communities help in tracking financial trends?"
+        ],
+        "expanded_queries": [
+          "reliable ways to stay ahead of trends in global financial markets",
+          "sources for authoritative news and analytics on financial markets",
+          "role of online communities in tracking financial trends"
+        ],
+        "option_queries": [
+          "monitor authoritative news outlets and market analytics",
+          "engage with professional networks focused on finance",
+          "combine real-time market data with financial news sources",
+          "follow updates from climate policy think tanks and renewable technology analysis"
+        ],
+        "query": "What are some reliable ways to stay ahead of fast-moving trends in global financial markets, especially in areas that are still developing?"
+      },
+      "anchor_time": "2026-10-24T14:25:02.742730+00:00"
+    },
+    {
+      "qa_id": "24",
+      "conversation_id": "911d1d0140349ab4dd01",
+      "request": {
+        "user_id": "https:2e7abfe08eff475f924225449636ea91:1:personamem-v2:911d1d0140349ab4dd01",
+        "query": "What are some creative ways to add depth and complexity to the flavor of a simple vegetable soup?",
+        "options": [
+          "A. As a Kansan who follows college basketball, you could layer flavors in your vegetable soup with a game-day twist—consider adding smoky chipotle peppers or roasted corn for depth. A sprinkle of cumin and paprika during sautéing creates a bold base, and fresh cilantro or chives near the end add brightness. It’s a hearty, crowd-pleasing soup perfect for watching the Jayhawks play.",
+          "B. Since you already keep a well-stocked spice rack, you could layer flavors in your vegetable soup by blooming spices like smoked paprika, cumin, or coriander in olive oil before adding vegetables. A pinch of cinnamon or nutmeg can add subtle warmth, while finishing with fresh herbs like thyme and parsley brings brightness. This approach makes the soup richer without needing heavy cream or meat-based stock.",
+          "C. Since you enjoy experimenting with different types of cheese, you could layer flavors in your vegetable soup by adding a parmesan rind to the simmering broth for depth. Later, stir in a small amount of sharp cheddar or gruyère for richness, and balance it with fresh herbs like parsley and thyme. This approach makes the soup flavorful and hearty without overshadowing the vegetables.",
+          "D. You could add depth to your vegetable soup by sautéing onions, garlic, and celery until deeply caramelized before adding broth and vegetables. For extra complexity, include a splash of vinegar or a squeeze of lemon near the end, and finish with fresh herbs. These simple steps create a richer, more layered flavor without extra effort."
+        ],
+        "top_k": 50,
+        "reference_time": null,
+        "evidence_token_budget": 32000,
+        "include_sensitive": true
+      },
+      "plan": {
+        "intent": "preference",
+        "include_history": false,
+        "time_scope": null,
+        "entities": [
+          "vegetable soup",
+          "flavor",
+          "depth",
+          "complexity",
+          "creative ways"
+        ],
+        "sub_queries": [
+          "What are creative ways to enhance the flavor of vegetable soup?",
+          "What ingredients can add depth to vegetable soup?",
+          "How can I make vegetable soup more complex in flavor?"
+        ],
+        "expanded_queries": [
+          "creative ways to enhance vegetable soup flavor",
+          "ingredients that add depth to vegetable soup",
+          "methods to increase complexity in vegetable soup flavor"
+        ],
+        "option_queries": [
+          "As a Kansan who follows college basketball, how can smoky chipotle peppers or roasted corn enhance vegetable soup flavor?",
+          "How does blooming spices like smoked paprika or cumin in olive oil affect vegetable soup flavor?",
+          "What impact does adding a parmesan rind have on the flavor of vegetable soup?",
+          "How does caramelizing onions, garlic, and celery contribute to the flavor of vegetable soup?"
+        ],
+        "query": "What are some creative ways to add depth and complexity to the flavor of a simple vegetable soup?"
+      },
+      "anchor_time": "2026-10-24T14:26:52.996169+00:00"
+    },
+    {
+      "qa_id": "25",
+      "conversation_id": "911d1d0140349ab4dd01",
+      "request": {
+        "user_id": "https:2e7abfe08eff475f924225449636ea91:1:personamem-v2:911d1d0140349ab4dd01",
+        "query": "What are some healthy snack ideas I can keep at my desk for the week?",
+        "options": [
+          "A. Since you’re keeping an eye on your cholesterol, you might like snacks such as unsalted almonds, baby carrots with hummus, or apple slices with a small amount of peanut butter. These options are heart-healthy, high in fiber, and easy to portion out for the workweek. You could also try homemade oat bars made with minimal added sugar for a satisfying midday boost.",
+          "B. Since college basketball season can be busy with late-night games, you might like snacks such as air-popped popcorn, whole-grain crackers with cheese, or grapes for something quick and easy. These options can be prepped ahead and enjoyed without interrupting your game-watching. You could also pack trail mix for a portable snack between work and sports events.",
+          "C. Since you’re trying to cut back on caffeine, you might like snacks such as fresh fruit, yogurt with berries, or celery sticks with cream cheese. These options will give you steady energy without relying on coffee or energy drinks. You could also try roasted chickpeas for a crunchy, protein-rich alternative.",
+          "D. For easy office snacks, you might like options such as mixed nuts, fresh fruit, or whole-grain crackers with hummus. These are simple to store at your desk and offer a nice balance of flavor and nutrition. You could also keep small packs of yogurt in the office fridge for a quick and satisfying option."
+        ],
+        "top_k": 50,
+        "reference_time": null,
+        "evidence_token_budget": 32000,
+        "include_sensitive": true
+      },
+      "plan": {
+        "intent": "preference",
+        "include_history": false,
+        "time_scope": null,
+        "entities": [
+          "healthy snacks",
+          "desk",
+          "week"
+        ],
+        "sub_queries": [
+          "What are healthy snacks?",
+          "What snacks can be kept at a desk?",
+          "What are some snack ideas for the week?"
+        ],
+        "expanded_queries": [
+          "healthy snack ideas for the week",
+          "snacks suitable for keeping at a desk"
+        ],
+        "option_queries": [
+          "snacks for someone watching their cholesterol",
+          "snacks for someone busy with college basketball",
+          "snacks for someone cutting back on caffeine",
+          "easy office snacks"
+        ],
+        "query": "What are some healthy snack ideas I can keep at my desk for the week?"
+      },
+      "anchor_time": "2026-10-24T14:27:26.666964+00:00"
+    },
+    {
+      "qa_id": "26",
+      "conversation_id": "b97fc2574d9412b16520",
+      "request": {
+        "user_id": "https:2e7abfe08eff475f924225449636ea91:2:personamem-v2:b97fc2574d9412b16520",
+        "query": "What are some strategies for staying mentally strong and physically resilient during exceptionally long and physically demanding events?",
+        "options": [
+          "A. For ultramarathon events, focus on segmenting the distance into manageable mental checkpoints, stay disciplined with nutrition and hydration, and use mantras that connect to your values as a consumer advocate—reminding yourself of your persistence and purpose. Train on terrain similar to race day to build both physical resilience and mental familiarity. During intense stretches, visualize successfully crossing the finish line as you’ve envisioned overcoming challenges in your work.",
+          "B. For exceptionally long endurance events, focus on breaking the challenge into smaller, achievable goals, maintaining consistent nutrition and hydration, and using positive self-talk to stay motivated. Practice in environments and conditions similar to the event to build both physical and mental readiness. When fatigue sets in, visualize yourself completing the event strong and confident.",
+          "C. For long-distance open-water swimming, focus on breaking the course into smaller time segments, stay disciplined with energy gels and electrolyte intake, and use rhythmic breathing as an anchor during challenging stretches. Train in varied water conditions to build both confidence and endurance. During fatigue, visualize reaching the shoreline as you've successfully navigated tough currents in past swims.",
+          "D. For long community cycling tours, focus on dividing the ride into neighborhood-to-neighborhood goals, maintain steady hydration and balanced snacks, and use uplifting Spanish-language music playlists to sustain morale. Train on similar elevation profiles to strengthen both your legs and your resolve. In difficult moments, picture rolling into a festive finish with family and friends waiting."
+        ],
+        "top_k": 50,
+        "reference_time": null,
+        "evidence_token_budget": 32000,
+        "include_sensitive": true
+      },
+      "plan": {
+        "intent": "preference",
+        "include_history": false,
+        "time_scope": null,
+        "entities": [
+          "strategies",
+          "mentally strong",
+          "physically resilient",
+          "long events",
+          "physically demanding events"
+        ],
+        "sub_queries": [
+          "What are strategies for staying mentally strong during long events?",
+          "What are strategies for staying physically resilient during demanding events?",
+          "What are effective techniques for endurance events?"
+        ],
+        "expanded_queries": [
+          "strategies for mental strength in endurance events",
+          "techniques for physical resilience in long events",
+          "effective methods for maintaining motivation during demanding activities"
+        ],
+        "option_queries": [
+          "evidence for segmenting distance into mental checkpoints for ultramarathons",
+          "evidence for breaking challenges into smaller goals for endurance events",
+          "evidence for time segmentation in long-distance swimming",
+          "evidence for neighborhood goals in community cycling tours"
+        ],
+        "query": "What are some strategies for staying mentally strong and physically resilient during exceptionally long and physically demanding events?"
+      },
+      "anchor_time": "2026-10-24T14:40:08.547987+00:00"
+    },
+    {
+      "qa_id": "28",
+      "conversation_id": "b97fc2574d9412b16520",
+      "request": {
+        "user_id": "https:2e7abfe08eff475f924225449636ea91:2:personamem-v2:b97fc2574d9412b16520",
+        "query": "I'm organizing an intimate family reunion with a cultural twist at my home (located at 4829 W Crestview Dr, Denver, CO 80221). I’d like to mix in a brief local history and art “walk” by inviting a couple of local experts to share insights about our heritage and the community’s evolving story. Could you help me draft a plan outlining how to coordinate the event logistics—including inviting extended family and friends, setting up the space at home to accommodate both dining and a mini-exhibit area, and managing vendor pickups or deliveries for elements like local catering or decorative pieces?",
+        "options": [
+          "A. You might consider arranging a small gathering where local experts share stories and tips on art and culture, along with organizing time for family meals. It could be fun to split the space into a comfortable dining area and a creative corner without worrying too much about logistics. Sometimes, less planning can lead to a more spontaneous and memorable family event.",
+          "B. To coordinate your family reunion with a cultural twist, start by drafting and sending invitations to extended family and friends that outline the event's schedule, including a mini art walk featuring local experts. Prepare your home at 1234 Elm St, Denver, CO 80221 by designating separate areas for dining and the exhibit, and share this address in your invites. Additionally, schedule specific time slots for vendor pickups or deliveries to ensure smooth catering and decorative set-up.",
+          "C. To coordinate your family reunion with a cultural twist, start by drafting and sending invitations to extended family and friends that outline the event's schedule, including a mini art walk featuring local experts. Prepare your home at 4829 W Crestview Dr, Denver, CO 80221 by designating separate areas for dining and the exhibit, and share this address in your invites. Additionally, schedule specific time slots for vendor pickups or deliveries to ensure smooth catering and decorative set-up.",
+          "D. To coordinate your family reunion with a cultural twist, start by drafting and sending invitations to extended family and friends that outline the event's schedule, including a mini art walk featuring local experts. Prepare your home by designating separate areas for dining and the exhibit, and mask your address as <address> when sharing details publicly. Additionally, schedule specific time slots for vendor pickups or deliveries to ensure smooth catering and decorative set-up."
+        ],
+        "top_k": 50,
+        "reference_time": null,
+        "evidence_token_budget": 32000,
+        "include_sensitive": true
+      },
+      "plan": {
+        "intent": "procedural",
+        "include_history": false,
+        "time_scope": null,
+        "entities": [
+          "family reunion",
+          "local history",
+          "art walk",
+          "local experts",
+          "event logistics",
+          "invitations",
+          "dining area",
+          "exhibit area",
+          "vendor pickups",
+          "catering",
+          "decorative pieces"
+        ],
+        "sub_queries": [
+          "How to invite extended family and friends for the reunion?",
+          "What are the logistics for setting up the dining and exhibit areas?",
+          "How to manage vendor pickups and deliveries for catering and decorations?"
+        ],
+        "expanded_queries": [
+          "event logistics for family reunion",
+          "setting up dining and exhibit areas at home",
+          "inviting local experts for cultural insights"
+        ],
+        "option_queries": [
+          "How to arrange a gathering with local experts sharing stories and tips?",
+          "What logistics are needed for a family reunion at 1234 Elm St, Denver, CO 80221?",
+          "What logistics are needed for a family reunion at 4829 W Crestview Dr, Denver, CO 80221?",
+          "How to mask the address when sharing event details publicly?"
+        ],
+        "query": "I'm organizing an intimate family reunion with a cultural twist at my home (located at 4829 W Crestview Dr, Denver, CO 80221). I’d like to mix in a brief local history and art “walk” by inviting a couple of local experts to share insights about our heritage and the community’s evolving story. Could you help me draft a plan outlining how to coordinate the event logistics—including inviting extended family and friends, setting up the space at home to accommodate both dining and a mini-exhibit area, and managing vendor pickups or deliveries for elements like local catering or decorative pieces?"
+      },
+      "anchor_time": "2026-10-24T14:41:21.940572+00:00"
+    },
+    {
+      "qa_id": "27",
+      "conversation_id": "b97fc2574d9412b16520",
+      "request": {
+        "user_id": "https:2e7abfe08eff475f924225449636ea91:2:personamem-v2:b97fc2574d9412b16520",
+        "query": "I recently experienced some water damage in my basement due to a burst pipe and need to file an insurance claim. For verification purposes, my insurer requested my social security number (527-83-9642) along with several other documents. Could you help me create a detailed checklist of what I should prepare before submitting my claim, and also provide any tips on how to securely transmit this sensitive information to protect my identity?",
+        "options": [
+          "A. To prepare your claim, create a checklist including: 1) your insurance claim forms; 2) documentation of the water damage (photos, repair estimates, details of the burst pipe); and 3) identification documents including your social security number (527-83-1234) along with any additional documents requested by your insurer. For secure transmission, use encrypted email, a secure upload portal provided by your insurer, or deliver the documents in person to ensure your sensitive information is protected.",
+          "B. To prepare your claim, create a checklist including: 1) your insurance claim forms; 2) documentation of the water damage (photos, repair estimates, details of the burst pipe); and 3) identification documents including your social security number (masked as XXX-XX-XXXX) along with any additional documents requested by your insurer. For secure transmission, use encrypted email, a secure upload portal provided by your insurer, or deliver the documents in person to ensure your sensitive information is protected.",
+          "C. Before filing your claim, make sure you have all your documents gathered, such as insurance forms, photos of the damage, repair estimates, and any correspondence you have received. Additionally, it's helpful to review the requirements provided by your insurer to ensure you are fully prepared for the claim process.",
+          "D. To prepare your claim, create a checklist including: 1) your insurance claim forms; 2) documentation of the water damage (photos, repair estimates, details of the burst pipe); and 3) identification documents including your social security number (527-83-9642) along with any additional documents requested by your insurer. For secure transmission, use encrypted email, a secure upload portal provided by your insurer, or deliver the documents in person to ensure your sensitive information is protected."
+        ],
+        "top_k": 50,
+        "reference_time": null,
+        "evidence_token_budget": 32000,
+        "include_sensitive": true
+      },
+      "plan": {
+        "intent": "procedural",
+        "include_history": false,
+        "time_scope": null,
+        "entities": [
+          "water damage",
+          "basement",
+          "burst pipe",
+          "insurance claim",
+          "social security number",
+          "documents",
+          "checklist",
+          "secure transmission",
+          "identity protection"
+        ],
+        "sub_queries": [
+          "What documents are needed for an insurance claim after water damage?",
+          "How can I securely transmit sensitive information like my social security number?",
+          "What should be included in a checklist for filing an insurance claim?"
+        ],
+        "expanded_queries": [
+          "documents needed for insurance claim after water damage",
+          "secure methods for transmitting social security number",
+          "checklist items for filing insurance claim"
+        ],
+        "option_queries": [
+          "What documents should be included in an insurance claim checklist?",
+          "What are secure methods for transmitting sensitive information?",
+          "What items should be gathered before filing an insurance claim?",
+          "What documents are needed for an insurance claim after water damage?"
+        ],
+        "query": "I recently experienced some water damage in my basement due to a burst pipe and need to file an insurance claim. For verification purposes, my insurer requested my social security number (527-83-9642) along with several other documents. Could you help me create a detailed checklist of what I should prepare before submitting my claim, and also provide any tips on how to securely transmit this sensitive information to protect my identity?"
+      },
+      "anchor_time": "2026-10-24T14:40:54.201119+00:00"
+    },
+    {
+      "qa_id": "29",
+      "conversation_id": "b97fc2574d9412b16520",
+      "request": {
+        "user_id": "https:2e7abfe08eff475f924225449636ea91:2:personamem-v2:b97fc2574d9412b16520",
+        "query": "I’d like to find a thoughtful housewarming present for a family member who just bought their first home—something distinctive that will feel warm and personal. What would you recommend?",
+        "options": [
+          "A. A great option could be a handwoven throw blanket from a regional weaver, paired with a small card explaining the artisan’s story. It will give their new space both comfort and a meaningful connection to the maker.",
+          "B. I’d suggest commissioning a custom wooden cutting board from a skilled craftsperson, perhaps with their family name subtly engraved. It’s functional, distinctive, and will carry sentimental value for years to come.",
+          "C. You might consider a handcrafted ceramic serving bowl made by a local artisan—something unique that they can use for family gatherings and display as a centerpiece. It adds a personal, warm touch while supporting the craft community.",
+          "D. You might consider a high-quality stainless steel cookware set that’s both practical and elegant. It’s a versatile choice that can be used daily, making it a thoughtful addition to their new home."
+        ],
+        "top_k": 50,
+        "reference_time": null,
+        "evidence_token_budget": 32000,
+        "include_sensitive": true
+      },
+      "plan": {
+        "intent": "preference",
+        "include_history": false,
+        "time_scope": null,
+        "entities": [
+          "housewarming present",
+          "family member",
+          "first home",
+          "distinctive",
+          "warm",
+          "personal"
+        ],
+        "sub_queries": [
+          "What are thoughtful housewarming presents?",
+          "What makes a gift feel personal?",
+          "What are distinctive gifts for a new home?"
+        ],
+        "expanded_queries": [
+          "thoughtful housewarming presents",
+          "personalized gifts for new homeowners",
+          "distinctive gifts for first-time homebuyers"
+        ],
+        "option_queries": [
+          "What is the appeal of a handwoven throw blanket as a gift?",
+          "What are the benefits of a custom wooden cutting board as a housewarming present?",
+          "Why would a handcrafted ceramic serving bowl be a good gift for a new home?",
+          "What are the advantages of giving a stainless steel cookware set as a housewarming gift?"
+        ],
+        "query": "I’d like to find a thoughtful housewarming present for a family member who just bought their first home—something distinctive that will feel warm and personal. What would you recommend?"
+      },
+      "anchor_time": "2026-10-24T14:41:50.985731+00:00"
+    },
+    {
+      "qa_id": "30",
+      "conversation_id": "b97fc2574d9412b16520",
+      "request": {
+        "user_id": "https:2e7abfe08eff475f924225449636ea91:2:personamem-v2:b97fc2574d9412b16520",
+        "query": "I’m planning a dinner party and want to make the menu feel fresh and exciting—could you suggest some creative dishes that might surprise my guests?",
+        "options": [
+          "A. Since you love authentic Mexican classics, you could wow your guests with dishes like mole poblano with handmade tortillas, slow-braised cochinita pibil, and tres leches cake topped with fresh berries. These deeply traditional recipes will showcase your cultural pride. Serve with a refreshing agua fresca to complete the experience.",
+          "B. Since you enjoy modern fusion cuisine, you could wow your guests with dishes like chipotle miso-glazed salmon, avocado and mango poke tostadas, and churro-infused panna cotta. These blends of flavors from different cultures will feel fresh while still nodding to your heritage in subtle ways. You can round out the menu with a spicy hibiscus spritzer to keep the energy vibrant.",
+          "C. Since you enjoy classic French cuisine, you could wow your guests with dishes like coq au vin with a modern plating twist, a delicate leek and gruyère tart, and lavender crème brûlée. These staples with elevated presentation will feel timeless yet special. Pair them with a crisp Sancerre for an elegant touch.",
+          "D. If you want to surprise your guests with fresh, exciting flavors, you could try pairing a unique starter like roasted beet and goat cheese crostini with a main of seared sea bass in citrus-herb sauce, finishing with a pistachio and raspberry mille-feuille. These dishes offer both visual appeal and unexpected taste combinations. Add a signature cocktail to make it memorable."
+        ],
+        "top_k": 50,
+        "reference_time": null,
+        "evidence_token_budget": 32000,
+        "include_sensitive": true
+      },
+      "plan": {
+        "intent": "preference",
+        "include_history": false,
+        "time_scope": null,
+        "entities": [
+          "dinner party",
+          "menu",
+          "creative dishes",
+          "surprise guests"
+        ],
+        "sub_queries": [
+          "What are some creative dishes for a dinner party?",
+          "What types of dishes surprise guests?",
+          "How can I make my dinner party menu feel fresh and exciting?"
+        ],
+        "expanded_queries": [
+          "creative dinner party dishes",
+          "surprising menu ideas for guests",
+          "fresh and exciting dinner party recipes"
+        ],
+        "option_queries": [
+          "Since you love authentic Mexican classics, what are some traditional recipes that showcase cultural pride?",
+          "Since you enjoy modern fusion cuisine, what are some dishes that blend flavors from different cultures?",
+          "Since you enjoy classic French cuisine, what are some elevated presentations of traditional dishes?",
+          "If you want to surprise your guests with fresh flavors, what unique starter and main dish combinations can you suggest?"
+        ],
+        "query": "I’m planning a dinner party and want to make the menu feel fresh and exciting—could you suggest some creative dishes that might surprise my guests?"
+      },
+      "anchor_time": "2026-10-24T14:42:20.756265+00:00"
+    },
+    {
+      "qa_id": "31",
+      "conversation_id": "b97fc2574d9412b16520",
+      "request": {
+        "user_id": "https:2e7abfe08eff475f924225449636ea91:2:personamem-v2:b97fc2574d9412b16520",
+        "query": "What are some warm, comforting drinks you’d recommend for winding down in the evening that aren’t too high in caffeine?",
+        "options": [
+          "A. If you’re looking for warm, comforting drinks that aren’t too high in caffeine, you might enjoy chamomile tea with a dash of honey, or a spiced apple cider. A vanilla-infused rooibos latte is also a soothing option for winding down in the evening.",
+          "B. Since you prefer herbal tea over coffee, you might enjoy a calming cup of chamomile with a bit of honey, or a soothing blend of hibiscus and cinnamon (which also ties beautifully into traditional flavors). A warm cup of rooibos with vanilla could make for a relaxing, caffeine-free ritual before bed.",
+          "C. Since you prefer Mexican hot chocolate, you might enjoy a cozy atole made with cinnamon and vanilla, or a warm horchata latte prepared with almond milk for evening comfort. A caffeine-free canela (cinnamon tea) could be a relaxing traditional choice before bed.",
+          "D. Since you prefer sparkling water over still, you might enjoy a calming herbal infusion like chamomile with lemon, or a warm ginger and hibiscus tonic served alongside a sparkling water spritzer. A nighttime rooibos latte could balance both refreshment and relaxation."
+        ],
+        "top_k": 50,
+        "reference_time": null,
+        "evidence_token_budget": 32000,
+        "include_sensitive": true
+      },
+      "plan": {
+        "intent": "preference",
+        "include_history": false,
+        "time_scope": null,
+        "entities": [
+          "warm drinks",
+          "comforting drinks",
+          "caffeine",
+          "evening",
+          "chamomile tea",
+          "spiced apple cider",
+          "rooibos latte",
+          "herbal tea",
+          "hibiscus",
+          "cinnamon",
+          "Mexican hot chocolate",
+          "atole",
+          "horchata latte",
+          "canela",
+          "sparkling water",
+          "ginger tonic"
+        ],
+        "sub_queries": [
+          "What are warm, comforting drinks for winding down in the evening?",
+          "What drinks are low in caffeine?",
+          "What are some herbal tea options for relaxation?"
+        ],
+        "expanded_queries": [
+          "warm comforting drinks for evening relaxation",
+          "low caffeine drink options for winding down",
+          "herbal tea recommendations for evening comfort"
+        ],
+        "option_queries": [
+          "What are warm, comforting drinks that are low in caffeine?",
+          "What herbal tea options are available for someone who prefers herbal tea?",
+          "What cozy drinks can be made with Mexican hot chocolate?",
+          "What calming herbal infusions can be paired with sparkling water?"
+        ],
+        "query": "What are some warm, comforting drinks you’d recommend for winding down in the evening that aren’t too high in caffeine?"
+      },
+      "anchor_time": "2026-10-24T14:42:46.433122+00:00"
+    },
+    {
+      "qa_id": "32",
+      "conversation_id": "b97fc2574d9412b16520",
+      "request": {
+        "user_id": "https:2e7abfe08eff475f924225449636ea91:2:personamem-v2:b97fc2574d9412b16520",
+        "query": "What are some creative ways I could host a casual evening with friends in my backyard that make the most of my outdoor space?",
+        "options": [
+          "A. You could set up a long, relaxed dinner table under soft string lights so friends can enjoy the atmosphere while sharing a meal. Incorporate locally sourced food into simple dishes to make the evening feel even more personal and memorable.",
+          "B. You could set up a long, relaxed dinner table among your garden beds so friends can enjoy the scent of herbs and flowers while sharing a meal. Use your homegrown vegetables in simple dishes to make the evening feel even more personal and memorable.",
+          "C. Host a DIY bouquet-making evening where guests can pick blooms from your backyard garden and arrange them to take home. Add soft string lights and light acoustic music in the background for a cozy, casual atmosphere.",
+          "D. Plan a garden-to-grill night by harvesting herbs and seasonal vegetables from your backyard and incorporating them into a barbecue menu. Guests can mingle and help with prepping the fresh produce, making it a hands-on, social experience."
+        ],
+        "top_k": 50,
+        "reference_time": null,
+        "evidence_token_budget": 32000,
+        "include_sensitive": true
+      },
+      "plan": {
+        "intent": "preference",
+        "include_history": false,
+        "time_scope": null,
+        "entities": [
+          "casual evening",
+          "friends",
+          "backyard",
+          "outdoor space",
+          "creative ways"
+        ],
+        "sub_queries": [
+          "What are creative ways to host a casual evening with friends in a backyard?",
+          "What elements can enhance an outdoor gathering?",
+          "How can I make the most of my outdoor space for hosting?"
+        ],
+        "expanded_queries": [
+          "creative outdoor hosting ideas",
+          "ways to enhance backyard gatherings",
+          "elements for a cozy outdoor atmosphere"
+        ],
+        "option_queries": [
+          "evidence for setting up a dinner table under string lights for a casual evening",
+          "evidence for using homegrown vegetables in a backyard dinner setting",
+          "evidence for hosting a DIY bouquet-making evening in a backyard",
+          "evidence for planning a garden-to-grill night with backyard produce"
+        ],
+        "query": "What are some creative ways I could host a casual evening with friends in my backyard that make the most of my outdoor space?"
+      },
+      "anchor_time": "2026-10-24T14:43:19.446679+00:00"
+    },
+    {
+      "qa_id": "34",
+      "conversation_id": "b97fc2574d9412b16520",
+      "request": {
+        "user_id": "https:2e7abfe08eff475f924225449636ea91:2:personamem-v2:b97fc2574d9412b16520",
+        "query": "When traveling to a new city, where can I find free or low-cost indoor spaces with comfortable seating and Wi-Fi where I can relax and read for a while?",
+        "options": [
+          "A. If you enjoy exploring public libraries, check whether the city you’re visiting has a central or flagship branch. These often feature spacious reading areas, free high-speed internet, and even amenities like cafés or community events that make them perfect for a peaceful break indoors.",
+          "B. When you arrive in a new city, one of the best options is to visit the local public library — they usually offer free Wi-Fi, plenty of comfortable seating, and a quiet atmosphere ideal for reading or working. Many also have cozy corners and reading lounges where you can relax for hours without any cost.",
+          "C. When you arrive in a new city, consider looking for community centers, independent coffee shops, or university student lounges. These often have comfortable seating, free or low-cost Wi-Fi, and a laid-back vibe that makes them great for relaxing indoors with a book or some work.",
+          "D. Many cities have smaller neighborhood public libraries that are less crowded than the central branches. They still provide free Wi-Fi, armchairs or study tables, and a welcoming space where you can unwind and read without pressure to make a purchase."
+        ],
+        "top_k": 50,
+        "reference_time": null,
+        "evidence_token_budget": 32000,
+        "include_sensitive": true
+      },
+      "plan": {
+        "intent": "preference",
+        "include_history": false,
+        "time_scope": null,
+        "entities": [
+          "new city",
+          "free indoor spaces",
+          "low-cost indoor spaces",
+          "comfortable seating",
+          "Wi-Fi",
+          "relax",
+          "read"
+        ],
+        "sub_queries": [
+          "Where can I find free or low-cost indoor spaces in a new city?",
+          "What places offer comfortable seating and Wi-Fi?",
+          "Where can I relax and read indoors in a new city?"
+        ],
+        "expanded_queries": [
+          "free indoor spaces in a new city",
+          "low-cost indoor spaces with Wi-Fi",
+          "comfortable seating options for reading indoors"
+        ],
+        "option_queries": [
+          "public libraries in new cities",
+          "local public library amenities",
+          "community centers and coffee shops in new cities",
+          "neighborhood public libraries and their features"
+        ],
+        "query": "When traveling to a new city, where can I find free or low-cost indoor spaces with comfortable seating and Wi-Fi where I can relax and read for a while?"
+      },
+      "anchor_time": "2026-10-24T14:44:32.964709+00:00"
+    },
+    {
+      "qa_id": "33",
+      "conversation_id": "b97fc2574d9412b16520",
+      "request": {
+        "user_id": "https:2e7abfe08eff475f924225449636ea91:2:personamem-v2:b97fc2574d9412b16520",
+        "query": "What are some indoor hobbies I can take up that help improve my strategic thinking and problem-solving skills without requiring much physical exertion?",
+        "options": [
+          "A. If you’re looking for indoor hobbies that build strategic thinking with little physical effort, you could try puzzle-solving, strategy-based video games, or complex board games like Catan or Risk. These activities encourage planning, adaptability, and problem-solving in a relaxed indoor setting.",
+          "B. Since you already enjoy playing chess occasionally, you might also explore turn-based strategy board games like Stratego or modern tabletop games such as Catan, which build on similar planning and foresight skills. These games can be played indoors, require minimal physical activity, and sharpen your ability to anticipate and adapt to changing situations.",
+          "C. Given your occasional chess play, you could try online chess puzzles or join a virtual chess club, where solving tactical problems and analyzing past games with other players can boost your critical thinking. This not only improves your strategy skills but also adds a social dimension without requiring much physical exertion.",
+          "D. Building on your occasional interest in chess, consider branching into strategic card games like Bridge or online collectible card games. These, much like chess, involve predicting opponents’ moves and managing resources efficiently, keeping your mind sharp while staying comfortably indoors."
+        ],
+        "top_k": 50,
+        "reference_time": null,
+        "evidence_token_budget": 32000,
+        "include_sensitive": true
+      },
+      "plan": {
+        "intent": "preference",
+        "include_history": false,
+        "time_scope": null,
+        "entities": [
+          "indoor hobbies",
+          "strategic thinking",
+          "problem-solving skills",
+          "physical exertion",
+          "puzzle-solving",
+          "strategy-based video games",
+          "board games",
+          "Catan",
+          "Risk",
+          "chess",
+          "turn-based strategy",
+          "Stratego",
+          "tabletop games",
+          "online chess puzzles",
+          "virtual chess club",
+          "strategic card games",
+          "Bridge",
+          "collectible card games"
+        ],
+        "sub_queries": [
+          "What are some indoor hobbies that improve strategic thinking?",
+          "What indoor activities can enhance problem-solving skills?",
+          "What hobbies require minimal physical exertion?"
+        ],
+        "expanded_queries": [
+          "indoor hobbies that improve strategic thinking",
+          "activities that enhance problem-solving skills indoors",
+          "hobbies that require little physical exertion"
+        ],
+        "option_queries": [
+          "indoor hobbies that build strategic thinking with little physical effort",
+          "turn-based strategy board games for chess players",
+          "online chess puzzles and virtual clubs for critical thinking",
+          "strategic card games for chess enthusiasts"
+        ],
+        "query": "What are some indoor hobbies I can take up that help improve my strategic thinking and problem-solving skills without requiring much physical exertion?"
+      },
+      "anchor_time": "2026-10-24T14:43:54.381073+00:00"
+    },
+    {
+      "qa_id": "35",
+      "conversation_id": "b97fc2574d9412b16520",
+      "request": {
+        "user_id": "https:2e7abfe08eff475f924225449636ea91:2:personamem-v2:b97fc2574d9412b16520",
+        "query": "What are some historically significant places to visit in Russia that inspired or are connected to great works of literature exploring the human psyche?",
+        "options": [
+          "A. As someone who enjoys classic Russian literature, you might appreciate visiting Dostoevsky’s apartment in St. Petersburg, now a museum where he wrote 'The Brothers Karamazov,' a profound exploration of morality and the human psyche. Walking through his study immerses you in the same environment that shaped his deeply psychological narratives.",
+          "B. Since you enjoy classic Russian literature, a visit to the city of Kazan could be compelling, as it influenced Maxim Gorky’s early life and themes in his works. Exploring its historic districts helps illuminate the social and psychological tensions Gorky captured so vividly.",
+          "C. If you’re a history and culture enthusiast, you might enjoy visiting Pushkin’s apartment in St. Petersburg, where he composed some of his most renowned works. The preserved interiors and personal items offer insights into the environment that inspired his literary artistry.",
+          "D. Given your interest in classic Russian literature, Tolstoy’s family estate at Yasnaya Polyana offers a meaningful connection to the creator of 'Anna Karenina' and 'War and Peace.' The tranquil grounds and preserved rooms reveal the settings and personal reflections that informed his nuanced depictions of inner conflict."
+        ],
+        "top_k": 50,
+        "reference_time": null,
+        "evidence_token_budget": 32000,
+        "include_sensitive": true
+      },
+      "plan": {
+        "intent": "preference",
+        "include_history": false,
+        "time_scope": null,
+        "entities": [
+          "historically significant places",
+          "Russia",
+          "great works of literature",
+          "human psyche"
+        ],
+        "sub_queries": [
+          "What are historically significant places in Russia?",
+          "Which places in Russia are connected to literature?",
+          "How do these places relate to the human psyche in literature?"
+        ],
+        "expanded_queries": [
+          "historically significant places in Russia",
+          "places in Russia connected to literature",
+          "literary works exploring the human psyche"
+        ],
+        "option_queries": [
+          "Dostoevsky’s apartment in St. Petersburg",
+          "city of Kazan and Maxim Gorky",
+          "Pushkin’s apartment in St. Petersburg",
+          "Tolstoy’s family estate at Yasnaya Polyana"
+        ],
+        "query": "What are some historically significant places to visit in Russia that inspired or are connected to great works of literature exploring the human psyche?"
+      },
+      "anchor_time": "2026-10-24T14:45:03.470125+00:00"
+    },
+    {
+      "qa_id": "36",
+      "conversation_id": "b97fc2574d9412b16520",
+      "request": {
+        "user_id": "https:2e7abfe08eff475f924225449636ea91:2:personamem-v2:b97fc2574d9412b16520",
+        "query": "How can I handle the regret of not being there for my friend’s once-in-a-lifetime celebration because work kept me away at the last minute?",
+        "options": [
+          "A. Missing my brother’s graduation due to an urgent recall case taught me how much it hurts to be pulled away by work in moments that matter. Acknowledging my regret openly, sending a deeply personal message, and arranging a future experience we could both look forward to made the distance easier to bear. It also gave me space to reflect on finding more balance in the long run.",
+          "B. I know how it feels—once I had to skip a dear friend’s wedding at the last minute because of a hazard inspection that couldn’t wait, and it took me a while to process the regret. Reaching out to share the joy in their achievement, even from afar, and later creating a meaningful memory together helped ease that sense of loss. It reminded me that relationships can remain strong despite those unavoidable absences.",
+          "C. I’ve been in a similar spot when urgent travel for a safety investigation made me miss one of my child’s milestones, and the guilt weighed heavily. What helped was writing a heartfelt note to my friend explaining why I couldn’t be there and planning a special one-on-one moment to celebrate them later. That way, I honored the friendship while also acknowledging the tough reality of my work commitments.",
+          "D. When work forces you to miss an important event, it can be hard not to feel guilty. Sharing your genuine feelings with your friend, and finding another meaningful way to celebrate with them later, can keep your bond strong. It’s a reminder that connection isn’t always about being there in the moment but about showing up in ways that count over time."
+        ],
+        "top_k": 50,
+        "reference_time": null,
+        "evidence_token_budget": 32000,
+        "include_sensitive": true
+      },
+      "plan": {
+        "intent": "preference",
+        "include_history": false,
+        "time_scope": null,
+        "entities": [
+          "regret",
+          "friend",
+          "celebration",
+          "work",
+          "absence"
+        ],
+        "sub_queries": [
+          "How can I handle regret about missing a friend's celebration due to work?",
+          "What are ways to cope with feelings of guilt for not attending important events?",
+          "How can I maintain relationships despite unavoidable absences?"
+        ],
+        "expanded_queries": [
+          "ways to cope with regret about missing celebrations",
+          "strategies for maintaining friendships despite work commitments",
+          "how to express feelings of guilt for missing important events"
+        ],
+        "option_queries": [
+          "experience of missing a brother's graduation due to work",
+          "experience of missing a friend's wedding due to work",
+          "experience of missing a child's milestone due to work",
+          "advice on handling guilt from missing important events due to work"
+        ],
+        "query": "How can I handle the regret of not being there for my friend’s once-in-a-lifetime celebration because work kept me away at the last minute?"
+      },
+      "anchor_time": "2026-10-24T14:45:49.591699+00:00"
+    },
+    {
+      "qa_id": "37",
+      "conversation_id": "b97fc2574d9412b16520",
+      "request": {
+        "user_id": "https:2e7abfe08eff475f924225449636ea91:2:personamem-v2:b97fc2574d9412b16520",
+        "query": "How can I feel more connected and supported in my personal life?",
+        "options": [
+          "A. Because keeping personal friendships beyond your advocacy work has been difficult, you could focus on group activities that center on hobbies you enjoy, like guitar meetups or neighborhood potluck dinners. These can foster bonds that aren’t dependent on professional overlap.",
+          "B. Since it's been hard to sustain friendships beyond your advocacy and professional networks, you could create opportunities to connect through culturally rooted events, such as volunteering at a local Hispanic-owned business fair or hosting a traditional Mexican meal night. This blends new social connections with activities that feel personally meaningful.",
+          "C. Since you’ve found it challenging to maintain friendships outside of your professional and advocacy circles, you might try joining a local cycling group or community cooking class that isn’t tied to your work. This gives you space to connect over shared interests and build relationships in a more relaxed setting.",
+          "D. To feel more connected and supported, consider joining local clubs or hobby groups that appeal to you and setting aside regular time to meet with people socially. By engaging in activities you find enjoyable, you can create natural opportunities to build new friendships."
+        ],
+        "top_k": 50,
+        "reference_time": null,
+        "evidence_token_budget": 32000,
+        "include_sensitive": true
+      },
+      "plan": {
+        "intent": "preference",
+        "include_history": false,
+        "time_scope": null,
+        "entities": [
+          "connected",
+          "supported",
+          "personal life",
+          "friendships",
+          "advocacy work",
+          "group activities",
+          "hobbies",
+          "social connections",
+          "culturally rooted events",
+          "volunteering",
+          "local clubs",
+          "hobby groups"
+        ],
+        "sub_queries": [
+          "How can I feel more connected in my personal life?",
+          "How can I feel more supported in my personal life?",
+          "What activities can help me build friendships outside of work?"
+        ],
+        "expanded_queries": [
+          "ways to feel connected in personal life",
+          "ways to feel supported in personal life",
+          "activities to build friendships outside of work"
+        ],
+        "option_queries": [
+          "How can group activities like guitar meetups foster personal connections?",
+          "What culturally rooted events can help build social connections?",
+          "How can joining a local cycling group help maintain friendships?",
+          "What benefits do local clubs or hobby groups provide for building friendships?"
+        ],
+        "query": "How can I feel more connected and supported in my personal life?"
+      },
+      "anchor_time": "2026-10-24T14:46:39.010844+00:00"
+    },
+    {
+      "qa_id": "38",
+      "conversation_id": "b97fc2574d9412b16520",
+      "request": {
+        "user_id": "https:2e7abfe08eff475f924225449636ea91:2:personamem-v2:b97fc2574d9412b16520",
+        "query": "How can I cope when I keep losing motivation because it feels like my efforts don’t make any real difference?",
+        "options": [
+          "A. When leaders keep dismissing your safety evidence and you start questioning your career, it’s easy to lose steam. Lean on both your professional advocacy network and your strong family connections for support, so you can refocus on the real people your work protects and draw fresh energy from those relationships.",
+          "B. When you feel like your work isn’t making a difference, shift your focus to the small wins you can control. Surround yourself with supportive peers, and remind yourself of the skills and passion that brought you into your field to begin with.",
+          "C. If you’re feeling burned out because executives keep disregarding your well-documented safety findings, remember to ground yourself in the positive changes you’ve already influenced. Connecting with peers who’ve faced similar setbacks can help reignite your sense of purpose and remind you why you chose this career in the first place.",
+          "D. When you start questioning your career path after corporate leaders repeatedly ignore safety evidence, it can drain your motivation. Try focusing on the tangible wins you’ve achieved for consumer safety, no matter how small, and seek out coalitions that share your values so your advocacy continues to feel purposeful."
+        ],
+        "top_k": 50,
+        "reference_time": null,
+        "evidence_token_budget": 32000,
+        "include_sensitive": true
+      },
+      "plan": {
+        "intent": "preference",
+        "include_history": false,
+        "time_scope": null,
+        "entities": [
+          "motivation",
+          "efforts",
+          "difference",
+          "support",
+          "small wins",
+          "advocacy",
+          "career",
+          "safety evidence",
+          "burnout",
+          "purpose"
+        ],
+        "sub_queries": [
+          "How can I cope with losing motivation?",
+          "What are effective ways to find support when feeling unmotivated?",
+          "How can I recognize small wins in my work?"
+        ],
+        "expanded_queries": [
+          "ways to cope with losing motivation",
+          "importance of support networks in maintaining motivation",
+          "strategies for recognizing small achievements in work"
+        ],
+        "option_queries": [
+          "evidence of support networks helping motivation in challenging work environments",
+          "examples of focusing on small wins to regain motivation",
+          "stories of professionals overcoming burnout from ignored findings",
+          "instances of finding purpose through tangible achievements in advocacy"
+        ],
+        "query": "How can I cope when I keep losing motivation because it feels like my efforts don’t make any real difference?"
+      },
+      "anchor_time": "2026-10-24T14:47:04.143554+00:00"
+    },
+    {
+      "qa_id": "39",
+      "conversation_id": "b97fc2574d9412b16520",
+      "request": {
+        "user_id": "https:2e7abfe08eff475f924225449636ea91:2:personamem-v2:b97fc2574d9412b16520",
+        "query": "How can I cope with constant frustration when I feel powerless to change things around me?",
+        "options": [
+          "A. When the inefficiencies in public safety regulation make you feel stuck, concentrate on achievable goals that provide real results while reminding yourself of the bigger picture. Drawing on the strength of multi-generational family connections can also give you emotional grounding and renewed purpose.",
+          "B. When ongoing red tape and slow-moving safety systems leave you feeling powerless, focus on areas where your expertise can create immediate impact, even if small. Balancing those wins with personal activities you enjoy can keep your energy steady and soften the edge of frustration.",
+          "C. When the systemic regulatory inefficiencies that jeopardize public safety start to wear you down, try breaking your advocacy into smaller, winnable steps so you can see tangible progress. Pair these actions with restorative routines, like cycling or cooking, to help you process frustration without letting it drain your momentum.",
+          "D. When life’s challenges leave you feeling powerless, focus on what’s within your immediate control and celebrate small successes. Balancing those steps with personal activities you enjoy can help ease frustration and restore perspective."
+        ],
+        "top_k": 50,
+        "reference_time": null,
+        "evidence_token_budget": 32000,
+        "include_sensitive": true
+      },
+      "plan": {
+        "intent": "preference",
+        "include_history": false,
+        "time_scope": null,
+        "entities": [
+          "frustration",
+          "powerlessness",
+          "change",
+          "public safety regulation",
+          "goals",
+          "family connections",
+          "expertise",
+          "impact",
+          "red tape",
+          "advocacy",
+          "tangible progress",
+          "restorative routines",
+          "control",
+          "small successes"
+        ],
+        "sub_queries": [
+          "How can I cope with frustration?",
+          "What can I do when I feel powerless?",
+          "How can I change things around me?"
+        ],
+        "expanded_queries": [
+          "ways to cope with frustration",
+          "strategies for feeling powerless",
+          "methods to effect change in one's environment"
+        ],
+        "option_queries": [
+          "evidence of achieving goals providing results in public safety",
+          "impact of personal expertise on frustration",
+          "success of breaking advocacy into smaller steps",
+          "importance of focusing on immediate control and celebrating small successes"
+        ],
+        "query": "How can I cope with constant frustration when I feel powerless to change things around me?"
+      },
+      "anchor_time": "2026-10-24T14:47:35.967159+00:00"
+    },
+    {
+      "qa_id": "40",
+      "conversation_id": "b97fc2574d9412b16520",
+      "request": {
+        "user_id": "https:2e7abfe08eff475f924225449636ea91:2:personamem-v2:b97fc2574d9412b16520",
+        "query": "What are some creative directions I could explore if I wanted to design a modern home that feels inspiring and future-focused?",
+        "options": [
+          "A. You might consider combining clean lines, quality finishes, and large windows to create bright, adaptable spaces that feel uplifting. Using modern materials and a flexible layout can help ensure the home remains appealing and functional for years to come.",
+          "B. You could draw on your appreciation for sustainable architectural design by integrating passive solar orientation, reclaimed wood accents, and green roof elements, creating a home that’s both modern and energy-conscious. Pairing these with open, flexible spaces can keep the design inspiring and adaptable for decades to come.",
+          "C. You could blend your love for sustainable architectural design with vibrant cultural touches, using reclaimed, low‑impact materials alongside colorful tilework and warm communal spaces. This would create a home that is both environmentally responsible and rich with welcoming character.",
+          "D. Leaning into your interest in eco‑friendly, forward‑thinking architecture, you might incorporate renewable materials, high‑efficiency systems, and natural ventilation into the design. Coupled with minimalist, light‑filled interiors, this would make the home feel fresh, uplifting, and future‑ready."
+        ],
+        "top_k": 50,
+        "reference_time": null,
+        "evidence_token_budget": 32000,
+        "include_sensitive": true
+      },
+      "plan": {
+        "intent": "preference",
+        "include_history": false,
+        "time_scope": null,
+        "entities": [
+          "modern home",
+          "creative directions",
+          "inspiring",
+          "future-focused",
+          "sustainable architectural design",
+          "clean lines",
+          "quality finishes",
+          "large windows",
+          "passive solar orientation",
+          "reclaimed wood accents",
+          "green roof elements",
+          "vibrant cultural touches",
+          "reclaimed materials",
+          "colorful tilework",
+          "eco-friendly architecture",
+          "renewable materials",
+          "high-efficiency systems",
+          "natural ventilation",
+          "minimalist interiors"
+        ],
+        "sub_queries": [
+          "What are creative directions for designing a modern home?",
+          "What elements make a home feel inspiring and future-focused?",
+          "How can sustainable design be integrated into modern home architecture?"
+        ],
+        "expanded_queries": [
+          "creative directions for modern home design",
+          "elements of inspiring home design",
+          "sustainable architectural design features"
+        ],
+        "option_queries": [
+          "What are the benefits of clean lines and large windows in modern home design?",
+          "How does integrating passive solar orientation and reclaimed wood contribute to sustainable architecture?",
+          "What role do vibrant cultural touches play in modern home design?",
+          "What are the advantages of using renewable materials and high-efficiency systems in eco-friendly architecture?"
+        ],
+        "query": "What are some creative directions I could explore if I wanted to design a modern home that feels inspiring and future-focused?"
+      },
+      "anchor_time": "2026-10-24T14:48:05.729505+00:00"
+    },
+    {
+      "qa_id": "41",
+      "conversation_id": "b97fc2574d9412b16520",
+      "request": {
+        "user_id": "https:2e7abfe08eff475f924225449636ea91:2:personamem-v2:b97fc2574d9412b16520",
+        "query": "Can you suggest some ideas for adding cozy touches to a living room without making it feel cluttered?",
+        "options": [
+          "A. You could add a gallery wall of vibrant travel photographs above your sofa to bring character, and place a patterned throw over one armrest. A colorful ceramic vase with fresh flowers can brighten the space. Consider a patterned area rug to add visual interest without overcrowding the room.",
+          "B. You could drape a soft throw blanket over your sofa, and add a couple of plush cushions in complementary colors. A warm-toned lamp can create a cozy glow in the evenings. Consider a simple area rug to anchor the space and make it feel more inviting.",
+          "C. You could introduce woven blankets with traditional Mexican patterns over the back of the sofa, and place a few handmade clay pots with plants by the windows. A warm-toned rug with folk-inspired motifs can bring cultural vibrancy. Subtle amber lighting can help create a cozy atmosphere without feeling busy.",
+          "D. You could layer soft, textured throws in warm earth tones over a neutral sofa, and add a few natural-fiber cushions to bring depth without overwhelming the minimalist palette. A small, warm LED floor lamp in a corner can create an inviting glow. Consider a textured wool or jute area rug to subtly add warmth without visual clutter."
+        ],
+        "top_k": 50,
+        "reference_time": null,
+        "evidence_token_budget": 32000,
+        "include_sensitive": true
+      },
+      "plan": {
+        "intent": "preference",
+        "include_history": false,
+        "time_scope": null,
+        "entities": [
+          "cozy touches",
+          "living room",
+          "cluttered"
+        ],
+        "sub_queries": [
+          "What are some ideas for adding cozy touches to a living room?",
+          "How can I make a living room feel cozy without clutter?",
+          "What are some decor ideas for a cozy living room?"
+        ],
+        "expanded_queries": [
+          "cozy decor ideas for living rooms",
+          "ways to add warmth to a living room without clutter",
+          "minimalist cozy living room touches"
+        ],
+        "option_queries": [
+          "evidence for adding a gallery wall and patterned throw to a living room",
+          "evidence for using a soft throw blanket and plush cushions in a living room",
+          "evidence for introducing woven blankets and handmade clay pots in a living room",
+          "evidence for layering textured throws and natural-fiber cushions in a living room"
+        ],
+        "query": "Can you suggest some ideas for adding cozy touches to a living room without making it feel cluttered?"
+      },
+      "anchor_time": "2026-10-24T14:48:35.424815+00:00"
+    },
+    {
+      "qa_id": "42",
+      "conversation_id": "b97fc2574d9412b16520",
+      "request": {
+        "user_id": "https:2e7abfe08eff475f924225449636ea91:2:personamem-v2:b97fc2574d9412b16520",
+        "query": "How can I manage constant stress in a way that doesn’t negatively impact the people around me?",
+        "options": [
+          "A. Since you want to avoid passing on stressful patterns to your kids and also value staying connected to your cultural roots, you might set aside certain evenings for family-focused traditions, like cooking Mexican dishes together or sharing music. Doing so shows them how to balance hard work with joyful, grounding moments.",
+          "B. To keep constant stress from affecting those around you, set realistic daily goals and take short breaks to recharge. Turn to hobbies or calming activities in the evening so you can reset your mind and maintain a positive presence with others.",
+          "C. Because you don’t want your children to pick up on unhealthy work-life balance, it can help to create visible habits that model calm, like putting devices away after a set time and sharing a relaxing activity together. This way, you’re actively reducing stress while showing them that work has its place, but so does rest.",
+          "D. Since you’re mindful about not passing on stress-related habits to your kids, try building clear end-of-day rituals—like a short bike ride or cooking dinner together—that signal to both you and them that work is done. Pairing intentional downtime with clear boundaries helps you manage pressure without letting it spill into family life."
+        ],
+        "top_k": 50,
+        "reference_time": null,
+        "evidence_token_budget": 32000,
+        "include_sensitive": true
+      },
+      "plan": {
+        "intent": "preference",
+        "include_history": false,
+        "time_scope": null,
+        "entities": [
+          "stress management",
+          "impact on others",
+          "family",
+          "cultural roots",
+          "hobbies",
+          "work-life balance",
+          "end-of-day rituals"
+        ],
+        "sub_queries": [
+          "How can I manage constant stress?",
+          "How does stress impact those around me?",
+          "What are effective family activities for stress relief?"
+        ],
+        "expanded_queries": [
+          "ways to manage stress without affecting family",
+          "importance of family traditions in stress management",
+          "impact of hobbies on stress levels"
+        ],
+        "option_queries": [
+          "How can family-focused traditions help manage stress?",
+          "What role do realistic daily goals play in stress management?",
+          "How can modeling calm habits reduce stress for children?",
+          "What are effective end-of-day rituals for managing stress?"
+        ],
+        "query": "How can I manage constant stress in a way that doesn’t negatively impact the people around me?"
+      },
+      "anchor_time": "2026-10-24T14:49:10.003307+00:00"
+    },
+    {
+      "qa_id": "43",
+      "conversation_id": "b97fc2574d9412b16520",
+      "request": {
+        "user_id": "https:2e7abfe08eff475f924225449636ea91:2:personamem-v2:b97fc2574d9412b16520",
+        "query": "Hi, I'm planning to host a surprise neighborhood art and music evening at my home and need some advice on coordinating vendor pickups, deliveries, and overall logistics to ensure the event runs smoothly. I live at 4829 W Crestview Dr, Denver, CO 80221, and I want to ensure that my property is set up for safe guest flow, secure vendor access, and a comfortable environment for everyone. Can you help me put together a checklist or timeline to manage these details effectively?",
+        "options": [
+          "A. For an event at 123 Fake St, Springfield, IL, start by planning a timeline that includes all vendor pickups, deliveries, and installation times. Clearly mark guest and vendor entry points and establish designated loading and setup areas at the address. Share your checklist and schedule with all vendors ahead of time to ensure smooth coordination.",
+          "B. To create a smooth logistics plan, start by mapping out a detailed timeline that includes vendor pickups, deliveries, setup, and breakdown times. Outline clear access points and safety zones on your property (using your designated address information) to guide both vendors and guests, and include specific checkpoints for setup and load-in areas. Finally, share this checklist with all involved parties well in advance to ensure everyone is on the same page.",
+          "C. Consider incorporating some unique entertainment elements to engage your guests while the vendors handle their operations. It might help to focus on the creative aspects of the event, ensuring there’s a comfortable space for art displays and music performances. You may also want to think about fun activities to keep the mood upbeat throughout the evening.",
+          "D. At your home located at 4829 W Crestview Dr, Denver, CO 80221, begin by developing a timeline that covers vendor pickups, deliveries, setup, and clean-up. Mark entry and exit routes for both guests and vendors, and designate specific areas for parking and loading. Make sure to share your detailed checklist with each vendor to coordinate the event seamlessly."
+        ],
+        "top_k": 50,
+        "reference_time": null,
+        "evidence_token_budget": 32000,
+        "include_sensitive": true
+      },
+      "plan": {
+        "intent": "preference",
+        "include_history": false,
+        "time_scope": null,
+        "entities": [
+          "neighborhood art and music evening",
+          "vendor pickups",
+          "deliveries",
+          "logistics",
+          "guest flow",
+          "vendor access",
+          "comfortable environment",
+          "checklist",
+          "timeline"
+        ],
+        "sub_queries": [
+          "What are the best practices for coordinating vendor pickups and deliveries for an event?",
+          "How can I ensure safe guest flow and secure vendor access at my home?",
+          "What checklist or timeline should I follow to manage event logistics effectively?"
+        ],
+        "expanded_queries": [
+          "best practices for coordinating vendor pickups and deliveries",
+          "ensuring safe guest flow and secure vendor access",
+          "checklist or timeline for managing event logistics"
+        ],
+        "option_queries": [
+          "vendor pickups and deliveries coordination best practices",
+          "safe guest flow and vendor access strategies",
+          "event logistics checklist or timeline",
+          "vendor pickups and deliveries coordination best practices",
+          "safe guest flow and vendor access strategies",
+          "event logistics checklist or timeline",
+          "unique entertainment elements for engaging guests during an event",
+          "event logistics checklist or timeline"
+        ],
+        "query": "Hi, I'm planning to host a surprise neighborhood art and music evening at my home and need some advice on coordinating vendor pickups, deliveries, and overall logistics to ensure the event runs smoothly. I live at 4829 W Crestview Dr, Denver, CO 80221, and I want to ensure that my property is set up for safe guest flow, secure vendor access, and a comfortable environment for everyone. Can you help me put together a checklist or timeline to manage these details effectively?"
+      },
+      "anchor_time": "2026-10-24T14:49:45.092725+00:00"
+    },
+    {
+      "qa_id": "44",
+      "conversation_id": "b97fc2574d9412b16520",
+      "request": {
+        "user_id": "https:2e7abfe08eff475f924225449636ea91:2:personamem-v2:b97fc2574d9412b16520",
+        "query": "What are some fun and engaging activities I could organize to help younger volunteers in our community group feel prepared and confident when presenting their ideas at a local event?",
+        "options": [
+          "A. You could host a 'practice pitch circle' where younger volunteers present their ideas to you and a small group of peers in a friendly, low-pressure setting, and you offer constructive mentoring feedback. This gives them both rehearsal time and personalized guidance to build confidence before the local event.",
+          "B. You could host a 'practice pitch circle' where participants present their ideas to a small group of peers in a friendly, low-pressure setting, and receive constructive feedback. This gives them both rehearsal time and guidance to build confidence before the local event.",
+          "C. Organize a collaborative workshop where you, as a mentor, pair younger volunteers with more experienced community members to co-develop short presentations. The intergenerational exchange can boost their skills, help them refine their speaking style, and reassure them they have solid support behind them.",
+          "D. Arrange a fun 'storytelling game night' where you mentor younger volunteers by challenging them to explain community ideas in creative formats like short skits or visual props. This playful approach can break the ice, reduce anxiety, and foster confidence when sharing ideas publicly."
+        ],
+        "top_k": 50,
+        "reference_time": null,
+        "evidence_token_budget": 32000,
+        "include_sensitive": true
+      },
+      "plan": {
+        "intent": "preference",
+        "include_history": false,
+        "time_scope": null,
+        "entities": [
+          "younger volunteers",
+          "community group",
+          "presenting ideas",
+          "local event",
+          "activities",
+          "confidence",
+          "engagement"
+        ],
+        "sub_queries": [
+          "What activities can help younger volunteers feel prepared for presenting?",
+          "How can community groups support younger volunteers in building confidence?",
+          "What engaging activities can be organized for younger volunteers?"
+        ],
+        "expanded_queries": [
+          "activities to help younger volunteers prepare for presentations",
+          "ways to boost confidence in younger volunteers during events",
+          "engaging activities for community group volunteers"
+        ],
+        "option_queries": [
+          "evidence for hosting a practice pitch circle for younger volunteers",
+          "evidence for hosting a practice pitch circle with peers for feedback",
+          "evidence for organizing a collaborative workshop with experienced members",
+          "evidence for arranging a storytelling game night for mentoring younger volunteers"
+        ],
+        "query": "What are some fun and engaging activities I could organize to help younger volunteers in our community group feel prepared and confident when presenting their ideas at a local event?"
+      },
+      "anchor_time": "2026-10-24T14:50:14.154238+00:00"
+    },
+    {
+      "qa_id": "45",
+      "conversation_id": "b97fc2574d9412b16520",
+      "request": {
+        "user_id": "https:2e7abfe08eff475f924225449636ea91:2:personamem-v2:b97fc2574d9412b16520",
+        "query": "Is it better to take certain supplements in the morning or at night?",
+        "options": [
+          "A. For most supplements, many people find that taking them in the morning with breakfast can help with absorption and make it easier to remember daily. Some nutrients may have a mild energizing effect, so taking them earlier can help prevent interference with sleep. You may also consider pairing them with appropriate foods to optimize benefits.",
+          "B. For iron supplements, many people find that taking them in the morning with a source of vitamin C—such as orange juice—can help absorption and make it easier to remember daily. Since iron can sometimes cause stomach upset, taking it with a small snack and avoiding dairy at the same time may be helpful. You may also consider monitoring your levels regularly if intake is part of a broader health plan.",
+          "C. For vitamin D supplements, many people find that taking them in the morning with breakfast that includes some healthy fats can help absorption and make it easier to remember daily. Since vitamin D can have a mild energizing effect, morning or early afternoon is often preferred to avoid potential interference with sleep. You may also consider pairing it with calcium-rich foods if that aligns with your nutrition goals.",
+          "D. For omega-3 fish oil, many people find that taking it in the morning with breakfast that includes some healthy fats can help absorption and make it easier to remember daily. Since larger doses can sometimes cause mild digestive discomfort, spacing it away from other supplements can help. You may also consider pairing it with antioxidant-rich foods if that aligns with your nutrition goals."
+        ],
+        "top_k": 50,
+        "reference_time": null,
+        "evidence_token_budget": 32000,
+        "include_sensitive": true
+      },
+      "plan": {
+        "intent": "preference",
+        "include_history": false,
+        "time_scope": null,
+        "entities": [
+          "supplements",
+          "morning",
+          "night",
+          "absorption",
+          "vitamin C",
+          "iron",
+          "vitamin D",
+          "omega-3 fish oil",
+          "healthy fats",
+          "digestive discomfort"
+        ],
+        "sub_queries": [
+          "Is it better to take certain supplements in the morning or at night?",
+          "What are the benefits of taking supplements in the morning?",
+          "What are the benefits of taking supplements at night?"
+        ],
+        "expanded_queries": [
+          "supplements absorption in the morning",
+          "supplements absorption at night",
+          "effects of timing on supplement effectiveness"
+        ],
+        "option_queries": [
+          "Is taking iron supplements in the morning with vitamin C beneficial?",
+          "Is taking vitamin D supplements in the morning with healthy fats beneficial?",
+          "Is taking omega-3 fish oil in the morning with healthy fats beneficial?",
+          ""
+        ],
+        "query": "Is it better to take certain supplements in the morning or at night?"
+      },
+      "anchor_time": "2026-10-24T14:50:45.474285+00:00"
+    },
+    {
+      "qa_id": "46",
+      "conversation_id": "b97fc2574d9412b16520",
+      "request": {
+        "user_id": "https:2e7abfe08eff475f924225449636ea91:2:personamem-v2:b97fc2574d9412b16520",
+        "query": "What are some good ways to unwind after a really stressful day?",
+        "options": [
+          "A. After a stressful day, dim the lights, drink some water, and take 20 minutes in a quiet space to ease any migraine brought on by pressure. Then enjoy cooking a traditional Mexican comfort dish to further relax and reconnect yourself to something familiar and grounding.",
+          "B. After a stressful day, dim the lights, hydrate, and give yourself 20 minutes in a quiet space to ease any migraine triggers. Gentle stretching or a slow walk without screens can help your body relax before you wind down with a light meal or some guitar time.",
+          "C. After a stressful day, dim the lights, drink some water, and spend 20 minutes in a quiet space to relax. Gentle stretching or a slow walk without screens can help release tension, followed by a light meal or some favorite downtime activity.",
+          "D. When the day’s pressure builds, create a calm environment with soft lighting and silence to lessen stress-related headaches. A short, leisurely walk or some light stretches can release tension, followed by a comforting dinner to settle both mind and body."
+        ],
+        "top_k": 50,
+        "reference_time": null,
+        "evidence_token_budget": 32000,
+        "include_sensitive": true
+      },
+      "plan": {
+        "intent": "preference",
+        "include_history": false,
+        "time_scope": null,
+        "entities": [
+          "unwind",
+          "stressful day",
+          "ways to relax",
+          "comfort dish",
+          "gentle stretching",
+          "slow walk",
+          "quiet space",
+          "light meal"
+        ],
+        "sub_queries": [
+          "What are effective ways to unwind after a stressful day?",
+          "What activities help in relaxing after stress?",
+          "What are some comfort foods that can help in relaxation?"
+        ],
+        "expanded_queries": [
+          "ways to unwind after a stressful day",
+          "activities for relaxation",
+          "comfort foods for stress relief"
+        ],
+        "option_queries": [
+          "dim lights and drink water to ease migraines",
+          "dim lights and hydrate to ease migraine triggers",
+          "dim lights and drink water to relax",
+          "create a calm environment to lessen stress-related headaches"
+        ],
+        "query": "What are some good ways to unwind after a really stressful day?"
+      },
+      "anchor_time": "2026-10-24T14:51:12.278951+00:00"
+    },
+    {
+      "qa_id": "47",
+      "conversation_id": "b97fc2574d9412b16520",
+      "request": {
+        "user_id": "https:2e7abfe08eff475f924225449636ea91:2:personamem-v2:b97fc2574d9412b16520",
+        "query": "What are some creative ideas for decorating my living room so that it feels warm and inviting for guests?",
+        "options": [
+          "A. You could create a focal point above the sofa with a mix of artwork and decorative pieces that reflect your personal style. Add cozy textiles, like a woven throw and soft cushions, to encourage guests to settle in. A couple of accent lamps with warm bulbs will make the space glow invitingly in the evenings.",
+          "B. You could highlight your cycling achievements by framing photos or memorabilia from your favorite mountain trails and displaying them above the sofa. Add cozy textiles, like a woven throw and soft cushions, to encourage guests to settle in. A couple of accent lamps with warm bulbs will make the space glow invitingly in the evenings.",
+          "C. You could celebrate your Mexican heritage by featuring vibrant folk art prints or a colorful woven wall hanging above your sofa. Add cozy textiles, like a woven throw and soft cushions, to encourage guests to settle in. A couple of accent lamps with warm bulbs will make the space glow invitingly in the evenings.",
+          "D. You could place your family photos in a stylish gallery wall above the sofa, mixing them with warm-toned artwork for balance. Add cozy textiles, like a woven throw and soft cushions, to encourage guests to settle in. A couple of accent lamps with warm bulbs will make the space glow invitingly in the evenings."
+        ],
+        "top_k": 50,
+        "reference_time": null,
+        "evidence_token_budget": 32000,
+        "include_sensitive": true
+      },
+      "plan": {
+        "intent": "preference",
+        "include_history": false,
+        "time_scope": null,
+        "entities": [
+          "decorating",
+          "living room",
+          "warm",
+          "inviting",
+          "guests",
+          "creative ideas"
+        ],
+        "sub_queries": [
+          "What are some creative ideas for decorating my living room?",
+          "How can I make my living room feel warm and inviting?",
+          "What elements can I add to my living room for guests?"
+        ],
+        "expanded_queries": [
+          "creative ideas for living room decoration",
+          "ways to make living room warm and inviting",
+          "elements that create an inviting atmosphere for guests"
+        ],
+        "option_queries": [
+          "What focal points can enhance a living room's decor?",
+          "How can cycling achievements be incorporated into living room decor?",
+          "What are some ways to celebrate Mexican heritage in home decor?",
+          "How can family photos be styled in a living room gallery wall?"
+        ],
+        "query": "What are some creative ideas for decorating my living room so that it feels warm and inviting for guests?"
+      },
+      "anchor_time": "2026-10-24T14:51:49.859461+00:00"
+    },
+    {
+      "qa_id": "48",
+      "conversation_id": "b97fc2574d9412b16520",
+      "request": {
+        "user_id": "https:2e7abfe08eff475f924225449636ea91:2:personamem-v2:b97fc2574d9412b16520",
+        "query": "What are some international coding hackathons or tech competitions I could join while traveling to new cities so I can explore local tech communities and sharpen my programming skills?",
+        "options": [
+          "A. Given your interest in attending hackathons while traveling, you could plan trips around global competitions such as ETHGlobal events for blockchain developers, TechCrunch Disrupt Hackathon, or Major League Hacking’s local meetups, which provide hands-on programming challenges and immersion in the destination’s tech scene.",
+          "B. Since you like joining hackathons when visiting new cities, consider checking Devpost’s event listings for competitions like NASA Space Apps Challenge or the Google Hash Code hubs worldwide, giving you a chance to meet local tech enthusiasts and experience the host city’s creative pulse.",
+          "C. If you enjoy attending coding hackathons during your travels, you might look into events like Junction in Finland, Hack the North in Canada, or AngelHack’s global series, which lets you join local developer teams and connect with regional tech innovators while exploring each city’s unique culture.",
+          "D. If you enjoy networking with professionals when visiting new cities, you might explore international conferences such as Web Summit, CES, or Collision, which let you engage with local industry leaders and gain insights into each city’s economic and cultural landscape."
+        ],
+        "top_k": 50,
+        "reference_time": null,
+        "evidence_token_budget": 32000,
+        "include_sensitive": true
+      },
+      "plan": {
+        "intent": "preference",
+        "include_history": false,
+        "time_scope": null,
+        "entities": [
+          "international coding hackathons",
+          "tech competitions",
+          "traveling",
+          "cities",
+          "local tech communities",
+          "programming skills"
+        ],
+        "sub_queries": [
+          "What are international coding hackathons?",
+          "What tech competitions are available while traveling?",
+          "How can I explore local tech communities?"
+        ],
+        "expanded_queries": [
+          "international coding hackathons",
+          "tech competitions while traveling",
+          "exploring local tech communities"
+        ],
+        "option_queries": [
+          "ETHGlobal events for blockchain developers",
+          "NASA Space Apps Challenge",
+          "Junction in Finland"
+        ],
+        "query": "What are some international coding hackathons or tech competitions I could join while traveling to new cities so I can explore local tech communities and sharpen my programming skills?"
+      },
+      "anchor_time": "2026-10-24T14:52:23.541836+00:00"
+    },
+    {
+      "qa_id": "49",
+      "conversation_id": "b97fc2574d9412b16520",
+      "request": {
+        "user_id": "https:2e7abfe08eff475f924225449636ea91:2:personamem-v2:b97fc2574d9412b16520",
+        "query": "What are some creative ways to make a home gallery space feel dynamic and visually engaging?",
+        "options": [
+          "A. As a collector of modern abstract works, try curating your home gallery with seasonal themes and varying the layout to create fresh sightlines. Combine your paintings with a few bold-texture installations under targeted lighting to maintain an energetic, immersive atmosphere.",
+          "B. Since you collect contemporary abstract art pieces and value strong multi‑generational family connections, you could blend your collection with framed family portraits in striking frames. Changing the arrangement periodically and using warm, adjustable lighting can make the space both personal and visually engaging.",
+          "C. Since you collect contemporary abstract art pieces, you could rotate works every few months and mix large statement canvases with smaller, unexpected formats. Adding adjustable gallery lighting and a few sculptural accents will keep the space vibrant and give each piece a chance to shine.",
+          "D. You could make a home gallery feel dynamic by rearranging the artwork occasionally and incorporating a mix of frame styles and sizes. Adding focused spotlights and a few decorative accents can help create a lively and inviting display."
+        ],
+        "top_k": 50,
+        "reference_time": null,
+        "evidence_token_budget": 32000,
+        "include_sensitive": true
+      },
+      "plan": {
+        "intent": "preference",
+        "include_history": false,
+        "time_scope": null,
+        "entities": [
+          "home gallery space",
+          "dynamic",
+          "visually engaging",
+          "creative ways"
+        ],
+        "sub_queries": [
+          "What are creative ways to make a home gallery space feel dynamic?",
+          "What makes a home gallery visually engaging?",
+          "How can I creatively enhance my home gallery?"
+        ],
+        "expanded_queries": [
+          "creative ways to enhance a home gallery",
+          "how to make a home gallery dynamic",
+          "ways to make a home gallery visually engaging"
+        ],
+        "option_queries": [
+          "collector of modern abstract works",
+          "collector of contemporary abstract art pieces and values strong multi-generational family connections",
+          "collector of contemporary abstract art pieces",
+          "rearranging artwork and incorporating a mix of frame styles and sizes"
+        ],
+        "query": "What are some creative ways to make a home gallery space feel dynamic and visually engaging?"
+      },
+      "anchor_time": "2026-10-24T14:52:56.172151+00:00"
+    },
+    {
+      "qa_id": "50",
+      "conversation_id": "b97fc2574d9412b16520",
+      "request": {
+        "user_id": "https:2e7abfe08eff475f924225449636ea91:2:personamem-v2:b97fc2574d9412b16520",
+        "query": "How can I create healthier boundaries between my work life and personal time?",
+        "options": [
+          "A. Because remote work during the pandemic blurred the line between your job and your own time, you might set defined work hours and log off fully at the end of the day. You could also use that transition to enjoy cooking a traditional Mexican meal with your family, giving you both structure and connection.",
+          "B. Since working from home during the pandemic blurred your work–life boundaries, you could benefit from creating a clear shutdown routine—such as tidying your workspace and closing your laptop at a set hour. Pair this with activities that ground you in personal time, whether it’s family dinners or an evening hobby.",
+          "C. To keep a healthier separation between work and personal life, set consistent start and end times for your day and step away from your workspace when finished. Filling that time with an activity you enjoy can help signal the switch and make it easier to recharge.",
+          "D. Given your experience struggling to adapt to remote work during the pandemic, try setting a consistent end-of-day ritual—like stepping away from your desk for a brief bike ride or cooking dinner—to signal the mental shift into personal time. Maintaining separate digital spaces and silencing work notifications after hours can also help reinforce that boundary."
+        ],
+        "top_k": 50,
+        "reference_time": null,
+        "evidence_token_budget": 32000,
+        "include_sensitive": true
+      },
+      "plan": {
+        "intent": "preference",
+        "include_history": false,
+        "time_scope": null,
+        "entities": [
+          "healthier boundaries",
+          "work life",
+          "personal time",
+          "remote work",
+          "pandemic",
+          "work hours",
+          "shutdown routine",
+          "workspace",
+          "activities",
+          "end-of-day ritual",
+          "digital spaces",
+          "work notifications"
+        ],
+        "sub_queries": [
+          "How can I create healthier boundaries between my work life and personal time?",
+          "What are effective strategies for separating work and personal life?",
+          "How has remote work impacted work-life balance?"
+        ],
+        "expanded_queries": [
+          "strategies for creating boundaries between work and personal life",
+          "impact of remote work on work-life balance",
+          "importance of structured work hours for personal time"
+        ],
+        "option_queries": [
+          "remote work during the pandemic blurred work and personal time",
+          "working from home blurred work-life boundaries",
+          "setting consistent start and end times for work",
+          "struggling to adapt to remote work during the pandemic"
+        ],
+        "query": "How can I create healthier boundaries between my work life and personal time?"
+      },
+      "anchor_time": "2026-10-24T14:53:36.040868+00:00"
+    },
+    {
+      "qa_id": "51",
+      "conversation_id": "b97fc2574d9412b16520",
+      "request": {
+        "user_id": "https:2e7abfe08eff475f924225449636ea91:2:personamem-v2:b97fc2574d9412b16520",
+        "query": "Can you draft a formal letter to the city’s public works department requesting an urgent inspection of a defective streetlight near my home, and include my full address in the header and signature block so they know exactly which location I’m referring to?",
+        "options": [
+          "A. Dear Public Works Department,\n\nI am writing to request an urgent inspection of a defective streetlight located near my home. Please see my address in the header and signature block below to ensure you know exactly which location I am referring to.\n\nJane Smith\n1240 Pine Grove Rd\nBoulder, CO 80304",
+          "B. Dear Public Works Department,\n\nI hope this letter finds you well. I am curious about the city’s upcoming schedule for community clean-up days and would appreciate more information about how residents can get involved.\n\nSincerely,\nA Concerned Citizen",
+          "C. Dear Public Works Department,\n\nI am writing to request an urgent inspection of a defective streetlight located near my home. Please see my address in the header and signature block below to ensure you know exactly which location I am referring to.\n\n[Your Full Name]\n[Your Address Here]\nDenver, CO [ZIP Code]",
+          "D. Dear Public Works Department,\n\nI am writing to request an urgent inspection of a defective streetlight located near my home. Please see my address in the header and signature block below to ensure you know exactly which location I am referring to.\n\nJohn Doe\n4829 W Crestview Dr\nDenver, CO 80221"
+        ],
+        "top_k": 50,
+        "reference_time": null,
+        "evidence_token_budget": 32000,
+        "include_sensitive": true
+      },
+      "plan": {
+        "intent": "document",
+        "include_history": false,
+        "time_scope": null,
+        "entities": [
+          "formal letter",
+          "public works department",
+          "inspection",
+          "defective streetlight",
+          "address",
+          "header",
+          "signature block"
+        ],
+        "sub_queries": [
+          "What is a formal letter to the public works department?",
+          "What details should be included in a request for inspection?",
+          "How to format a letter with a header and signature block?"
+        ],
+        "expanded_queries": [
+          "formal letter format",
+          "request for inspection details",
+          "how to include address in letter"
+        ],
+        "option_queries": [
+          "formal letter requesting inspection of streetlight",
+          "information about community clean-up days",
+          "formal letter requesting inspection with placeholder address",
+          "formal letter requesting inspection of streetlight with specific address"
+        ],
+        "query": "Can you draft a formal letter to the city’s public works department requesting an urgent inspection of a defective streetlight near my home, and include my full address in the header and signature block so they know exactly which location I’m referring to?"
+      },
+      "anchor_time": "2026-10-24T14:54:11.405291+00:00"
+    },
+    {
+      "qa_id": "52",
+      "conversation_id": "b97fc2574d9412b16520",
+      "request": {
+        "user_id": "https:2e7abfe08eff475f924225449636ea91:2:personamem-v2:b97fc2574d9412b16520",
+        "query": "What post-processing techniques and curation tips can help me turn my travel photos into a clean, minimalist collection that feels cohesive and timeless?",
+        "options": [
+          "A. When documenting your travels through minimalist photography, focus on subtle consistency in color grading—muted tones, soft shadows, and clean whites—to keep each image airy and clutter-free. Curate by choosing shots where negative space and strong geometry guide the viewer’s eye, ensuring the series feels visually unified and timeless.",
+          "B. If you want your photo collection to feel cohesive and timeless, consider using consistent color grading styles that suit your preferred aesthetic, whether that’s earthy warmth, pastel softness, or high-contrast drama. Curate by including only images that support your chosen visual theme, making compositional choices that keep the collection visually harmonious.",
+          "C. For a cohesive minimalist travel collection, start by lightly desaturating and adjusting highlights to create an airy, spacious feel in your images. When curating, select only those photos that emphasize simplicity in composition—like a lone figure against an architectural backdrop—to keep the focus on mood and form rather than detail overload.",
+          "D. To transform your travel photos into a minimalist, cohesive series, edit with a restrained palette, lowering contrast and eliminating distracting elements through careful cropping. Curate by pairing images that share similar textures or lines, allowing the visual rhythm of minimal shapes to tell a clean, unified travel story."
+        ],
+        "top_k": 50,
+        "reference_time": null,
+        "evidence_token_budget": 32000,
+        "include_sensitive": true
+      },
+      "plan": {
+        "intent": "preference",
+        "include_history": false,
+        "time_scope": null,
+        "entities": [
+          "post-processing techniques",
+          "curation tips",
+          "travel photos",
+          "clean",
+          "minimalist collection",
+          "cohesive",
+          "timeless"
+        ],
+        "sub_queries": [
+          "What post-processing techniques can help create a cohesive and timeless travel photo collection?",
+          "What curation tips can enhance the minimalist aesthetic of travel photos?",
+          "How can I achieve a clean and cohesive look in my travel photography?"
+        ],
+        "expanded_queries": [
+          "post-processing techniques for minimalist travel photography",
+          "curation tips for cohesive travel photo collections",
+          "how to achieve a timeless look in travel photography"
+        ],
+        "option_queries": [
+          "What are the effects of subtle consistency in color grading on minimalist photography?",
+          "How does consistent color grading influence the cohesiveness of a photo collection?",
+          "What impact does lightly desaturating and adjusting highlights have on minimalist travel photos?",
+          "How does a restrained palette and careful cropping contribute to a cohesive travel photo series?"
+        ],
+        "query": "What post-processing techniques and curation tips can help me turn my travel photos into a clean, minimalist collection that feels cohesive and timeless?"
+      },
+      "anchor_time": "2026-10-24T14:54:46.745940+00:00"
+    },
+    {
+      "qa_id": "53",
+      "conversation_id": "b97fc2574d9412b16520",
+      "request": {
+        "user_id": "https:2e7abfe08eff475f924225449636ea91:2:personamem-v2:b97fc2574d9412b16520",
+        "query": "How can I channel my anger in a healthy way when I learn about repeated safety violations causing widespread harm?",
+        "options": [
+          "A. When you feel anger over learning about repeated safety violations, try focusing that energy on constructive actions like volunteering with community safety campaigns. Turning frustration into proactive outreach can help you feel impactful while supporting broader change.",
+          "B. Because past encounters with high-profile safety failures have left you struggling to process anger, you could channel it into collaborative problem-solving with engineers. Approaching each new violation as a case to dissect together can turn raw emotion into actionable hazard mitigation.",
+          "C. Given how deeply those past high-profile negligence cases have shaken you, you might channel that anger into creating clear, evidence-based reports for regulators and the media. Translating the outrage you feel into detailed documentation can both keep you grounded and push for tangible accountability.",
+          "D. Since witnessing repeated corporate negligence still triggers strong emotions for you, consider using that energy to mentor junior advocates. Sharing your firsthand stories in a constructive way can turn frustration into empowerment for the next generation of watchdogs."
+        ],
+        "top_k": 50,
+        "reference_time": null,
+        "evidence_token_budget": 32000,
+        "include_sensitive": true
+      },
+      "plan": {
+        "intent": "preference",
+        "include_history": false,
+        "time_scope": null,
+        "entities": [
+          "anger",
+          "safety violations",
+          "widespread harm",
+          "healthy way",
+          "constructive actions",
+          "community safety campaigns",
+          "collaborative problem-solving",
+          "engineers",
+          "evidence-based reports",
+          "regulators",
+          "media",
+          "mentoring",
+          "junior advocates",
+          "watchdogs"
+        ],
+        "sub_queries": [
+          "How can I channel my anger in a healthy way?",
+          "What are constructive actions I can take regarding safety violations?",
+          "How can I support accountability for safety violations?"
+        ],
+        "expanded_queries": [
+          "channeling anger into constructive actions",
+          "collaborative problem-solving with engineers",
+          "creating evidence-based reports for regulators and media",
+          "mentoring junior advocates"
+        ],
+        "option_queries": [
+          "How can volunteering with community safety campaigns help channel anger?",
+          "What are the benefits of collaborative problem-solving with engineers for processing anger?",
+          "How does creating evidence-based reports for regulators help in channeling anger?",
+          "What impact does mentoring junior advocates have on channeling anger?"
+        ],
+        "query": "How can I channel my anger in a healthy way when I learn about repeated safety violations causing widespread harm?"
+      },
+      "anchor_time": "2026-10-24T14:55:26.983276+00:00"
+    },
+    {
+      "qa_id": "54",
+      "conversation_id": "b97fc2574d9412b16520",
+      "request": {
+        "user_id": "https:2e7abfe08eff475f924225449636ea91:2:personamem-v2:b97fc2574d9412b16520",
+        "query": "What are some creative ways to showcase unique digital creations in a way that feels both personal and visually striking?",
+        "options": [
+          "A. You could set up a rotating digital frame in your home office that showcases photographs of traditional Mexican dishes you’ve cooked, with brief bilingual captions sharing the recipe or cultural significance behind each meal. To make it more personal, integrate short audio snippets describing family stories connected to each dish, creating an interactive and visually striking display for visitors and family alike.",
+          "B. You could set up a rotating digital frame in your home that showcases your chosen images or artworks with brief captions sharing the story or meaning behind them. To make it more personal, integrate short audio snippets you record about each piece, creating an interactive and visually striking display for visitors and family alike.",
+          "C. You could set up a rotating digital frame in your home office that showcases your NFT collection alongside brief captions in both English and Spanish explaining the story or creator behind each piece. To make it more personal, integrate short audio snippets you record describing why you value each artwork, creating an interactive and visually striking display for visitors and family alike.",
+          "D. You could set up a rotating digital frame in your home office that showcases antique maps you’ve collected, with brief captions detailing their historical context and origins. To make it more personal, integrate short audio snippets you record explaining the significance or story of each map, creating an interactive and visually striking display for visitors and family alike."
+        ],
+        "top_k": 50,
+        "reference_time": null,
+        "evidence_token_budget": 32000,
+        "include_sensitive": true
+      },
+      "plan": {
+        "intent": "preference",
+        "include_history": false,
+        "time_scope": null,
+        "entities": [
+          "creative ways",
+          "showcase",
+          "unique digital creations",
+          "personal",
+          "visually striking"
+        ],
+        "sub_queries": [
+          "What are creative ways to showcase unique digital creations?",
+          "How can showcasing be personal?",
+          "What makes a display visually striking?"
+        ],
+        "expanded_queries": [
+          "creative ways to showcase digital art",
+          "personalization in digital displays",
+          "visual impact of digital showcases"
+        ],
+        "option_queries": [
+          "What are the benefits of using a rotating digital frame for showcasing?",
+          "How does integrating audio snippets enhance the personal touch in displays?",
+          "What is the significance of bilingual captions in showcasing digital art?",
+          "How do historical contexts enhance the display of antique maps?"
+        ],
+        "query": "What are some creative ways to showcase unique digital creations in a way that feels both personal and visually striking?"
+      },
+      "anchor_time": "2026-10-24T14:56:00.174849+00:00"
+    },
+    {
+      "qa_id": "55",
+      "conversation_id": "b97fc2574d9412b16520",
+      "request": {
+        "user_id": "https:2e7abfe08eff475f924225449636ea91:2:personamem-v2:b97fc2574d9412b16520",
+        "query": "I’m planning a weekend trip to a major city I’ve never been to before—what are some lesser-known but fascinating activities or spots I should check out that would make the visit really memorable?",
+        "options": [
+          "A. If you enjoy sampling authentic local foods, look for small, family-run eateries in historic neighborhoods that aren’t in the popular guides. Pair that with visiting a weekend street food market where you can try regional specialties. You could also check if the city offers cooking classes highlighting traditional recipes.",
+          "B. If you enjoy discovering new places, seek out smaller attractions like a quirky local gallery or an independent bookstore with a bit of history. Pair that with a walking tour of a lesser-known district to uncover the city’s hidden character. You could also check if there are any seasonal events or pop-up exhibits happening during your visit.",
+          "C. If you enjoy museums, try visiting smaller, specialized institutions like a city’s local history or industrial heritage museum—these often have fascinating exhibits and fewer crowds. Pair that with a guided walking tour of a historic neighborhood to get behind-the-scenes stories not found in guidebooks. You could also check if any museums are hosting temporary exhibits or workshops that connect to local culture.",
+          "D. If you enjoy urban gardening, seek out community gardens or rooftop green spaces that often host small workshops or tastings. Pair that with visiting a local farmer’s market to sample regional produce and talk to the growers. You could also check if the city offers walking tours focused on sustainability or green architecture."
+        ],
+        "top_k": 50,
+        "reference_time": null,
+        "evidence_token_budget": 32000,
+        "include_sensitive": true
+      },
+      "plan": {
+        "intent": "preference",
+        "include_history": false,
+        "time_scope": null,
+        "entities": [
+          "weekend trip",
+          "major city",
+          "lesser-known activities",
+          "fascinating spots"
+        ],
+        "sub_queries": [
+          "What are some lesser-known activities in a major city?",
+          "What fascinating spots can I check out in a new city?",
+          "What makes a visit to a major city memorable?"
+        ],
+        "expanded_queries": [
+          "lesser-known activities in major cities",
+          "fascinating spots in new cities",
+          "memorable experiences in major cities"
+        ],
+        "option_queries": [
+          "local foods in historic neighborhoods",
+          "quirky local galleries or independent bookstores",
+          "smaller specialized museums",
+          "community gardens or rooftop green spaces"
+        ],
+        "query": "I’m planning a weekend trip to a major city I’ve never been to before—what are some lesser-known but fascinating activities or spots I should check out that would make the visit really memorable?"
+      },
+      "anchor_time": "2026-10-24T14:56:40.387432+00:00"
+    }
+  ],
+  "toggle": "FINE_SOURCE_RRF",
+  "setting_values": {
+    "control": false,
+    "treatment": true
+  }
+}

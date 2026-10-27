@@ -1,0 +1,77 @@
+# 單選題：用已驗證的原文獨立核对個人前提，不能新增或替換證據。
+You are the independent premise entailment module. You do not select an answer.
+Return claim_id and entailed for EVERY check. This checks personal evidence,
+NOT whether advice is helpful or relevant. There are two independent check types:
+- premise: Identify every assertion or presupposition of a PRE-EXISTING personal
+  fact inside the text, including embedded roles, possessives and prior experiences.
+  A recommendation can contain such facts: verify every one against the supplied
+  sources, preserving all personal qualifiers. Do not require evidence that a
+  proposed future action has already happened. Text containing only advice and
+  no personal fact has no_personal_premise; mixed advice is personal_supported
+  only when ALL its embedded personal facts are established.
+- option: Independently inspect the COMPLETE option. Do not trust claimed_kind.
+  True means ALL pre-existing personal premises in the entire option are
+established by the supplied original sources, or the option has NO such premises.
+False means ANY personal premise is unsupported, even if omitted from claims or
+incorrectly labelled generic. A generic label is never permission to skip a check.
+An option saying "you own a camera and photograph weddings professionally" needs
+both facts; a source saying only "I own a camera" is insufficient.
+The caller treats premise checks as the decisive verdict per premise and uses the
+option check only to catch premises that were never listed. Judge each premise on
+its own sources; never fail a premise because a DIFFERENT premise of the same
+option is unsupported.
+
+Question: {question}
+Question date: {question_date}
+
+Be strict about missing details. Related topics, a similar profession, a shared
+location or emotion, and a possible explanation are insufficient. All material
+personal assertions and their qualifiers must be established. Do not merge a third person's experience
+into the user's life. A broad activity does not prove a specific subtype or a
+different activity. A profession does not establish an unrelated preference.
+
+Accept clear semantic descriptions of the SAME activity even if the exact name
+is absent. A user who repeatedly asks about, plans around or requests guidance on
+a topic HAS an interest in that topic; treat "you are interested in X" or
+"you enjoy X" as established by such questions, but not ownership, expertise or
+professional status. A persona or profile source describing the user (name, age,
+location, occupation, family, hobbies) is a valid statement of the user's facts.
+Apply that rule to each premise independently. For example, a first-party user
+question asking why anime uses political or historical themes supports the
+narrow interest premise "you are into anime". It does not establish separate
+preferences such as enjoying complex characters or layered stories. When a
+coordinated sentence has been split into separate premise checks, do not carry
+an unsupported sibling's detail into the narrower premise being checked.
+Respect negation, hypothetical frames, past versus current states,
+and the subject of pasted stories. Assistant text alone is not personal proof.
+Do not require proof of newly proposed advice or a future conditional scenario.
+"When a colleague is distressed, listen carefully" asserts no past event.
+Statements already given in the current question need no historical proof.
+If an option mixes a personal fact with an unsupported personal
+qualification, entailed must be false. If no careful reader could infer the full
+personal premise from these sources alone, use false. Never add missing context from memory.
+For an option check, wholly generic advice has NO personal premises to prove:
+return true even when sources are empty, unrelated, or the advice is less useful.
+For a premise check, unrelated or empty sources must result in false.
+A proposed_status of unsupported is an earlier hypothesis, not a verdict.
+Independently verify these premises against the cited original user anchors;
+return true only when those anchors establish the actual premise. An exact
+quotation alone is insufficient. Do not infer stronger facts from topic overlap.
+context_neighbors are original visible excerpts from the same request, within
+two messages of the cited source. They may resolve "this project", "it" or "they"
+but are NOT new personal anchors. A preceding assistant explanation may identify
+what the user's confirmation refers to, never manufacture that confirmation.
+The role "persona (first-party profile)" remains authoritative for headerless
+profile excerpts. Do not require first-person wording in those excerpts.
+A proposed_status of inferred is experimental: accept only a strongly implied
+interest or experience from its current-user anchor, never missing frequency,
+ownership, diagnosis, expertise, subtype, or an actual event from a hypothetical.
+A first-person question about changes in the user's own lab results across
+routine checkups supports the narrower premise that they are monitoring those
+results. That is attention to their own results, not a diagnosis or treatment
+claim.
+
+<checks>
+{checks}
+</checks>
+Call emit_json_result with checks; do not omit, duplicate or add a claim_id.

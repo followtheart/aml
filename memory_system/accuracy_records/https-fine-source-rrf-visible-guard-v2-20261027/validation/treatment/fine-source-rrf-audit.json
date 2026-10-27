@@ -1,0 +1,859 @@
+{
+  "status": "passed",
+  "summary": {
+    "questions": 61,
+    "archived_source_responses": 163,
+    "started_source_batches": 163,
+    "accounted_source_tokens": 565088,
+    "provider_calls": 163,
+    "statuses": {
+      "fallback": 21,
+      "selected": 35,
+      "skipped": 5
+    }
+  },
+  "rows": [
+    {
+      "search_id": "da8c70605d2647bf95a6001d31ede669",
+      "status": "fallback",
+      "original_main_bytes": 23856,
+      "actual_main_bytes": 23856,
+      "totals": {
+        "questions": 1,
+        "archived_source_responses": 3,
+        "started_source_batches": 3,
+        "accounted_source_tokens": 9102,
+        "provider_calls": 3
+      },
+      "qa_id": "282"
+    },
+    {
+      "search_id": "c72911a9f41a4e91b031dc70dc369aec",
+      "status": "selected",
+      "original_main_bytes": 23627,
+      "actual_main_bytes": 23674,
+      "totals": {
+        "questions": 1,
+        "archived_source_responses": 3,
+        "started_source_batches": 3,
+        "accounted_source_tokens": 9142,
+        "provider_calls": 3
+      },
+      "qa_id": "283"
+    },
+    {
+      "search_id": "c0a4ebfc7c1a4989852babcdd342ddb8",
+      "status": "selected",
+      "original_main_bytes": 23663,
+      "actual_main_bytes": 23625,
+      "totals": {
+        "questions": 1,
+        "archived_source_responses": 3,
+        "started_source_batches": 3,
+        "accounted_source_tokens": 13835,
+        "provider_calls": 3
+      },
+      "qa_id": "284"
+    },
+    {
+      "search_id": "ba4bea3771d948298c1a389f2cf6fd0f",
+      "status": "fallback",
+      "original_main_bytes": 23400,
+      "actual_main_bytes": 23400,
+      "totals": {
+        "questions": 1,
+        "archived_source_responses": 3,
+        "started_source_batches": 3,
+        "accounted_source_tokens": 13968,
+        "provider_calls": 3
+      },
+      "qa_id": "285"
+    },
+    {
+      "search_id": "7324020e6ff1454f8916b236cf7b95ac",
+      "status": "selected",
+      "original_main_bytes": 23398,
+      "actual_main_bytes": 23185,
+      "totals": {
+        "questions": 1,
+        "archived_source_responses": 3,
+        "started_source_batches": 3,
+        "accounted_source_tokens": 12241,
+        "provider_calls": 3
+      },
+      "qa_id": "286"
+    },
+    {
+      "search_id": "a8186f69e7344b6e998c578a327b756f",
+      "status": "fallback",
+      "original_main_bytes": 23831,
+      "actual_main_bytes": 23831,
+      "totals": {
+        "questions": 1,
+        "archived_source_responses": 3,
+        "started_source_batches": 3,
+        "accounted_source_tokens": 9202,
+        "provider_calls": 3
+      },
+      "qa_id": "287"
+    },
+    {
+      "search_id": "50b305a6f3bc4ee78aa2c7c8b7356c0a",
+      "status": "fallback",
+      "original_main_bytes": 23878,
+      "actual_main_bytes": 23878,
+      "totals": {
+        "questions": 1,
+        "archived_source_responses": 3,
+        "started_source_batches": 3,
+        "accounted_source_tokens": 7688,
+        "provider_calls": 3
+      },
+      "qa_id": "288"
+    },
+    {
+      "search_id": "49f17f7f89294a4e93f7106b76433bee",
+      "status": "selected",
+      "original_main_bytes": 23606,
+      "actual_main_bytes": 23984,
+      "totals": {
+        "questions": 1,
+        "archived_source_responses": 3,
+        "started_source_batches": 3,
+        "accounted_source_tokens": 12747,
+        "provider_calls": 3
+      },
+      "qa_id": "289"
+    },
+    {
+      "search_id": "e7c1431c0c7a4b85b2abafcd344f8eda",
+      "status": "selected",
+      "original_main_bytes": 22890,
+      "actual_main_bytes": 23872,
+      "totals": {
+        "questions": 1,
+        "archived_source_responses": 3,
+        "started_source_batches": 3,
+        "accounted_source_tokens": 14683,
+        "provider_calls": 3
+      },
+      "qa_id": "290"
+    },
+    {
+      "search_id": "4611f25707bf47009422ed3df82049d8",
+      "status": "selected",
+      "original_main_bytes": 23913,
+      "actual_main_bytes": 23939,
+      "totals": {
+        "questions": 1,
+        "archived_source_responses": 3,
+        "started_source_batches": 3,
+        "accounted_source_tokens": 4765,
+        "provider_calls": 3
+      },
+      "qa_id": "291"
+    },
+    {
+      "search_id": "654f6a43df4c4710bec016dc3bd648e6",
+      "status": "selected",
+      "original_main_bytes": 23876,
+      "actual_main_bytes": 23968,
+      "totals": {
+        "questions": 1,
+        "archived_source_responses": 3,
+        "started_source_batches": 3,
+        "accounted_source_tokens": 11125,
+        "provider_calls": 3
+      },
+      "qa_id": "292"
+    },
+    {
+      "search_id": "7cd7756f38c840c484f4bf480475df27",
+      "status": "selected",
+      "original_main_bytes": 23638,
+      "actual_main_bytes": 23988,
+      "totals": {
+        "questions": 1,
+        "archived_source_responses": 3,
+        "started_source_batches": 3,
+        "accounted_source_tokens": 8202,
+        "provider_calls": 3
+      },
+      "qa_id": "293"
+    },
+    {
+      "search_id": "68af3709e7ba498abceadf820590e93f",
+      "status": "fallback",
+      "original_main_bytes": 23800,
+      "actual_main_bytes": 23800,
+      "totals": {
+        "questions": 1,
+        "archived_source_responses": 3,
+        "started_source_batches": 3,
+        "accounted_source_tokens": 11607,
+        "provider_calls": 3
+      },
+      "qa_id": "294"
+    },
+    {
+      "search_id": "b7b5a31dac8e404cb8296cc0ef438d0f",
+      "status": "fallback",
+      "original_main_bytes": 23906,
+      "actual_main_bytes": 23906,
+      "totals": {
+        "questions": 1,
+        "archived_source_responses": 3,
+        "started_source_batches": 3,
+        "accounted_source_tokens": 11488,
+        "provider_calls": 3
+      },
+      "qa_id": "295"
+    },
+    {
+      "search_id": "a2b92137002e409f908883fff80c1dd3",
+      "status": "skipped",
+      "original_main_bytes": 23973,
+      "actual_main_bytes": 23973,
+      "totals": {
+        "questions": 1
+      },
+      "qa_id": "296"
+    },
+    {
+      "search_id": "d9952cabe1324fed9b360b798ce23cf3",
+      "status": "skipped",
+      "original_main_bytes": 23821,
+      "actual_main_bytes": 23821,
+      "totals": {
+        "questions": 1
+      },
+      "qa_id": "297"
+    },
+    {
+      "search_id": "f6db9b8e07a445169f504e617c329a8a",
+      "status": "skipped",
+      "original_main_bytes": 23778,
+      "actual_main_bytes": 23778,
+      "totals": {
+        "questions": 1
+      },
+      "qa_id": "298"
+    },
+    {
+      "search_id": "a975e33c438a4b5086a987061d35789c",
+      "status": "selected",
+      "original_main_bytes": 23645,
+      "actual_main_bytes": 23719,
+      "totals": {
+        "questions": 1,
+        "archived_source_responses": 3,
+        "started_source_batches": 3,
+        "accounted_source_tokens": 13377,
+        "provider_calls": 3
+      },
+      "qa_id": "299"
+    },
+    {
+      "search_id": "8295d7340e43483a89b84c2f66cdaa30",
+      "status": "fallback",
+      "original_main_bytes": 23709,
+      "actual_main_bytes": 23709,
+      "totals": {
+        "questions": 1,
+        "archived_source_responses": 3,
+        "started_source_batches": 3,
+        "accounted_source_tokens": 8091,
+        "provider_calls": 3
+      },
+      "qa_id": "300"
+    },
+    {
+      "search_id": "5aa881d5e1b4402babf9ebea4e90199a",
+      "status": "selected",
+      "original_main_bytes": 23652,
+      "actual_main_bytes": 23531,
+      "totals": {
+        "questions": 1,
+        "archived_source_responses": 3,
+        "started_source_batches": 3,
+        "accounted_source_tokens": 8481,
+        "provider_calls": 3
+      },
+      "qa_id": "301"
+    },
+    {
+      "search_id": "1bfd6fc909a3435b86f7d4f08a6be024",
+      "status": "fallback",
+      "original_main_bytes": 23985,
+      "actual_main_bytes": 23985,
+      "totals": {
+        "questions": 1,
+        "archived_source_responses": 3,
+        "started_source_batches": 3,
+        "accounted_source_tokens": 10003,
+        "provider_calls": 3
+      },
+      "qa_id": "302"
+    },
+    {
+      "search_id": "256b9ffddb724b1fbbd68de3f924a77d",
+      "status": "selected",
+      "original_main_bytes": 23813,
+      "actual_main_bytes": 23791,
+      "totals": {
+        "questions": 1,
+        "archived_source_responses": 3,
+        "started_source_batches": 3,
+        "accounted_source_tokens": 12086,
+        "provider_calls": 3
+      },
+      "qa_id": "303"
+    },
+    {
+      "search_id": "ef5e6720cb974a8eb116e4bea78d6592",
+      "status": "skipped",
+      "original_main_bytes": 23939,
+      "actual_main_bytes": 23939,
+      "totals": {
+        "questions": 1
+      },
+      "qa_id": "304"
+    },
+    {
+      "search_id": "2c672f47e2db459798706ffb93d6c635",
+      "status": "selected",
+      "original_main_bytes": 23853,
+      "actual_main_bytes": 23822,
+      "totals": {
+        "questions": 1,
+        "archived_source_responses": 3,
+        "started_source_batches": 3,
+        "accounted_source_tokens": 13361,
+        "provider_calls": 3
+      },
+      "qa_id": "305"
+    },
+    {
+      "search_id": "71ae355d93dc4d15af41452579a94478",
+      "status": "selected",
+      "original_main_bytes": 23532,
+      "actual_main_bytes": 23968,
+      "totals": {
+        "questions": 1,
+        "archived_source_responses": 3,
+        "started_source_batches": 3,
+        "accounted_source_tokens": 10613,
+        "provider_calls": 3
+      },
+      "qa_id": "306"
+    },
+    {
+      "search_id": "f10d6f0cf43747a897ffc13b1f64a3c7",
+      "status": "selected",
+      "original_main_bytes": 23708,
+      "actual_main_bytes": 23944,
+      "totals": {
+        "questions": 1,
+        "archived_source_responses": 3,
+        "started_source_batches": 3,
+        "accounted_source_tokens": 9154,
+        "provider_calls": 3
+      },
+      "qa_id": "307"
+    },
+    {
+      "search_id": "c1cf324670ea4cb79b70b4d86eff2fe2",
+      "status": "selected",
+      "original_main_bytes": 23339,
+      "actual_main_bytes": 23842,
+      "totals": {
+        "questions": 1,
+        "archived_source_responses": 3,
+        "started_source_batches": 3,
+        "accounted_source_tokens": 10493,
+        "provider_calls": 3
+      },
+      "qa_id": "308"
+    },
+    {
+      "search_id": "05900a68d2cb49a39217e0e4d02547b6",
+      "status": "selected",
+      "original_main_bytes": 23984,
+      "actual_main_bytes": 23702,
+      "totals": {
+        "questions": 1,
+        "archived_source_responses": 3,
+        "started_source_batches": 3,
+        "accounted_source_tokens": 12749,
+        "provider_calls": 3
+      },
+      "qa_id": "309"
+    },
+    {
+      "search_id": "cb3eb581776e47e7830e4b78c9d73749",
+      "status": "fallback",
+      "original_main_bytes": 23993,
+      "actual_main_bytes": 23993,
+      "totals": {
+        "questions": 1,
+        "archived_source_responses": 3,
+        "started_source_batches": 3,
+        "accounted_source_tokens": 9009,
+        "provider_calls": 3
+      },
+      "qa_id": "310"
+    },
+    {
+      "search_id": "d3234bed61274f1db5597f07e1943aab",
+      "status": "fallback",
+      "original_main_bytes": 23304,
+      "actual_main_bytes": 23304,
+      "totals": {
+        "questions": 1,
+        "archived_source_responses": 3,
+        "started_source_batches": 3,
+        "accounted_source_tokens": 8632,
+        "provider_calls": 3
+      },
+      "qa_id": "311"
+    },
+    {
+      "search_id": "4a12876299f541099f88f7c95cd01bc9",
+      "status": "selected",
+      "original_main_bytes": 22606,
+      "actual_main_bytes": 23993,
+      "totals": {
+        "questions": 1,
+        "archived_source_responses": 3,
+        "started_source_batches": 3,
+        "accounted_source_tokens": 8244,
+        "provider_calls": 3
+      },
+      "qa_id": "312"
+    },
+    {
+      "search_id": "820b271ad6314b499f455bfc80eb7861",
+      "status": "selected",
+      "original_main_bytes": 23985,
+      "actual_main_bytes": 23881,
+      "totals": {
+        "questions": 1,
+        "archived_source_responses": 3,
+        "started_source_batches": 3,
+        "accounted_source_tokens": 9620,
+        "provider_calls": 3
+      },
+      "qa_id": "313"
+    },
+    {
+      "search_id": "c3bd2e9d1ffe403090f0ba4783d3104d",
+      "status": "fallback",
+      "original_main_bytes": 23980,
+      "actual_main_bytes": 23980,
+      "totals": {
+        "questions": 1,
+        "archived_source_responses": 3,
+        "started_source_batches": 3,
+        "accounted_source_tokens": 9342,
+        "provider_calls": 3
+      },
+      "qa_id": "314"
+    },
+    {
+      "search_id": "da4392448f724d0aa5d4568cd22c725a",
+      "status": "selected",
+      "original_main_bytes": 23757,
+      "actual_main_bytes": 23717,
+      "totals": {
+        "questions": 1,
+        "archived_source_responses": 3,
+        "started_source_batches": 3,
+        "accounted_source_tokens": 9738,
+        "provider_calls": 3
+      },
+      "qa_id": "315"
+    },
+    {
+      "search_id": "ba2c42412e6940f0aa7c77b6ace920d0",
+      "status": "fallback",
+      "original_main_bytes": 23654,
+      "actual_main_bytes": 23654,
+      "totals": {
+        "questions": 1,
+        "archived_source_responses": 3,
+        "started_source_batches": 3,
+        "accounted_source_tokens": 12926,
+        "provider_calls": 3
+      },
+      "qa_id": "316"
+    },
+    {
+      "search_id": "0a24ef7ebfec471cb4663e2a2af92b18",
+      "status": "fallback",
+      "original_main_bytes": 23400,
+      "actual_main_bytes": 23400,
+      "totals": {
+        "questions": 1,
+        "archived_source_responses": 2,
+        "started_source_batches": 2,
+        "accounted_source_tokens": 4482,
+        "provider_calls": 2
+      },
+      "qa_id": "317"
+    },
+    {
+      "search_id": "2ae9352d3d004090adb89d42adfd336d",
+      "status": "selected",
+      "original_main_bytes": 23694,
+      "actual_main_bytes": 23761,
+      "totals": {
+        "questions": 1,
+        "archived_source_responses": 2,
+        "started_source_batches": 2,
+        "accounted_source_tokens": 8551,
+        "provider_calls": 2
+      },
+      "qa_id": "318"
+    },
+    {
+      "search_id": "8cef1e4984a2487cb07b09e8c1b4f87c",
+      "status": "selected",
+      "original_main_bytes": 23792,
+      "actual_main_bytes": 23896,
+      "totals": {
+        "questions": 1,
+        "archived_source_responses": 2,
+        "started_source_batches": 2,
+        "accounted_source_tokens": 9986,
+        "provider_calls": 2
+      },
+      "qa_id": "319"
+    },
+    {
+      "search_id": "48c377ec63824023bf75c08eee41f2e1",
+      "status": "selected",
+      "original_main_bytes": 23921,
+      "actual_main_bytes": 23769,
+      "totals": {
+        "questions": 1,
+        "archived_source_responses": 3,
+        "started_source_batches": 3,
+        "accounted_source_tokens": 11939,
+        "provider_calls": 3
+      },
+      "qa_id": "320"
+    },
+    {
+      "search_id": "4da58ddb6f0a4036baa4fb31ee3d9bd3",
+      "status": "selected",
+      "original_main_bytes": 23547,
+      "actual_main_bytes": 23786,
+      "totals": {
+        "questions": 1,
+        "archived_source_responses": 3,
+        "started_source_batches": 3,
+        "accounted_source_tokens": 11963,
+        "provider_calls": 3
+      },
+      "qa_id": "321"
+    },
+    {
+      "search_id": "2e95a32a71044b24b36de39adb1d6569",
+      "status": "selected",
+      "original_main_bytes": 23670,
+      "actual_main_bytes": 23857,
+      "totals": {
+        "questions": 1,
+        "archived_source_responses": 3,
+        "started_source_batches": 3,
+        "accounted_source_tokens": 11420,
+        "provider_calls": 3
+      },
+      "qa_id": "322"
+    },
+    {
+      "search_id": "e6779dbe92284b6e8e5e73855023a214",
+      "status": "fallback",
+      "original_main_bytes": 23755,
+      "actual_main_bytes": 23755,
+      "totals": {
+        "questions": 1,
+        "archived_source_responses": 3,
+        "started_source_batches": 3,
+        "accounted_source_tokens": 10139,
+        "provider_calls": 3
+      },
+      "qa_id": "323"
+    },
+    {
+      "search_id": "75b41f2359cc488f903842bb63e1dfc1",
+      "status": "selected",
+      "original_main_bytes": 23948,
+      "actual_main_bytes": 23742,
+      "totals": {
+        "questions": 1,
+        "archived_source_responses": 2,
+        "started_source_batches": 2,
+        "accounted_source_tokens": 7661,
+        "provider_calls": 2
+      },
+      "qa_id": "324"
+    },
+    {
+      "search_id": "37983b121d4a457b91c5b3bdae0aae42",
+      "status": "selected",
+      "original_main_bytes": 23886,
+      "actual_main_bytes": 23940,
+      "totals": {
+        "questions": 1,
+        "archived_source_responses": 3,
+        "started_source_batches": 3,
+        "accounted_source_tokens": 9040,
+        "provider_calls": 3
+      },
+      "qa_id": "325"
+    },
+    {
+      "search_id": "164836902a894ebe9afec36db18f0808",
+      "status": "selected",
+      "original_main_bytes": 23818,
+      "actual_main_bytes": 23823,
+      "totals": {
+        "questions": 1,
+        "archived_source_responses": 3,
+        "started_source_batches": 3,
+        "accounted_source_tokens": 7055,
+        "provider_calls": 3
+      },
+      "qa_id": "326"
+    },
+    {
+      "search_id": "89be2e5e90be4dbdbdc68c87fe253f82",
+      "status": "fallback",
+      "original_main_bytes": 23948,
+      "actual_main_bytes": 23948,
+      "totals": {
+        "questions": 1,
+        "archived_source_responses": 3,
+        "started_source_batches": 3,
+        "accounted_source_tokens": 8288,
+        "provider_calls": 3
+      },
+      "qa_id": "327"
+    },
+    {
+      "search_id": "13ba82dc078b474ba9f62a050d235f18",
+      "status": "selected",
+      "original_main_bytes": 23395,
+      "actual_main_bytes": 23587,
+      "totals": {
+        "questions": 1,
+        "archived_source_responses": 3,
+        "started_source_batches": 3,
+        "accounted_source_tokens": 8215,
+        "provider_calls": 3
+      },
+      "qa_id": "328"
+    },
+    {
+      "search_id": "d834a8af13de4eafa7a03dfcb4330f57",
+      "status": "fallback",
+      "original_main_bytes": 23373,
+      "actual_main_bytes": 23373,
+      "totals": {
+        "questions": 1,
+        "archived_source_responses": 3,
+        "started_source_batches": 3,
+        "accounted_source_tokens": 11395,
+        "provider_calls": 3
+      },
+      "qa_id": "329"
+    },
+    {
+      "search_id": "ccc5a0ac5b984fe2a01c4b01b0cb5c0d",
+      "status": "fallback",
+      "original_main_bytes": 23393,
+      "actual_main_bytes": 23393,
+      "totals": {
+        "questions": 1,
+        "archived_source_responses": 3,
+        "started_source_batches": 3,
+        "accounted_source_tokens": 10277,
+        "provider_calls": 3
+      },
+      "qa_id": "330"
+    },
+    {
+      "search_id": "2fb66be244ee404da17b6cbd0e47ab70",
+      "status": "fallback",
+      "original_main_bytes": 23614,
+      "actual_main_bytes": 23614,
+      "totals": {
+        "questions": 1,
+        "archived_source_responses": 3,
+        "started_source_batches": 3,
+        "accounted_source_tokens": 10282,
+        "provider_calls": 3
+      },
+      "qa_id": "331"
+    },
+    {
+      "search_id": "c82895950d244cf28d9f71b9a59a5888",
+      "status": "selected",
+      "original_main_bytes": 23491,
+      "actual_main_bytes": 23795,
+      "totals": {
+        "questions": 1,
+        "archived_source_responses": 2,
+        "started_source_batches": 2,
+        "accounted_source_tokens": 4032,
+        "provider_calls": 2
+      },
+      "qa_id": "332"
+    },
+    {
+      "search_id": "640d6d7e63d745e88704b15198f5b500",
+      "status": "fallback",
+      "original_main_bytes": 23981,
+      "actual_main_bytes": 23981,
+      "totals": {
+        "questions": 1,
+        "archived_source_responses": 3,
+        "started_source_batches": 3,
+        "accounted_source_tokens": 10064,
+        "provider_calls": 3
+      },
+      "qa_id": "333"
+    },
+    {
+      "search_id": "ce687be6d1b041559a7b042b0e5e2fdb",
+      "status": "selected",
+      "original_main_bytes": 23576,
+      "actual_main_bytes": 23470,
+      "totals": {
+        "questions": 1,
+        "archived_source_responses": 3,
+        "started_source_batches": 3,
+        "accounted_source_tokens": 12438,
+        "provider_calls": 3
+      },
+      "qa_id": "334"
+    },
+    {
+      "search_id": "c228a22d963947cba20c105ba9f383a1",
+      "status": "skipped",
+      "original_main_bytes": 23377,
+      "actual_main_bytes": 23377,
+      "totals": {
+        "questions": 1
+      },
+      "qa_id": "335"
+    },
+    {
+      "search_id": "df237c994a7e4ef7bbfddfcba7fa55cf",
+      "status": "fallback",
+      "original_main_bytes": 23853,
+      "actual_main_bytes": 23853,
+      "totals": {
+        "questions": 1,
+        "archived_source_responses": 3,
+        "started_source_batches": 3,
+        "accounted_source_tokens": 14551,
+        "provider_calls": 3
+      },
+      "qa_id": "336"
+    },
+    {
+      "search_id": "7297f488a7b5461297a4d37c8394fd54",
+      "status": "selected",
+      "original_main_bytes": 23923,
+      "actual_main_bytes": 23921,
+      "totals": {
+        "questions": 1,
+        "archived_source_responses": 3,
+        "started_source_batches": 3,
+        "accounted_source_tokens": 6764,
+        "provider_calls": 3
+      },
+      "qa_id": "337"
+    },
+    {
+      "search_id": "94d813b9277a4f819c3408059249b84c",
+      "status": "selected",
+      "original_main_bytes": 23661,
+      "actual_main_bytes": 24000,
+      "totals": {
+        "questions": 1,
+        "archived_source_responses": 3,
+        "started_source_batches": 3,
+        "accounted_source_tokens": 10109,
+        "provider_calls": 3
+      },
+      "qa_id": "338"
+    },
+    {
+      "search_id": "2aa0a34992c2417392f31a9ffc9f3d50",
+      "status": "fallback",
+      "original_main_bytes": 23490,
+      "actual_main_bytes": 23490,
+      "totals": {
+        "questions": 1,
+        "archived_source_responses": 3,
+        "started_source_batches": 3,
+        "accounted_source_tokens": 8121,
+        "provider_calls": 3
+      },
+      "qa_id": "339"
+    },
+    {
+      "search_id": "b51b87d16b204fa4b159e5efda31091c",
+      "status": "selected",
+      "original_main_bytes": 23753,
+      "actual_main_bytes": 23665,
+      "totals": {
+        "questions": 1,
+        "archived_source_responses": 3,
+        "started_source_batches": 3,
+        "accounted_source_tokens": 8800,
+        "provider_calls": 3
+      },
+      "qa_id": "340"
+    },
+    {
+      "search_id": "38e25fb048c246dbb2ed6364681f11e7",
+      "status": "selected",
+      "original_main_bytes": 23773,
+      "actual_main_bytes": 23676,
+      "totals": {
+        "questions": 1,
+        "archived_source_responses": 3,
+        "started_source_batches": 3,
+        "accounted_source_tokens": 11499,
+        "provider_calls": 3
+      },
+      "qa_id": "341"
+    },
+    {
+      "search_id": "2d4d8e5fe7e74add979bcefa1548ace0",
+      "status": "selected",
+      "original_main_bytes": 23373,
+      "actual_main_bytes": 23294,
+      "totals": {
+        "questions": 1,
+        "archived_source_responses": 3,
+        "started_source_batches": 3,
+        "accounted_source_tokens": 12303,
+        "provider_calls": 3
+      },
+      "qa_id": "342"
+    }
+  ],
+  "provider_calls_by_audit": 0,
+  "limitation": "Reconstruct source-score wire identity, fixed RRF, budgets and admission.\n\nOffline only. Source transport and fixed ranking do not establish relevance or\nanswer quality. The stage auditor separately checks raw source/packet binding.\n",
+  "input_sha256": {
+    "/root/aml/memory_system/runs/https-fine-source-rrf-visible-guard-v2-20261027/validation/plan.json": "e9b7810794f23bdd99eb625aca98d60d7f85e467036fef708d178256211c5797",
+    "/root/aml/memory_system/runs/https-fine-source-rrf-visible-guard-v2-20261027/validation/treatment/server-search-debug.jsonl": "30c6e8bd2d763bf4a064d226bab1b3d98c2c94027f1c6c4714d3bc4630df4614",
+    "/root/aml/memory_system/runs/https-fine-source-rrf-visible-guard-v2-20261027/validation/treatment/server.log": "f54f833e46afee2276eb4405137c8b5c106848c376c94499a198e7f5dc3dd393",
+    "/root/aml/memory_system/runs/https-fine-source-rrf-visible-guard-v2-20261027/validation/treatment/completed/data/results/personamem-v2-32k.jsonl": "cdb75765c85ccc343396236b5254e3f8e8106114c24312e0b20d9897344b26c9"
+  }
+}

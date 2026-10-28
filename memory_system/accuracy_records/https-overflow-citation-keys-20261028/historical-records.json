@@ -1,0 +1,375 @@
+{
+  "status": "complete_comparable_history_scan",
+  "best_correct": {
+    "regression": 38.0,
+    "validation": 23.0,
+    "total": 58.0
+  },
+  "records": [
+    {
+      "experiment": "/root/aml/memory_system/runs/https-endpoint-completion-20261026",
+      "arm": "control",
+      "scores": {
+        "regression": 34.0,
+        "validation": 21.0
+      },
+      "evidence": [
+        {
+          "cohort": "regression",
+          "correct": 34.0,
+          "questions": 56,
+          "results": "/root/aml/memory_system/runs/https-endpoint-completion-20261026/regression/control/completed/data/results/personamem-v2-32k.jsonl",
+          "results_sha256": "5511d945cea80a2b8ee6104d806103bc9e518e2b7aa731d1e6d91f5d2c978460",
+          "manifest_sha256": "880f5f6b057bee14440c34802475506b8b5294187841d248e600b4311df71970"
+        },
+        {
+          "cohort": "validation",
+          "correct": 21.0,
+          "questions": 61,
+          "results": "/root/aml/memory_system/runs/https-endpoint-completion-20261026/validation/control/completed/data/results/personamem-v2-32k.jsonl",
+          "results_sha256": "400685c25ca2e72b954f9513c1a84bc3a52e3ed59f111c11be1317b8b8295d33",
+          "manifest_sha256": "890f663d60e01b8d735bdd327b064f8cd3d0d8d13a660609f3c886541e1175bb"
+        }
+      ]
+    },
+    {
+      "experiment": "/root/aml/memory_system/runs/https-endpoint-completion-20261026",
+      "arm": "treatment",
+      "scores": {
+        "regression": 32.0,
+        "validation": 19.0
+      },
+      "evidence": [
+        {
+          "cohort": "regression",
+          "correct": 32.0,
+          "questions": 56,
+          "results": "/root/aml/memory_system/runs/https-endpoint-completion-20261026/regression/treatment/completed/data/results/personamem-v2-32k.jsonl",
+          "results_sha256": "9e3920944b2524199dc7d9919cc67d3836bd604d03fdd7a26866f10603c37a5f",
+          "manifest_sha256": "da18198abef43e56555b793292665a1dc5244b8ed90ccec248e8539dd2f66502"
+        },
+        {
+          "cohort": "validation",
+          "correct": 19.0,
+          "questions": 61,
+          "results": "/root/aml/memory_system/runs/https-endpoint-completion-20261026/validation/treatment/completed/data/results/personamem-v2-32k.jsonl",
+          "results_sha256": "1c07dac9026b6a42a8e0f9a8ed9f1a6d4a232b20462f4b320c34f7d827ce30e6",
+          "manifest_sha256": "81f8f350ac9daece0d4c9853ad9ec0ab6ee82308cad747a83f40162957a784d0"
+        }
+      ]
+    },
+    {
+      "experiment": "/root/aml/memory_system/runs/https-fine-source-rrf-20261027",
+      "arm": "control",
+      "scores": {
+        "regression": 32.0,
+        "validation": 18.0
+      },
+      "evidence": [
+        {
+          "cohort": "regression",
+          "correct": 32.0,
+          "questions": 56,
+          "results": "/root/aml/memory_system/runs/https-fine-source-rrf-20261027/regression/control/completed/data/results/personamem-v2-32k.jsonl",
+          "results_sha256": "57a9b061d8387f938777364321fcc5646cbac7047c598a96af62d53f3bd607c4",
+          "manifest_sha256": "0b9a69a2730f57ba08d4a458561893656735c6ade6c2884b7b29ecc1751fbdb6"
+        },
+        {
+          "cohort": "validation",
+          "correct": 18.0,
+          "questions": 61,
+          "results": "/root/aml/memory_system/runs/https-fine-source-rrf-20261027/validation/control/completed/data/results/personamem-v2-32k.jsonl",
+          "results_sha256": "7209bf3e3e632a45314a486e41e464a745a0286dffd9cced5e2249b9589ff805",
+          "manifest_sha256": "48bb15fb937c8936149ca807973afc2c881cf5fb568797eb11e2e11aeeecc287"
+        }
+      ]
+    },
+    {
+      "experiment": "/root/aml/memory_system/runs/https-fine-source-rrf-20261027",
+      "arm": "treatment",
+      "scores": {
+        "regression": 35.0,
+        "validation": 14.0
+      },
+      "evidence": [
+        {
+          "cohort": "regression",
+          "correct": 35.0,
+          "questions": 56,
+          "results": "/root/aml/memory_system/runs/https-fine-source-rrf-20261027/regression/treatment/completed/data/results/personamem-v2-32k.jsonl",
+          "results_sha256": "8c9a886659641c068c443f8f2b1c575b91ec5ba40f952fc3bda2950c752dd663",
+          "manifest_sha256": "70fbb9c8195583533a29c75975f48bf249f2158702f3399ebbce952c428eefd8"
+        },
+        {
+          "cohort": "validation",
+          "correct": 14.0,
+          "questions": 61,
+          "results": "/root/aml/memory_system/runs/https-fine-source-rrf-20261027/validation/treatment/completed/data/results/personamem-v2-32k.jsonl",
+          "results_sha256": "9e51cf1719c0b7b2d5bf9bb1c3616acfa59f3283e2a91e091d040783a852c745",
+          "manifest_sha256": "ed75cc6860c9a25abfb50792ff7794c2616dc87e5f3f52a49e5a651ecfdfd564"
+        }
+      ]
+    },
+    {
+      "experiment": "/root/aml/memory_system/runs/https-fine-source-rrf-visible-guard-v2-20261027",
+      "arm": "control",
+      "scores": {
+        "regression": 36.0,
+        "validation": 22.0
+      },
+      "evidence": [
+        {
+          "cohort": "regression",
+          "correct": 36.0,
+          "questions": 56,
+          "results": "/root/aml/memory_system/runs/https-fine-source-rrf-visible-guard-v2-20261027/regression/control/completed/data/results/personamem-v2-32k.jsonl",
+          "results_sha256": "b8167e73987961286183f8943afabc116106178cae06743638e04929b6fc44bd",
+          "manifest_sha256": "c4f4f3094ae73c379e6beec8fd4891ccb276ff797acd96c9c6b04c233f72c9ab"
+        },
+        {
+          "cohort": "validation",
+          "correct": 22.0,
+          "questions": 61,
+          "results": "/root/aml/memory_system/runs/https-fine-source-rrf-visible-guard-v2-20261027/validation/control/completed/data/results/personamem-v2-32k.jsonl",
+          "results_sha256": "5ca166183b161f83695617d513de86c0ef1f09dc31c6fc406242b77388bdc762",
+          "manifest_sha256": "45417f2c359863f891014990bba0f3ae62fac4c5f7f8390334eb638d87d71f72"
+        }
+      ]
+    },
+    {
+      "experiment": "/root/aml/memory_system/runs/https-fine-source-rrf-visible-guard-v2-20261027",
+      "arm": "treatment",
+      "scores": {
+        "regression": 29.0,
+        "validation": 13.0
+      },
+      "evidence": [
+        {
+          "cohort": "regression",
+          "correct": 29.0,
+          "questions": 56,
+          "results": "/root/aml/memory_system/runs/https-fine-source-rrf-visible-guard-v2-20261027/regression/treatment/completed/data/results/personamem-v2-32k.jsonl",
+          "results_sha256": "554267ae89c1a77d7f306727e4abee28bedcadf59bd5ceddb924b34e6161ab81",
+          "manifest_sha256": "5ebde44e78a9e8c4f732ead5a5b8e5ebb7565fe20dbc4e95a1c146c1b356f036"
+        },
+        {
+          "cohort": "validation",
+          "correct": 13.0,
+          "questions": 61,
+          "results": "/root/aml/memory_system/runs/https-fine-source-rrf-visible-guard-v2-20261027/validation/treatment/completed/data/results/personamem-v2-32k.jsonl",
+          "results_sha256": "cdb75765c85ccc343396236b5254e3f8e8106114c24312e0b20d9897344b26c9",
+          "manifest_sha256": "b255659939b5e0ee6cded1d866c400cec818a688a9afc9f4bcebe9dc207818fc"
+        }
+      ]
+    },
+    {
+      "experiment": "/root/aml/memory_system/runs/https-joint-source-rank-20261026",
+      "arm": "control",
+      "scores": {
+        "regression": 31.0,
+        "validation": 23.0
+      },
+      "evidence": [
+        {
+          "cohort": "regression",
+          "correct": 31.0,
+          "questions": 56,
+          "results": "/root/aml/memory_system/runs/https-joint-source-rank-20261026/regression/control/completed/data/results/personamem-v2-32k.jsonl",
+          "results_sha256": "fd0609e43362595a3c457c642415e1a28519981c2f386270037135ea8c585aa4",
+          "manifest_sha256": "b969ec51c684911a37d67ee522c264794399329cb9df91906f1925080406b403"
+        },
+        {
+          "cohort": "validation",
+          "correct": 23.0,
+          "questions": 61,
+          "results": "/root/aml/memory_system/runs/https-joint-source-rank-20261026/validation/control/completed/data/results/personamem-v2-32k.jsonl",
+          "results_sha256": "13a84468fb5c981b0e84177f40d72b36c271c95bab08aa082b6dd7a3401e9541",
+          "manifest_sha256": "3efc7cbb425f309e70ebc8c8e39f756dff4d0aa3d0ca785a6f1171349ca4f917"
+        }
+      ]
+    },
+    {
+      "experiment": "/root/aml/memory_system/runs/https-joint-source-rank-20261026",
+      "arm": "treatment",
+      "scores": {
+        "regression": 30.0,
+        "validation": 17.0
+      },
+      "evidence": [
+        {
+          "cohort": "regression",
+          "correct": 30.0,
+          "questions": 56,
+          "results": "/root/aml/memory_system/runs/https-joint-source-rank-20261026/regression/treatment/completed/data/results/personamem-v2-32k.jsonl",
+          "results_sha256": "b9059fde1466b81631400252d32dab22f4ed185f7f2751284f1ba8fe36f8c006",
+          "manifest_sha256": "6a1c46cf4fce94f0cbee81f1dd9b15aa377174165c3e422902a64449707f9f3c"
+        },
+        {
+          "cohort": "validation",
+          "correct": 17.0,
+          "questions": 61,
+          "results": "/root/aml/memory_system/runs/https-joint-source-rank-20261026/validation/treatment/completed/data/results/personamem-v2-32k.jsonl",
+          "results_sha256": "bc2a79faf2b5fbd46c93d419e0ff35231202ab6e173ebc357d11223d73251483",
+          "manifest_sha256": "949f7a3362b93e7e6aaaec51c24b5ffcaf421a60336efb75aea7e669b5a69112"
+        }
+      ]
+    },
+    {
+      "experiment": "/root/aml/memory_system/runs/https-option-margin-20261027",
+      "arm": "control",
+      "scores": {
+        "regression": 30.0,
+        "validation": 18.0
+      },
+      "evidence": [
+        {
+          "cohort": "regression",
+          "correct": 30.0,
+          "questions": 56,
+          "results": "/root/aml/memory_system/runs/https-option-margin-20261027/regression/control/completed/data/results/personamem-v2-32k.jsonl",
+          "results_sha256": "4f0e7dfb943f7151f61fef04a46b0c1cce004585530e1f57ccbb81ea132d81c3",
+          "manifest_sha256": "95f2c13c40588723540bc09eb9004374c00862ac47145c147db1a38427d686dc"
+        },
+        {
+          "cohort": "validation",
+          "correct": 18.0,
+          "questions": 61,
+          "results": "/root/aml/memory_system/runs/https-option-margin-20261027/validation/control/completed/data/results/personamem-v2-32k.jsonl",
+          "results_sha256": "148db70f60a1fd4a8d9e64181f39512f5550f81376e52f76dd9f862116314424",
+          "manifest_sha256": "ba301929fd7441882478aa8901202b103cb383aa6abfc6e884f392083767117c"
+        }
+      ]
+    },
+    {
+      "experiment": "/root/aml/memory_system/runs/https-option-margin-20261027",
+      "arm": "treatment",
+      "scores": {
+        "regression": 33.0,
+        "validation": 21.0
+      },
+      "evidence": [
+        {
+          "cohort": "regression",
+          "correct": 33.0,
+          "questions": 56,
+          "results": "/root/aml/memory_system/runs/https-option-margin-20261027/regression/treatment/completed/data/results/personamem-v2-32k.jsonl",
+          "results_sha256": "9729e9a2cbff39a049c3c0f8534c9317bc5d5860db92f3ea30ae0d1dd0ea9a4c",
+          "manifest_sha256": "b5baa1cb160dfa89351910e48aa2ca4b9ddc07cde92d809c94a8bc941309aaf6"
+        },
+        {
+          "cohort": "validation",
+          "correct": 21.0,
+          "questions": 61,
+          "results": "/root/aml/memory_system/runs/https-option-margin-20261027/validation/treatment/completed/data/results/personamem-v2-32k.jsonl",
+          "results_sha256": "eb062b6fb45ba122ebd48ff883920a608e7a5ec7850c99facf3c03640f7fb618",
+          "manifest_sha256": "5460574bc04acfc039b70c767a08864036c5c8d7ec0d93b0b23f35d12d9eafb1"
+        }
+      ]
+    },
+    {
+      "experiment": "/root/aml/memory_system/runs/https-recovery-valid-citation-20261028",
+      "arm": "control",
+      "scores": {
+        "regression": 30.0,
+        "validation": 19.0
+      },
+      "evidence": [
+        {
+          "cohort": "regression",
+          "correct": 30.0,
+          "questions": 56,
+          "results": "/root/aml/memory_system/runs/https-recovery-valid-citation-20261028/regression/control/completed/data/results/personamem-v2-32k.jsonl",
+          "results_sha256": "978f32c906f30b7bfc71ead0f03aeede381b3a81ab43ba6af0e438cb39556911",
+          "manifest_sha256": "d44f397ebdc25803f6806d3e1aaf889ce575644e5faab25aa01963c3aeaa02c1"
+        },
+        {
+          "cohort": "validation",
+          "correct": 19.0,
+          "questions": 61,
+          "results": "/root/aml/memory_system/runs/https-recovery-valid-citation-20261028/validation/control/completed/data/results/personamem-v2-32k.jsonl",
+          "results_sha256": "61c6f64ec65e9406318dd83fa463ad68d93f302224618dc96ae422e94e1bfd70",
+          "manifest_sha256": "3a104b520c8ddcce52e5bf5efcd089844ede7260e7aa52e9b7dbc56c07bcf1cb"
+        }
+      ]
+    },
+    {
+      "experiment": "/root/aml/memory_system/runs/https-recovery-valid-citation-20261028",
+      "arm": "treatment",
+      "scores": {
+        "regression": 36.0,
+        "validation": 20.0
+      },
+      "evidence": [
+        {
+          "cohort": "regression",
+          "correct": 36.0,
+          "questions": 56,
+          "results": "/root/aml/memory_system/runs/https-recovery-valid-citation-20261028/regression/treatment/completed/data/results/personamem-v2-32k.jsonl",
+          "results_sha256": "91aede20f42f43cbc8210365071071dbb522cd2913353481d8977050c8a0fc8f",
+          "manifest_sha256": "bd3a472189e7d15344d3d522cb3383c148a2db9e41a570cb4d860faf81e4baaa"
+        },
+        {
+          "cohort": "validation",
+          "correct": 20.0,
+          "questions": 61,
+          "results": "/root/aml/memory_system/runs/https-recovery-valid-citation-20261028/validation/treatment/completed/data/results/personamem-v2-32k.jsonl",
+          "results_sha256": "04ea82df77043e7c3d23b74dc3b46f5c07e78193c83cd3abc0f515b48eb161ec",
+          "manifest_sha256": "949174298fb6bea3172739c21420d9973db254c528205ecc027849e4d77ced34"
+        }
+      ]
+    },
+    {
+      "experiment": "/root/aml/memory_system/runs/https-screened-source-20261026",
+      "arm": "control",
+      "scores": {
+        "regression": 38.0,
+        "validation": 17.0
+      },
+      "evidence": [
+        {
+          "cohort": "regression",
+          "correct": 38.0,
+          "questions": 56,
+          "results": "/root/aml/memory_system/runs/https-screened-source-20261026/regression/control/completed/data/results/personamem-v2-32k.jsonl",
+          "results_sha256": "b8ee76d09d76ecbd69c3e953312b7414d7be9329b005e25d88d79db6b5833750",
+          "manifest_sha256": "fafb51a4a3d3bf9ae2135aaec6f17ca722ac455deb6c2409f5f27ef677b06c1c"
+        },
+        {
+          "cohort": "validation",
+          "correct": 17.0,
+          "questions": 61,
+          "results": "/root/aml/memory_system/runs/https-screened-source-20261026/validation/control/completed/data/results/personamem-v2-32k.jsonl",
+          "results_sha256": "80224b3353c1f9d7a3a386b23f7365182fbc52b41bebae658f0aa69f2d02fbd6",
+          "manifest_sha256": "d2d9adef299025d95e598e76ad6f6beba584ae9ad816de705a9ccda1ff16f87b"
+        }
+      ]
+    },
+    {
+      "experiment": "/root/aml/memory_system/runs/https-screened-source-20261026",
+      "arm": "treatment",
+      "scores": {
+        "regression": 33.0,
+        "validation": 15.0
+      },
+      "evidence": [
+        {
+          "cohort": "regression",
+          "correct": 33.0,
+          "questions": 56,
+          "results": "/root/aml/memory_system/runs/https-screened-source-20261026/regression/treatment/completed/data/results/personamem-v2-32k.jsonl",
+          "results_sha256": "721b3e9b3571c469812eb612775f5cf97512510a9d335aa65c9bc39bf72c2419",
+          "manifest_sha256": "6e8134494e1bed2aa2a4f9027f65112aa1b9eb9bb43904e3ad87aa03abd0cd57"
+        },
+        {
+          "cohort": "validation",
+          "correct": 15.0,
+          "questions": 61,
+          "results": "/root/aml/memory_system/runs/https-screened-source-20261026/validation/treatment/completed/data/results/personamem-v2-32k.jsonl",
+          "results_sha256": "52a97fe60891628fe3ce2aa92771d0b01205a4c8236dd062ac194f6cde3cdec7",
+          "manifest_sha256": "0c3c0d707dacafbd8a93f7f7c63e4d98ae4c63e88d6cb60b5857cad989ae0c25"
+        }
+      ]
+    }
+  ],
+  "comparison": "Same complete prepared-file hash and identities, frozen-search-https-v1, fixed gpt-4o-mini, terminal audited arms. Failures remain in denominator. Separate cohort records and same-run/arm total; never combine arms."
+}

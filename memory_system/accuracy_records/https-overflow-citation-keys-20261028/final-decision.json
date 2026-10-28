@@ -1,0 +1,883 @@
+{
+  "status": "complete_paired_https_analysis",
+  "scores": {
+    "control": {
+      "regression": {
+        "correct": 34,
+        "questions": 56,
+        "accuracy": 0.6071428571428571,
+        "errors": 0
+      },
+      "validation": {
+        "correct": 24,
+        "questions": 61,
+        "accuracy": 0.39344262295081966,
+        "errors": 0
+      },
+      "total": {
+        "correct": 58,
+        "questions": 117,
+        "accuracy": 0.49572649572649574,
+        "errors": 0
+      }
+    },
+    "treatment": {
+      "regression": {
+        "correct": 33,
+        "questions": 56,
+        "accuracy": 0.5892857142857143,
+        "errors": 0
+      },
+      "validation": {
+        "correct": 20,
+        "questions": 61,
+        "accuracy": 0.32786885245901637,
+        "errors": 0
+      },
+      "total": {
+        "correct": 53,
+        "questions": 117,
+        "accuracy": 0.452991452991453,
+        "errors": 0
+      }
+    }
+  },
+  "records": [
+    {
+      "arm": "control",
+      "scope": "validation",
+      "correct": 24,
+      "questions": 61,
+      "previous_correct": 23.0
+    }
+  ],
+  "decision": "retain_default_baseline",
+  "candidate_gates_passed": false,
+  "default_changed": false,
+  "comparisons": {
+    "regression": {
+      "stages": {
+        "fused": {
+          "control": 72,
+          "treatment": 72,
+          "gains": 0,
+          "losses": 0
+        },
+        "coarse": {
+          "control": 72,
+          "treatment": 72,
+          "gains": 0,
+          "losses": 0
+        },
+        "fine": {
+          "control": 67,
+          "treatment": 67,
+          "gains": 0,
+          "losses": 0
+        },
+        "listwise_input": {
+          "control": 56,
+          "treatment": 57,
+          "gains": 1,
+          "losses": 0
+        },
+        "listwise_selected": {
+          "control": 49,
+          "treatment": 51,
+          "gains": 4,
+          "losses": 2
+        },
+        "packet": {
+          "control": 52,
+          "treatment": 58,
+          "gains": 6,
+          "losses": 0
+        },
+        "catalog": {
+          "control": 52,
+          "treatment": 58,
+          "gains": 6,
+          "losses": 0
+        }
+      },
+      "gains": [
+        {
+          "conversation_id": "911d1d0140349ab4dd01",
+          "qa_id": "20",
+          "turn_index": 0,
+          "stage": "listwise_selected"
+        },
+        {
+          "conversation_id": "911d1d0140349ab4dd01",
+          "qa_id": "20",
+          "turn_index": 0,
+          "stage": "packet"
+        },
+        {
+          "conversation_id": "911d1d0140349ab4dd01",
+          "qa_id": "20",
+          "turn_index": 0,
+          "stage": "catalog"
+        },
+        {
+          "conversation_id": "911d1d0140349ab4dd01",
+          "qa_id": "21",
+          "turn_index": 1,
+          "stage": "packet"
+        },
+        {
+          "conversation_id": "911d1d0140349ab4dd01",
+          "qa_id": "21",
+          "turn_index": 1,
+          "stage": "catalog"
+        },
+        {
+          "conversation_id": "911d1d0140349ab4dd01",
+          "qa_id": "22",
+          "turn_index": 0,
+          "stage": "listwise_selected"
+        },
+        {
+          "conversation_id": "911d1d0140349ab4dd01",
+          "qa_id": "22",
+          "turn_index": 0,
+          "stage": "packet"
+        },
+        {
+          "conversation_id": "911d1d0140349ab4dd01",
+          "qa_id": "22",
+          "turn_index": 0,
+          "stage": "catalog"
+        },
+        {
+          "conversation_id": "911d1d0140349ab4dd01",
+          "qa_id": "24",
+          "turn_index": 0,
+          "stage": "packet"
+        },
+        {
+          "conversation_id": "911d1d0140349ab4dd01",
+          "qa_id": "24",
+          "turn_index": 0,
+          "stage": "catalog"
+        },
+        {
+          "conversation_id": "911d1d0140349ab4dd01",
+          "qa_id": "7",
+          "turn_index": 0,
+          "stage": "listwise_selected"
+        },
+        {
+          "conversation_id": "911d1d0140349ab4dd01",
+          "qa_id": "7",
+          "turn_index": 0,
+          "stage": "packet"
+        },
+        {
+          "conversation_id": "911d1d0140349ab4dd01",
+          "qa_id": "7",
+          "turn_index": 0,
+          "stage": "catalog"
+        },
+        {
+          "conversation_id": "911d1d0140349ab4dd01",
+          "qa_id": "8",
+          "turn_index": 0,
+          "stage": "listwise_input"
+        },
+        {
+          "conversation_id": "911d1d0140349ab4dd01",
+          "qa_id": "8",
+          "turn_index": 0,
+          "stage": "listwise_selected"
+        },
+        {
+          "conversation_id": "911d1d0140349ab4dd01",
+          "qa_id": "8",
+          "turn_index": 0,
+          "stage": "packet"
+        },
+        {
+          "conversation_id": "911d1d0140349ab4dd01",
+          "qa_id": "8",
+          "turn_index": 0,
+          "stage": "catalog"
+        }
+      ],
+      "losses": [
+        {
+          "conversation_id": "911d1d0140349ab4dd01",
+          "qa_id": "4",
+          "turn_index": 0,
+          "stage": "listwise_selected"
+        },
+        {
+          "conversation_id": "b97fc2574d9412b16520",
+          "qa_id": "44",
+          "turn_index": 0,
+          "stage": "listwise_selected"
+        }
+      ],
+      "first_loss": {
+        "control": {
+          "delivered_all_stages": 49,
+          "listwise_selected": 7,
+          "fine": 5,
+          "listwise_input": 11,
+          "fused": 6,
+          "not_available_in_raw": 4
+        },
+        "treatment": {
+          "delivered_all_stages": 51,
+          "listwise_selected": 6,
+          "fine": 5,
+          "listwise_input": 10,
+          "fused": 6,
+          "not_available_in_raw": 4
+        }
+      }
+    },
+    "validation": {
+      "stages": {
+        "fused": {
+          "control": 69,
+          "treatment": 69,
+          "gains": 0,
+          "losses": 0
+        },
+        "coarse": {
+          "control": 69,
+          "treatment": 69,
+          "gains": 0,
+          "losses": 0
+        },
+        "fine": {
+          "control": 44,
+          "treatment": 44,
+          "gains": 0,
+          "losses": 0
+        },
+        "listwise_input": {
+          "control": 40,
+          "treatment": 40,
+          "gains": 0,
+          "losses": 0
+        },
+        "listwise_selected": {
+          "control": 35,
+          "treatment": 32,
+          "gains": 0,
+          "losses": 3
+        },
+        "packet": {
+          "control": 39,
+          "treatment": 37,
+          "gains": 1,
+          "losses": 3
+        },
+        "catalog": {
+          "control": 39,
+          "treatment": 37,
+          "gains": 1,
+          "losses": 3
+        }
+      },
+      "gains": [
+        {
+          "conversation_id": "160145517d81465ce456",
+          "qa_id": "307",
+          "turn_index": 0,
+          "stage": "packet"
+        },
+        {
+          "conversation_id": "160145517d81465ce456",
+          "qa_id": "307",
+          "turn_index": 0,
+          "stage": "catalog"
+        }
+      ],
+      "losses": [
+        {
+          "conversation_id": "160145517d81465ce456",
+          "qa_id": "283",
+          "turn_index": 0,
+          "stage": "listwise_selected"
+        },
+        {
+          "conversation_id": "160145517d81465ce456",
+          "qa_id": "283",
+          "turn_index": 1,
+          "stage": "listwise_selected"
+        },
+        {
+          "conversation_id": "160145517d81465ce456",
+          "qa_id": "283",
+          "turn_index": 0,
+          "stage": "packet"
+        },
+        {
+          "conversation_id": "160145517d81465ce456",
+          "qa_id": "283",
+          "turn_index": 1,
+          "stage": "packet"
+        },
+        {
+          "conversation_id": "160145517d81465ce456",
+          "qa_id": "283",
+          "turn_index": 0,
+          "stage": "catalog"
+        },
+        {
+          "conversation_id": "160145517d81465ce456",
+          "qa_id": "283",
+          "turn_index": 1,
+          "stage": "catalog"
+        },
+        {
+          "conversation_id": "309dac78d2ccdd53f786",
+          "qa_id": "315",
+          "turn_index": 0,
+          "stage": "packet"
+        },
+        {
+          "conversation_id": "309dac78d2ccdd53f786",
+          "qa_id": "315",
+          "turn_index": 0,
+          "stage": "catalog"
+        },
+        {
+          "conversation_id": "309dac78d2ccdd53f786",
+          "qa_id": "336",
+          "turn_index": 0,
+          "stage": "listwise_selected"
+        }
+      ],
+      "first_loss": {
+        "control": {
+          "listwise_input": 4,
+          "fine": 25,
+          "delivered_all_stages": 35,
+          "not_available_in_raw": 18,
+          "listwise_selected": 5,
+          "fused": 1
+        },
+        "treatment": {
+          "listwise_input": 4,
+          "fine": 25,
+          "listwise_selected": 8,
+          "not_available_in_raw": 18,
+          "delivered_all_stages": 32,
+          "fused": 1
+        }
+      }
+    }
+  },
+  "costs": {
+    "regression:control": {
+      "search": {
+        "totals": {
+          "calls": 459,
+          "accounted_tokens": 2202979,
+          "errors": 3,
+          "failed_calls_without_known_usage": 3
+        },
+        "stages": {
+          "search.embed_queries": {
+            "calls": 77,
+            "accounted_tokens": 12345,
+            "errors": 0,
+            "failed_calls_without_known_usage": 0
+          },
+          "search.cross_encoder.batch_2": {
+            "calls": 56,
+            "accounted_tokens": 535184,
+            "errors": 0,
+            "failed_calls_without_known_usage": 0
+          },
+          "search.cross_encoder.batch_1": {
+            "calls": 56,
+            "accounted_tokens": 603572,
+            "errors": 1,
+            "failed_calls_without_known_usage": 1
+          },
+          "search.cross_encoder.batch_3": {
+            "calls": 56,
+            "accounted_tokens": 182533,
+            "errors": 0,
+            "failed_calls_without_known_usage": 0
+          },
+          "search.listwise": {
+            "calls": 56,
+            "accounted_tokens": 340837,
+            "errors": 2,
+            "failed_calls_without_known_usage": 2
+          },
+          "search.listwise.overflow": {
+            "calls": 55,
+            "accounted_tokens": 186805,
+            "errors": 0,
+            "failed_calls_without_known_usage": 0
+          },
+          "search.listwise.recovery": {
+            "calls": 95,
+            "accounted_tokens": 304557,
+            "errors": 0,
+            "failed_calls_without_known_usage": 0
+          },
+          "search.listwise.retry": {
+            "calls": 2,
+            "accounted_tokens": 13044,
+            "errors": 0,
+            "failed_calls_without_known_usage": 0
+          },
+          "search.listwise.repair": {
+            "calls": 4,
+            "accounted_tokens": 21306,
+            "errors": 0,
+            "failed_calls_without_known_usage": 0
+          },
+          "search.cross_encoder.retry_1": {
+            "calls": 1,
+            "accounted_tokens": 1338,
+            "errors": 0,
+            "failed_calls_without_known_usage": 0
+          },
+          "search.cross_encoder.retry_2": {
+            "calls": 1,
+            "accounted_tokens": 1458,
+            "errors": 0,
+            "failed_calls_without_known_usage": 0
+          }
+        }
+      },
+      "source": {
+        "requests": 150,
+        "valid_decisions": 563,
+        "questions": 56
+      },
+      "summary_calls": 459,
+      "summary_tokens": 2202979
+    },
+    "regression:treatment": {
+      "search": {
+        "totals": {
+          "calls": 452,
+          "accounted_tokens": 2220457,
+          "errors": 3,
+          "failed_calls_without_known_usage": 3
+        },
+        "stages": {
+          "search.embed_queries": {
+            "calls": 77,
+            "accounted_tokens": 12345,
+            "errors": 0,
+            "failed_calls_without_known_usage": 0
+          },
+          "search.cross_encoder.batch_1": {
+            "calls": 56,
+            "accounted_tokens": 601787,
+            "errors": 1,
+            "failed_calls_without_known_usage": 1
+          },
+          "search.cross_encoder.batch_2": {
+            "calls": 56,
+            "accounted_tokens": 524431,
+            "errors": 1,
+            "failed_calls_without_known_usage": 1
+          },
+          "search.cross_encoder.batch_3": {
+            "calls": 56,
+            "accounted_tokens": 182533,
+            "errors": 0,
+            "failed_calls_without_known_usage": 0
+          },
+          "search.listwise": {
+            "calls": 56,
+            "accounted_tokens": 353656,
+            "errors": 0,
+            "failed_calls_without_known_usage": 0
+          },
+          "search.listwise.overflow": {
+            "calls": 55,
+            "accounted_tokens": 230094,
+            "errors": 0,
+            "failed_calls_without_known_usage": 0
+          },
+          "search.listwise.recovery": {
+            "calls": 86,
+            "accounted_tokens": 277697,
+            "errors": 0,
+            "failed_calls_without_known_usage": 0
+          },
+          "search.cross_encoder.retry_1": {
+            "calls": 2,
+            "accounted_tokens": 4106,
+            "errors": 0,
+            "failed_calls_without_known_usage": 0
+          },
+          "search.cross_encoder.retry_2": {
+            "calls": 2,
+            "accounted_tokens": 1912,
+            "errors": 1,
+            "failed_calls_without_known_usage": 1
+          },
+          "search.listwise.repair": {
+            "calls": 6,
+            "accounted_tokens": 31896,
+            "errors": 0,
+            "failed_calls_without_known_usage": 0
+          }
+        }
+      },
+      "source": {
+        "requests": 141,
+        "applied": 55,
+        "extra_reservation_bytes": 94709,
+        "valid_decisions": 478,
+        "questions": 56
+      },
+      "summary_calls": 452,
+      "summary_tokens": 2220457
+    },
+    "regression:reader": {
+      "totals": {
+        "calls": 735,
+        "accounted_tokens": 3120630,
+        "errors": 1,
+        "failed_calls_without_known_usage": 1
+      },
+      "stages": {
+        "eval.choice_witness": {
+          "calls": 112,
+          "accounted_tokens": 467878,
+          "errors": 1,
+          "failed_calls_without_known_usage": 1
+        },
+        "eval.choice_support": {
+          "calls": 112,
+          "accounted_tokens": 943821,
+          "errors": 0,
+          "failed_calls_without_known_usage": 0
+        },
+        "eval.choice_support.repair": {
+          "calls": 100,
+          "accounted_tokens": 503194,
+          "errors": 0,
+          "failed_calls_without_known_usage": 0
+        },
+        "eval.choice_premise_scope": {
+          "calls": 105,
+          "accounted_tokens": 112057,
+          "errors": 0,
+          "failed_calls_without_known_usage": 0
+        },
+        "eval.choice_entailment": {
+          "calls": 112,
+          "accounted_tokens": 428175,
+          "errors": 0,
+          "failed_calls_without_known_usage": 0
+        },
+        "eval.choice_select": {
+          "calls": 53,
+          "accounted_tokens": 284665,
+          "errors": 0,
+          "failed_calls_without_known_usage": 0
+        },
+        "eval.choice_select_review": {
+          "calls": 24,
+          "accounted_tokens": 134791,
+          "errors": 0,
+          "failed_calls_without_known_usage": 0
+        },
+        "eval.choice_citation_recovery": {
+          "calls": 93,
+          "accounted_tokens": 229799,
+          "errors": 0,
+          "failed_calls_without_known_usage": 0
+        },
+        "eval.choice_constraints": {
+          "calls": 22,
+          "accounted_tokens": 13562,
+          "errors": 0,
+          "failed_calls_without_known_usage": 0
+        },
+        "eval.choice_premise_scope.repair": {
+          "calls": 2,
+          "accounted_tokens": 2688,
+          "errors": 0,
+          "failed_calls_without_known_usage": 0
+        }
+      }
+    },
+    "validation:control": {
+      "search": {
+        "totals": {
+          "calls": 491,
+          "accounted_tokens": 2519003,
+          "errors": 1,
+          "failed_calls_without_known_usage": 1
+        },
+        "stages": {
+          "search.embed_queries": {
+            "calls": 77,
+            "accounted_tokens": 14245,
+            "errors": 0,
+            "failed_calls_without_known_usage": 0
+          },
+          "search.cross_encoder.batch_2": {
+            "calls": 61,
+            "accounted_tokens": 596464,
+            "errors": 0,
+            "failed_calls_without_known_usage": 0
+          },
+          "search.cross_encoder.batch_1": {
+            "calls": 61,
+            "accounted_tokens": 715207,
+            "errors": 1,
+            "failed_calls_without_known_usage": 1
+          },
+          "search.cross_encoder.batch_3": {
+            "calls": 61,
+            "accounted_tokens": 222094,
+            "errors": 0,
+            "failed_calls_without_known_usage": 0
+          },
+          "search.listwise": {
+            "calls": 61,
+            "accounted_tokens": 390830,
+            "errors": 0,
+            "failed_calls_without_known_usage": 0
+          },
+          "search.listwise.recovery": {
+            "calls": 95,
+            "accounted_tokens": 310453,
+            "errors": 0,
+            "failed_calls_without_known_usage": 0
+          },
+          "search.listwise.overflow": {
+            "calls": 61,
+            "accounted_tokens": 205148,
+            "errors": 0,
+            "failed_calls_without_known_usage": 0
+          },
+          "search.listwise.repair": {
+            "calls": 11,
+            "accounted_tokens": 59100,
+            "errors": 0,
+            "failed_calls_without_known_usage": 0
+          },
+          "search.cross_encoder.batch_4": {
+            "calls": 1,
+            "accounted_tokens": 1430,
+            "errors": 0,
+            "failed_calls_without_known_usage": 0
+          },
+          "search.cross_encoder.retry_1": {
+            "calls": 1,
+            "accounted_tokens": 2198,
+            "errors": 0,
+            "failed_calls_without_known_usage": 0
+          },
+          "search.cross_encoder.retry_2": {
+            "calls": 1,
+            "accounted_tokens": 1834,
+            "errors": 0,
+            "failed_calls_without_known_usage": 0
+          }
+        }
+      },
+      "source": {
+        "requests": 156,
+        "valid_decisions": 549,
+        "questions": 61
+      },
+      "summary_calls": 491,
+      "summary_tokens": 2519003
+    },
+    "validation:treatment": {
+      "search": {
+        "totals": {
+          "calls": 493,
+          "accounted_tokens": 2587906,
+          "errors": 1,
+          "failed_calls_without_known_usage": 1
+        },
+        "stages": {
+          "search.embed_queries": {
+            "calls": 77,
+            "accounted_tokens": 14245,
+            "errors": 0,
+            "failed_calls_without_known_usage": 0
+          },
+          "search.cross_encoder.batch_1": {
+            "calls": 61,
+            "accounted_tokens": 727713,
+            "errors": 0,
+            "failed_calls_without_known_usage": 0
+          },
+          "search.cross_encoder.batch_2": {
+            "calls": 61,
+            "accounted_tokens": 596464,
+            "errors": 0,
+            "failed_calls_without_known_usage": 0
+          },
+          "search.cross_encoder.batch_3": {
+            "calls": 61,
+            "accounted_tokens": 222094,
+            "errors": 0,
+            "failed_calls_without_known_usage": 0
+          },
+          "search.listwise": {
+            "calls": 61,
+            "accounted_tokens": 384971,
+            "errors": 1,
+            "failed_calls_without_known_usage": 1
+          },
+          "search.listwise.recovery": {
+            "calls": 100,
+            "accounted_tokens": 329088,
+            "errors": 0,
+            "failed_calls_without_known_usage": 0
+          },
+          "search.listwise.overflow": {
+            "calls": 61,
+            "accounted_tokens": 256214,
+            "errors": 0,
+            "failed_calls_without_known_usage": 0
+          },
+          "search.listwise.repair": {
+            "calls": 9,
+            "accounted_tokens": 49261,
+            "errors": 0,
+            "failed_calls_without_known_usage": 0
+          },
+          "search.cross_encoder.batch_4": {
+            "calls": 1,
+            "accounted_tokens": 1430,
+            "errors": 0,
+            "failed_calls_without_known_usage": 0
+          },
+          "search.listwise.retry": {
+            "calls": 1,
+            "accounted_tokens": 6426,
+            "errors": 0,
+            "failed_calls_without_known_usage": 0
+          }
+        }
+      },
+      "source": {
+        "requests": 161,
+        "valid_decisions": 505,
+        "applied": 61,
+        "extra_reservation_bytes": 109764,
+        "questions": 61
+      },
+      "summary_calls": 493,
+      "summary_tokens": 2587906
+    },
+    "validation:reader": {
+      "totals": {
+        "calls": 744,
+        "accounted_tokens": 3217317,
+        "errors": 1,
+        "failed_calls_without_known_usage": 1
+      },
+      "stages": {
+        "eval.choice_witness": {
+          "calls": 122,
+          "accounted_tokens": 507830,
+          "errors": 1,
+          "failed_calls_without_known_usage": 1
+        },
+        "eval.choice_support": {
+          "calls": 122,
+          "accounted_tokens": 1031275,
+          "errors": 0,
+          "failed_calls_without_known_usage": 0
+        },
+        "eval.choice_premise_scope": {
+          "calls": 110,
+          "accounted_tokens": 126875,
+          "errors": 0,
+          "failed_calls_without_known_usage": 0
+        },
+        "eval.choice_citation_recovery": {
+          "calls": 82,
+          "accounted_tokens": 207507,
+          "errors": 0,
+          "failed_calls_without_known_usage": 0
+        },
+        "eval.choice_entailment": {
+          "calls": 120,
+          "accounted_tokens": 483239,
+          "errors": 0,
+          "failed_calls_without_known_usage": 0
+        },
+        "eval.choice_select": {
+          "calls": 66,
+          "accounted_tokens": 361955,
+          "errors": 0,
+          "failed_calls_without_known_usage": 0
+        },
+        "eval.choice_select_review": {
+          "calls": 38,
+          "accounted_tokens": 216371,
+          "errors": 0,
+          "failed_calls_without_known_usage": 0
+        },
+        "eval.choice_premise_scope.repair": {
+          "calls": 2,
+          "accounted_tokens": 6244,
+          "errors": 0,
+          "failed_calls_without_known_usage": 0
+        },
+        "eval.choice_constraints": {
+          "calls": 16,
+          "accounted_tokens": 10248,
+          "errors": 0,
+          "failed_calls_without_known_usage": 0
+        },
+        "eval.choice_support.repair": {
+          "calls": 66,
+          "accounted_tokens": 265773,
+          "errors": 0,
+          "failed_calls_without_known_usage": 0
+        }
+      }
+    }
+  },
+  "input_sha256": {
+    "/root/aml/memory_system/runs/https-overflow-citation-keys-20261028/regression/control/completed/data/results/personamem-v2-32k.jsonl": "67bd42b1bc488cd8ac9da58336856c712298cc1ea2d50cf3d568fb83b9aa51f2",
+    "/root/aml/memory_system/runs/https-overflow-citation-keys-20261028/regression/control/summary.json": "14ffc98a8f2605ba99c4efa8ec0fe6e6f455a0a50f05d63ee1aff9a17ca197df",
+    "/root/aml/memory_system/runs/https-overflow-citation-keys-20261028/regression/control/isolated-manifest.json": "69b0543be0fa3a6930de926affa76ac407e11afe1edcde3ddaf21f9493df5ae1",
+    "/root/aml/memory_system/runs/https-overflow-citation-keys-20261028/regression/control/server-search-debug.jsonl": "aa29ecbb4e9c2821d6d10f03191204ac14e5a313b16d5fdda3bee0b44d174337",
+    "/root/aml/memory_system/runs/https-overflow-citation-keys-20261028/regression/control/server.log": "97d985b0922043308d8d97f296f49af1bfee16ff4c0f6dfa02d26433022d8f02",
+    "/root/aml/memory_system/runs/https-overflow-citation-keys-20261028/regression/control/recovery-citation-keys-audit.json": "41d240d476a6ccd883556f8d508907127a0f745075cd049b26de9473119c3f96",
+    "/root/aml/memory_system/runs/https-overflow-citation-keys-20261028/regression/control/funnel/stage-transport.json": "1a2860101fdb1357391017904949ab999fa6027590055761d45c840b5a5edf3a",
+    "/root/aml/memory_system/runs/https-overflow-citation-keys-20261028/regression/treatment/completed/data/results/personamem-v2-32k.jsonl": "ad544ad4aa93b46e2e4e072dbd17274d16d4c91cf534e61b2fe808792ca2192e",
+    "/root/aml/memory_system/runs/https-overflow-citation-keys-20261028/regression/treatment/summary.json": "0629223a85688c7c817f349786a270c68e653c56cb803ea226034d58d7a66ce4",
+    "/root/aml/memory_system/runs/https-overflow-citation-keys-20261028/regression/treatment/isolated-manifest.json": "b1f5872dbd5a887ccb1f63761165f26890b5f4e1678f0e568edc40bdb4f22252",
+    "/root/aml/memory_system/runs/https-overflow-citation-keys-20261028/regression/treatment/server-search-debug.jsonl": "302dc33f3791126fd35e03d81c30553ac2a4107a73e53d2d2ffb950c5fbae60d",
+    "/root/aml/memory_system/runs/https-overflow-citation-keys-20261028/regression/treatment/server.log": "8566a3d88ae86f693ebfb41304638647138a41405a497ac13b947ecb05f03a13",
+    "/root/aml/memory_system/runs/https-overflow-citation-keys-20261028/regression/treatment/recovery-citation-keys-audit.json": "61258ca48624062be6ac7a62cc934816e9ebd059af2680626c779b4d4249f17a",
+    "/root/aml/memory_system/runs/https-overflow-citation-keys-20261028/regression/treatment/funnel/stage-transport.json": "98f0ac87da7e5cbbab7117b5b587171fea6d10876fb5759922ee12a96607cac9",
+    "/root/aml/memory_system/runs/https-overflow-citation-keys-20261028/regression/reader-provider.log": "f948bbbde8365e898a5aa9ba2817850c271bec10fe8bf8986b8082ada48214e1",
+    "/root/aml/memory_system/runs/https-overflow-citation-keys-20261028/validation/control/completed/data/results/personamem-v2-32k.jsonl": "d84cf60084f91a0f00bdb782679553322498acf27c66cd85badff75a0cb2e1ee",
+    "/root/aml/memory_system/runs/https-overflow-citation-keys-20261028/validation/control/summary.json": "d67e0e7085b48e575356b42e8f505864519b860a2531d250904fc90231701afe",
+    "/root/aml/memory_system/runs/https-overflow-citation-keys-20261028/validation/control/isolated-manifest.json": "2f4a7484d96e197573bee711d2be49d61e8a08c3ea61a3c3443f07ea8e0597dd",
+    "/root/aml/memory_system/runs/https-overflow-citation-keys-20261028/validation/control/server-search-debug.jsonl": "a12a6f828e4ce4008be9d191f1bb9d82c7043f9f75bb221c09dec10685893ea2",
+    "/root/aml/memory_system/runs/https-overflow-citation-keys-20261028/validation/control/server.log": "5d468907af4a691f6c0e6db955f39333e2cf9a8e0a0cc1c0c20f78ef601846e2",
+    "/root/aml/memory_system/runs/https-overflow-citation-keys-20261028/validation/control/recovery-citation-keys-audit.json": "0aa613f6c0227e20985875993f6b7a8eee59984e177cdf853214c9d8ddbbc268",
+    "/root/aml/memory_system/runs/https-overflow-citation-keys-20261028/validation/control/funnel/stage-transport.json": "66b739ffc7c4fc8e22c4caeaf749a7f0d88f61fba6e529f325c56bc589d42dcb",
+    "/root/aml/memory_system/runs/https-overflow-citation-keys-20261028/validation/treatment/completed/data/results/personamem-v2-32k.jsonl": "6dfda928fc716895e3f099c4431178f7ce68f8c7509bcd27338c845015295358",
+    "/root/aml/memory_system/runs/https-overflow-citation-keys-20261028/validation/treatment/summary.json": "7b092f669e00e64d57482f46330aa52a98cd1522e6a5689ef7d62af200b981da",
+    "/root/aml/memory_system/runs/https-overflow-citation-keys-20261028/validation/treatment/isolated-manifest.json": "85bf5d431c6b4f12fea96164e9541845df85113649c0db015ac38cce1f1f6588",
+    "/root/aml/memory_system/runs/https-overflow-citation-keys-20261028/validation/treatment/server-search-debug.jsonl": "b67f9bf38f13a86f4ab4befcd531f6965b1b6b74fc890d87a6e6eef8bb91ef05",
+    "/root/aml/memory_system/runs/https-overflow-citation-keys-20261028/validation/treatment/server.log": "85dde2e4f83d72fe94f644b98fbe35b5e3a285af9ee4ed7d47774af463984473",
+    "/root/aml/memory_system/runs/https-overflow-citation-keys-20261028/validation/treatment/recovery-citation-keys-audit.json": "b695a0cc31f34d6131a2d06e8c3606a9e3f3f851c08719a288c03ffbf7cde046",
+    "/root/aml/memory_system/runs/https-overflow-citation-keys-20261028/validation/treatment/funnel/stage-transport.json": "ac295157f712da917cce840dea66cf226755fe4e2caf9e0ed90f152520b0e6a3",
+    "/root/aml/memory_system/runs/https-overflow-citation-keys-20261028/validation/reader-provider.log": "dd1d3aba789dd337807fd169106884e44fe1d4bbead32d536fd5647564a68ad8"
+  },
+  "limitation": "Same FastAPI HTTPS /search on isolated services, frozen ingestion/planning/usage; repeated development cohorts, one stochastic pair. A schema constraint does not force provider compliance or establish semantic relevance. Actual budgets may trigger fallback; full paid outcomes required.",
+  "next_step": "Analyze full final packet losses/gains and answer changes before the next general retrieval change."
+}

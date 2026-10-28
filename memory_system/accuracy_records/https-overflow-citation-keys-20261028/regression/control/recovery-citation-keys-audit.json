@@ -1,0 +1,13 @@
+{
+  "status": "passed",
+  "summary": {
+    "requests": 150,
+    "valid_decisions": 563,
+    "questions": 56
+  },
+  "input_sha256": {
+    "/root/aml/memory_system/runs/https-overflow-citation-keys-20261028/regression/source/memory_system/scripts/audit_recovery_citation_keys.py": "8011a4db3e2adab29cb4d7b3ea5036e7f53a5307f4d3fe61f16f207286bc4c0d",
+    "/root/aml/memory_system/runs/https-overflow-citation-keys-20261028/regression/control/server-search-debug.jsonl": "aa29ecbb4e9c2821d6d10f03191204ac14e5a313b16d5fdda3bee0b44d174337",
+    "/root/aml/memory_system/runs/https-overflow-citation-keys-20261028/regression/control/completed/data/results/personamem-v2-32k.jsonl": "67bd42b1bc488cd8ac9da58336856c712298cc1ea2d50cf3d568fb83b9aa51f2"
+  }
+}

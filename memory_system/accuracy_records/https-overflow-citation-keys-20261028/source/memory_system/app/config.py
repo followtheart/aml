@@ -1,0 +1,491 @@
+"""Deployment configuration. All knobs are environment variables.
+
+AML_LLM_MODEL   : litellm model string for all LLM calls.
+                  Default "gpt-4o-mini" (AML full-gate requirement in cycle 1).
+                  Any litellm-supported model works. Examples:
+                    OpenAI       gpt-4o-mini            (OPENAI_API_KEY)
+                    SiliconFlow  siliconflow/Qwen/Qwen2.5-7B-Instruct
+                                 (SILICONFLOW_API_KEY)
+                    DashScope    dashscope/qwen3-14b   (DASHSCOPE_API_KEY,
+                                 Alibaba Cloud Bailian OpenAI-compatible mode)
+                    DeepSeek     deepseek/deepseek-flash (DEEPSEEK_API_KEY)
+                    Ollama       ollama/qwen2.5
+                    Any OpenAI-compatible endpoint:
+                      AML_LLM_MODEL=openai/<model> + AML_LLM_API_BASE=<url>
+AML_LLM_API_BASE / AML_LLM_API_KEY : optional custom endpoint / key override
+                  for the chat model (OpenAI-compatible APIs).
+AML_LLM_JSON_MAX_TOKENS : output cap for structured JSON calls. Default 2048.
+AML_EXTRACT_BATCH_MESSAGES : maximum messages per extraction request.
+                  Default 6 to keep small-model JSON generation reliable.
+AML_EMBED_MODEL : litellm embedding model. Default "text-embedding-3-small".
+                  SiliconFlow example: siliconflow/BAAI/bge-m3
+                  DashScope example:   dashscope/text-embedding-v4
+                  (or openai/<model> + AML_EMBED_API_BASE).
+AML_EMBED_API_BASE / AML_EMBED_API_KEY : same override for embeddings.
+AML_EMBED_DIM / AML_EMBEDDING_SPACE : stored vector dimension and explicit
+                  compatibility-space label. Changing either requires re-embedding.
+AML_API_KEY     : Bearer token required on /add and /search. Empty = no auth
+                  (only acceptable for local smoke).
+AML_DB_PATH     : SQLite file path. Default ./memory.db
+AML_FAKE        : "1" forces offline FakeLLM/FakeEmbedding (no network, for
+                  plumbing tests and CI).
+AML_CASCADE_COARSE_LIMIT / AML_CASCADE_FINE_LIMIT / AML_CASCADE_LLM_LIMIT : stage budgets.
+"""
+import os
+from pathlib import Path
+
+
+def _load_dotenv():
+    """Tiny .env loader (no dependency). Does not override existing env."""
+    for cand in (Path(__file__).resolve().parents[1] / ".env",
+                 Path.cwd() / ".env"):
+        if not cand.exists():
+            continue
+        for line in cand.read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            k, v = line.split("=", 1)
+            os.environ.setdefault(k.strip(), v.strip().strip('"').strip("'"))
+
+
+_load_dotenv()
+
+LLM_MODEL = os.environ.get("AML_LLM_MODEL", "gpt-4o-mini")
+LLM_API_BASE = os.environ.get("AML_LLM_API_BASE", "") or None
+LLM_API_KEY = os.environ.get("AML_LLM_API_KEY", "") or None
+EMBED_MODEL = os.environ.get("AML_EMBED_MODEL", "text-embedding-3-small")
+EMBED_API_BASE = os.environ.get("AML_EMBED_API_BASE", "") or None
+EMBED_API_KEY = os.environ.get("AML_EMBED_API_KEY", "") or None
+
+
+# OpenAI-compatible providers that litellm may not know natively. Each prefix
+# maps to its base URL, the environment variable holding the API key, the
+# provider's hard ceiling on max_tokens and on embedding inputs per request
+# (None when unknown/unbounded).
+_COMPATIBLE_PROVIDERS = {
+    "siliconflow/": {"base": "https://api.siliconflow.cn/v1",
+                     "key_env": "SILICONFLOW_API_KEY", "max_output_tokens": None,
+                     "embed_batch": None},
+    "dashscope/": {"base": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+                   "key_env": "DASHSCOPE_API_KEY", "max_output_tokens": 8192,
+                   "embed_batch": 10},
+}
+
+
+def _normalize_compatible(model, api_base, api_key):
+    """Rewrite `<provider>/<m>` -> `openai/<m>` with the provider's base URL
+    and API key so litellm talks to it through its OpenAI client. Also returns
+    the provider spec (limits) or None."""
+    for prefix, spec in _COMPATIBLE_PROVIDERS.items():
+        if model and model.startswith(prefix):
+            return ("openai/" + model[len(prefix):],
+                    api_base or spec["base"],
+                    api_key or os.environ.get(spec["key_env"]) or None,
+                    spec)
+    return model, api_base, api_key, None
+
+
+LLM_MODEL, LLM_API_BASE, LLM_API_KEY, _LLM_SPEC = _normalize_compatible(
+    LLM_MODEL, LLM_API_BASE, LLM_API_KEY)
+EMBED_MODEL, EMBED_API_BASE, EMBED_API_KEY, _EMBED_SPEC = _normalize_compatible(
+    EMBED_MODEL, EMBED_API_BASE, EMBED_API_KEY)
+_LLM_OUTPUT_CAP = _LLM_SPEC["max_output_tokens"] if _LLM_SPEC else None
+# Inputs per embedding request; larger lists are split into ordered batches.
+EMBED_BATCH_SIZE = max(1, int(os.environ.get(
+    "AML_EMBED_BATCH_SIZE",
+    str((_EMBED_SPEC or {}).get("embed_batch") or 2048))))
+# Per-provider embedding request; search also bounds pacing, batches and retries.
+EMBED_TIMEOUT_SECONDS = max(1.0, float(os.environ.get("AML_EMBED_TIMEOUT_SECONDS", "120")))
+API_KEY = os.environ.get("AML_API_KEY", "")
+DB_PATH = os.environ.get("AML_DB_PATH", os.path.join(os.path.dirname(__file__), "..", "memory.db"))
+FAKE = os.environ.get("AML_FAKE", "") == "1"
+
+
+def _cross_encoder_settings():
+    """Reuse credentials only for the exact configured provider origin."""
+    from urllib.parse import urlsplit
+    explicit_url = os.environ.get('AML_CE_API_URL', '').strip()
+    explicit_key = os.environ.get('AML_CE_API_KEY', '').strip()
+    model = os.environ.get('AML_CE_MODEL', '').strip()
+    default_url, default_model = '', ''
+    providers = [(LLM_API_BASE, LLM_API_KEY), (EMBED_API_BASE, EMBED_API_KEY)]
+    for base, key in providers:
+        parsed = urlsplit(base or '')
+        host = parsed.hostname or ''
+        origin = f'{parsed.scheme}://{parsed.netloc}'
+        if host in ('dashscope.aliyuncs.com', 'dashscope-intl.aliyuncs.com', 'dashscope-us.aliyuncs.com') or host.endswith('.maas.aliyuncs.com'):
+            default_url, default_model = origin + '/compatible-api/v1/reranks', 'qwen3-rerank'
+        elif host in ('api.siliconflow.cn', 'api.siliconflow.com'):
+            default_url, default_model = origin + '/v1/rerank', 'BAAI/bge-reranker-v2-m3'
+        else:
+            continue
+        break
+    url = explicit_url or default_url
+    key = explicit_key
+    if not key and url:
+        target = urlsplit(url)
+        for base, candidate_key in providers:
+            source = urlsplit(base or '')
+            if (target.scheme, target.hostname, target.port) == (source.scheme, source.hostname, source.port):
+                key = candidate_key or ''
+                if key:
+                    break
+    return url, key, model or (default_model if not explicit_url or explicit_url == default_url else ''), os.environ.get('AML_CE_API_FORMAT', 'cohere')
+
+
+CE_API_URL, CE_API_KEY, CE_MODEL, CE_API_FORMAT = _cross_encoder_settings()
+CE_FULL_OPTION_TEXT = os.environ.get('AML_CE_FULL_OPTION_TEXT', '0') == '1'
+SOURCE_CE_LATE_ADMISSION = os.environ.get('AML_SOURCE_CE_LATE_ADMISSION', '0') == '1'
+CE_TIMEOUT_SECONDS = max(1.0, float(os.environ.get('AML_CE_TIMEOUT_SECONDS', '10')))
+CE_DEADLINE_SECONDS = max(1.0, float(os.environ.get('AML_CE_DEADLINE_SECONDS', '12')))
+CE_BATCH_SIZE = max(1, int(os.environ.get('AML_CE_BATCH_SIZE', '24')))
+CE_RETRY_BATCHES = max(0, min(2, int(os.environ.get('AML_CE_RETRY_BATCHES', '2'))))
+CE_RETRY_BATCH_SIZE = max(1, min(8, int(os.environ.get('AML_CE_RETRY_BATCH_SIZE', '4'))))
+CE_MAX_DOCUMENT_BYTES = max(512, int(os.environ.get('AML_CE_MAX_DOCUMENT_BYTES', '4000')))
+CE_MAX_REQUEST_BYTES = max(1024, int(os.environ.get('AML_CE_MAX_REQUEST_BYTES', '90000')))
+FINE_COARSE_CORE_QUOTA = os.environ.get('AML_FINE_COARSE_CORE_QUOTA', '1') == '1'
+FINE_WEAK_PROMOTION_ONE = os.environ.get('AML_FINE_WEAK_PROMOTION_ONE', '0') == '1'
+# One existing extra seat for a displaced candidate inside the core CE cutoff.
+FINE_SEMANTIC_RESERVE = os.environ.get('AML_FINE_SEMANTIC_RESERVE', '0') == '1'
+# One existing extra seat for a full-pool CE head excluded by the new-core quota.
+FINE_NEW_COARSE_INSURANCE = os.environ.get('AML_FINE_NEW_COARSE_INSURANCE', '0') == '1'
+FINE_NEW_COARSE_MISSING_ONLY = os.environ.get('AML_FINE_NEW_COARSE_MISSING_ONLY', '0') == '1'
+COARSE_EVIDENCE_EXTEND = os.environ.get('AML_COARSE_EVIDENCE_EXTEND', '1') == '1'
+CASCADE_COARSE_LIMIT = max(1, int(os.environ.get('AML_CASCADE_COARSE_LIMIT', '50')))
+CASCADE_FINE_LIMIT = max(1, int(os.environ.get('AML_CASCADE_FINE_LIMIT', '16')))
+CASCADE_LLM_LIMIT = max(1, int(os.environ.get('AML_CASCADE_LLM_LIMIT', '16')))
+# Interest-level premises anchored only by the user's own topical turns are
+# admitted as a labelled `inferred` tier; the selection judge weighs their
+# question relevance against verified-but-unrelated traits.
+CHOICE_ALLOW_INFERRED = os.environ.get('AML_CHOICE_ALLOW_INFERRED', '1') == '1'
+# Offer the user source behind each option's retrieval-covering memory as an
+# extra witness hint when the semantic witness pass found no user source.
+CHOICE_COVERAGE_WITNESSES = os.environ.get('AML_CHOICE_COVERAGE_WITNESSES', '1') == '1'
+CHOICE_BOUNDED_SUPPORT_SPANS = os.environ.get('AML_CHOICE_BOUNDED_SUPPORT_SPANS', '0') == '1'
+CHOICE_TYPOGRAPHIC_QUOTES = os.environ.get('AML_CHOICE_TYPOGRAPHIC_QUOTES', '0') == '1'
+CHOICE_REPAIR_CONTEXT = os.environ.get('AML_CHOICE_REPAIR_CONTEXT', '0') == '1'
+CHOICE_REPAIR_SPAN_REFS = os.environ.get('AML_CHOICE_REPAIR_SPAN_REFS', '0') == '1'
+CHOICE_ADAPTIVE_INTEREST_RETRY = os.environ.get('AML_CHOICE_ADAPTIVE_INTEREST_RETRY', '0') == '1'
+# A failed entailment remains rejected by default; contextual re-review is opt-in.
+CHOICE_ENTAILMENT_REVIEW = os.environ.get('AML_CHOICE_ENTAILMENT_REVIEW', '0') == '1'
+CHOICE_SEMANTIC_WITNESSES = os.environ.get('AML_CHOICE_SEMANTIC_WITNESSES', '1') == '1'
+CHOICE_WITNESS_SPAN_REFS = os.environ.get('AML_CHOICE_WITNESS_SPAN_REFS', '0') == '1'
+CHOICE_WITNESS_KEYED_OUTPUT = os.environ.get('AML_CHOICE_WITNESS_KEYED_OUTPUT', '0') == '1'
+CHOICE_WITNESS_LEXICAL_FILL = os.environ.get('AML_CHOICE_WITNESS_LEXICAL_FILL', '0') == '1'
+CHOICE_INDEPENDENT_SELECTION_REVIEW = os.environ.get('AML_CHOICE_INDEPENDENT_SELECTION_REVIEW', '0') == '1'
+CHOICE_TYPED_SCOPE_CONSISTENCY = os.environ.get('AML_CHOICE_TYPED_SCOPE_CONSISTENCY', '0') == '1'
+CHOICE_SCOPE_ROLES = os.environ.get('AML_CHOICE_SCOPE_ROLES', '0') == '1'
+CHOICE_DIRECT_REQUEST_SELECTION = os.environ.get('AML_CHOICE_DIRECT_REQUEST_SELECTION', '0') == '1'
+CHOICE_STRUCTURED_REQUEST_SELECTION = os.environ.get('AML_CHOICE_STRUCTURED_REQUEST_SELECTION', '0') == '1'
+CHOICE_QUERY_CONTEXT = os.environ.get('AML_CHOICE_QUERY_CONTEXT', '0') == '1'
+CHOICE_PRESERVE_REPAIR_PREMISES = os.environ.get('AML_CHOICE_PRESERVE_REPAIR_PREMISES', '0') == '1'
+CHOICE_CURRENT_QUESTION_SOURCE = os.environ.get('AML_CHOICE_CURRENT_QUESTION_SOURCE', '0') == '1'
+CHOICE_SOURCE_SCOPE = os.environ.get('AML_CHOICE_SOURCE_SCOPE', '0') == '1'
+# Candidate: avoid recommendation text distracting premise-to-source matching.
+CHOICE_RECOVERY_CLAIM_ONLY = os.environ.get('AML_CHOICE_RECOVERY_CLAIM_ONLY', '0') == '1'
+CHOICE_RECOVERY_BEFORE_SCOPE = os.environ.get('AML_CHOICE_RECOVERY_BEFORE_SCOPE', '0') == '1'
+CHOICE_CONSTRAINT_CONTENT_TERMS = os.environ.get('AML_CHOICE_CONSTRAINT_CONTENT_TERMS', '0') == '1'
+CHOICE_CONSTRAINT_TERM_FORMS = os.environ.get('AML_CHOICE_CONSTRAINT_TERM_FORMS', '0') == '1'
+CHOICE_VERIFICATION_SCOPE = os.environ.get('AML_CHOICE_VERIFICATION_SCOPE', '0') == '1'
+GRAPH_FUSION_ENABLED = os.environ.get('AML_GRAPH_FUSION_ENABLED', '1') == '1'
+GRAPH_FUSION_MAX_CANDIDATES = max(16, int(os.environ.get('AML_GRAPH_FUSION_MAX_CANDIDATES', '256')))
+LLM_TEMPERATURE = 0.0
+# Additional retries for HTTP 429, independent of parsing/other error retries.
+RATE_LIMIT_RETRIES = max(0, int(os.environ.get("AML_RATE_LIMIT_RETRIES", "6")))
+RATE_LIMIT_BACKOFF_SECONDS = max(
+    1.0, float(os.environ.get("AML_RATE_LIMIT_BACKOFF_SECONDS", "15")))
+RATE_LIMIT_MAX_BACKOFF_SECONDS = max(
+    RATE_LIMIT_BACKOFF_SECONDS,
+    float(os.environ.get("AML_RATE_LIMIT_MAX_BACKOFF_SECONDS", "120")))
+# Local soft thresholds; set to the account's limits with suitable headroom.
+PROVIDER_SOFT_TPM = max(0, int(os.environ.get("AML_PROVIDER_SOFT_TPM", "60000")))
+PROVIDER_RPM = max(0, int(os.environ.get("AML_PROVIDER_RPM", "30")))
+# In-flight calls allowed per (kind, model); the RPM/TPM window still paces them.
+PROVIDER_CONCURRENCY = max(1, int(os.environ.get("AML_PROVIDER_CONCURRENCY", "4")))
+# Qwen3 chat models reason by default on OpenAI-compatible endpoints; the
+# hidden reasoning tokens multiply latency for structured extraction, and
+# DashScope rejects non-streaming requests while thinking is enabled.
+# DeepSeek also defaults to thinking; disable it for forced tool selection.
+LLM_DISABLE_THINKING = os.environ.get("AML_LLM_DISABLE_THINKING", "1") == "1"
+# Keep unstructured text completions bounded; callers can lower this further
+# when a provider has a small per-request credit allowance.
+LLM_MAX_TOKENS = max(1, int(os.environ.get("AML_LLM_MAX_TOKENS", "1200")))
+LLM_JSON_MAX_TOKENS = int(os.environ.get("AML_LLM_JSON_MAX_TOKENS", "2048"))
+# Providers reject max_tokens above their ceiling with HTTP 400 instead of
+# clamping; clamp locally so a generous default does not break every call.
+if _LLM_OUTPUT_CAP:
+    LLM_JSON_MAX_TOKENS = min(LLM_JSON_MAX_TOKENS, _LLM_OUTPUT_CAP)
+    LLM_MAX_TOKENS = min(LLM_MAX_TOKENS, _LLM_OUTPUT_CAP)
+EXTRACT_BATCH_MESSAGES = max(
+    1, int(os.environ.get("AML_EXTRACT_BATCH_MESSAGES", "6")))
+EMBED_DIM = max(32, int(os.environ.get("AML_EMBED_DIM", "256")))
+# Stored with every vector so incompatible providers/fallbacks are never mixed.
+EMBEDDING_SPACE = os.environ.get(
+    "AML_EMBEDDING_SPACE",
+    f"{'fake-hash' if FAKE else EMBED_MODEL}:float32:{EMBED_DIM}")
+# Sensitive recall follows the selected control baseline; each request must
+# still allow it. AML_SENSITIVE_RECALL_ENABLED=0 disables it for the deployment.
+SENSITIVE_RECALL_ENABLED = os.environ.get("AML_SENSITIVE_RECALL_ENABLED", "1") == "1"
+GOVERNANCE_NEIGHBORS = 5
+RECALL_PER_ROUTE = 100
+# Retrieval budgets are independent of the final answer's top_k.
+RECALL_VECTOR_LIMIT = max(1, int(os.environ.get("AML_RECALL_VECTOR_LIMIT", "40")))
+RECALL_SOURCE_LIMIT = max(1, int(os.environ.get("AML_RECALL_SOURCE_LIMIT", "40")))
+# Allocate source-route slots by original user-message sets.
+SOURCE_RECALL_DIVERSITY = os.environ.get("AML_SOURCE_RECALL_DIVERSITY", "1") == "1"
+# Defer source sets already represented by earlier candidates across queries.
+SOURCE_RECALL_NOVELTY = os.environ.get('AML_SOURCE_RECALL_NOVELTY', '0') == '1'
+RECALL_PORTER_SUPPLEMENT = os.environ.get('AML_RECALL_PORTER_SUPPLEMENT', '0') == '1'
+# Literal query views and context labels follow the selected control baseline.
+RECALL_TOPIC_ANCHORS = os.environ.get('AML_RECALL_TOPIC_ANCHORS', '1') == '1'
+RECALL_TOPIC_ANCHOR_LIMIT = max(0, min(4, int(os.environ.get('AML_RECALL_TOPIC_ANCHOR_LIMIT', '4'))))
+LISTWISE_CONTEXT_LABEL = os.environ.get('AML_LISTWISE_CONTEXT_LABEL', '1') == '1'
+RECALL_FTS_LIMIT = max(1, int(os.environ.get("AML_RECALL_FTS_LIMIT", "20")))
+RECALL_PROFILE_LIMIT = max(1, int(os.environ.get("AML_RECALL_PROFILE_LIMIT", "8")))
+# Rules recalled per search besides forget constraints; 0 keeps every rule.
+RECALL_RULE_LIMIT = max(0, int(os.environ.get("AML_RECALL_RULE_LIMIT", "12")))
+RECALL_EXPANSION_LIMIT = max(0, int(os.environ.get("AML_RECALL_EXPANSION_LIMIT", "12")))
+RECALL_EXPANSION_MIN_DIRECT = max(1, int(os.environ.get("AML_RECALL_EXPANSION_MIN_DIRECT", "3")))
+# Historical replay settings; v7 uses CASCADE_* and CE_BATCH_SIZE instead.
+RERANK_MAX_CANDIDATES = max(
+    10, int(os.environ.get("AML_RERANK_MAX_CANDIDATES", "80")))
+# Bound each provider request independently of the total candidate pool.
+RERANK_BATCH_MAX_CANDIDATES = max(1, int(os.environ.get("AML_RERANK_BATCH_MAX_CANDIDATES", "24")))
+RERANK_MAX_PROMPT_BYTES = max(1024, int(os.environ.get("AML_RERANK_MAX_PROMPT_BYTES", "24000")))
+LISTWISE_SHARED_SOURCES = os.environ.get('AML_LISTWISE_SHARED_SOURCES', '1') == '1'
+# Preserve the original overflow proposal, then append at most two complete units.
+LISTWISE_OVERFLOW_EXTEND = os.environ.get('AML_LISTWISE_OVERFLOW_EXTEND', '0') == '1'
+LISTWISE_OVERFLOW_REVIEW = os.environ.get('AML_LISTWISE_OVERFLOW_REVIEW', '1') == '1'
+# Review previously unsubmitted byte omissions in at most three bounded batches.
+LISTWISE_OVERFLOW_BATCHED = os.environ.get('AML_LISTWISE_OVERFLOW_BATCHED', '0') == '1'
+LISTWISE_KEYED_OUTPUT = os.environ.get('AML_LISTWISE_KEYED_OUTPUT', '1') == '1'
+# Separate usefulness, deletion review and ordering; legacy remains an ablation.
+LISTWISE_STAGED = os.environ.get('AML_LISTWISE_STAGED', '0') == '1'
+# Supplemented cards also enter final ordering; leave room beyond admission.
+LISTWISE_STAGED_MAX_PROMPT_BYTES = max(1024, int(os.environ.get('AML_LISTWISE_STAGED_MAX_PROMPT_BYTES', '48000')))
+LISTWISE_CONTEXT_MAX_BYTES = max(1024, int(os.environ.get('AML_LISTWISE_CONTEXT_MAX_BYTES', '12000')))
+LISTWISE_PURPOSE_BATCH_SIZE = max(1, min(24, int(os.environ.get('AML_LISTWISE_PURPOSE_BATCH_SIZE', '10'))))
+LISTWISE_CONTEXT_REVIEW_LIMIT = max(0, min(4, int(os.environ.get('AML_LISTWISE_CONTEXT_REVIEW_LIMIT', '2'))))
+
+RERANK_CONCURRENCY = max(1, int(os.environ.get("AML_RERANK_CONCURRENCY", "2")))
+RERANK_DEADLINE_SECONDS = max(1.0, float(os.environ.get("AML_RERANK_DEADLINE_SECONDS", "45")))
+# At most two repairs across ranking/relevance and groups, within search budgets.
+RERANK_REPAIR_MAX_CALLS = max(0, int(os.environ.get("AML_RERANK_REPAIR_MAX_CALLS", "2")))
+# Exact source-part references avoid generated quotation mismatches.
+LISTWISE_SPAN_REFS = os.environ.get("AML_LISTWISE_SPAN_REFS", "1") == "1"
+LISTWISE_ROLE_BOUND_REFS = os.environ.get('AML_LISTWISE_ROLE_BOUND_REFS', '0') == '1'
+LISTWISE_VALID_CITATION_CONTRACT = os.environ.get('AML_LISTWISE_VALID_CITATION_CONTRACT', '0') == '1'
+OVERFLOW_CITATION_KEYS = os.environ.get('AML_OVERFLOW_CITATION_KEYS', '0') == '1'
+PACKET_ADJACENT_CONTEXT = os.environ.get('AML_PACKET_ADJACENT_CONTEXT', '0') == '1'
+PACKET_FINE_CONTEXT_RESERVE = os.environ.get('AML_PACKET_FINE_CONTEXT_RESERVE', '1') == '1'
+PACKET_FINE_CONTEXT_5K = os.environ.get('AML_PACKET_FINE_CONTEXT_5K', '1') == '1'
+PACKET_FINE_CONTEXT_LEXICAL = os.environ.get('AML_PACKET_FINE_CONTEXT_LEXICAL', '1') == '1'
+PACKET_QUERY_CONTEXT_COMBINED = os.environ.get('AML_PACKET_QUERY_CONTEXT_COMBINED', '0') == '1'
+PACKET_FINE_CONTEXT_FILL = os.environ.get('AML_PACKET_FINE_CONTEXT_FILL', '0') == '1'
+PACKET_ENDPOINT_FINE_COMPLETION = os.environ.get('AML_PACKET_ENDPOINT_FINE_COMPLETION', '0') == '1'
+# One source-query first hit inside the existing fine CE window; shares 5 KiB.
+PACKET_SOURCE_QUERY_CONTEXT = os.environ.get('AML_PACKET_SOURCE_QUERY_CONTEXT', '0') == '1'
+# One complete source after the lexical prefix, ranked by original-question CE.
+PACKET_QUESTION_CONTEXT_CE = os.environ.get('AML_PACKET_QUESTION_CONTEXT_CE', '0') == '1'
+# Original-question source first hit after the immutable three-seat prefix.
+PACKET_SOURCE_FIRST_RESIDUAL = os.environ.get('AML_PACKET_SOURCE_FIRST_RESIDUAL', '0') == '1'
+# One residual source improving literal question/topic query coverage.
+PACKET_MARGINAL_QUERY_CONTEXT = os.environ.get('AML_PACKET_MARGINAL_QUERY_CONTEXT', '0') == '1'
+# One complete CE-core outsider after the lexical prefix; separate 4 KiB cap.
+PACKET_CORE_GAP_CONTEXT = os.environ.get('AML_PACKET_CORE_GAP_CONTEXT', '0') == '1'
+PACKET_SPARSE_SOURCE_CONTEXT = os.environ.get('AML_PACKET_SPARSE_SOURCE_CONTEXT', '0') == '1'
+PACKET_EXCLUSIVE_SHARED_CONTEXT = os.environ.get('AML_PACKET_EXCLUSIVE_SHARED_CONTEXT', '0') == '1'
+PACKET_UNMATCHED_NOUN_CONTEXT = os.environ.get('AML_PACKET_UNMATCHED_NOUN_CONTEXT', '0') == '1'
+LISTWISE_TOPIC_INTEREST = os.environ.get('AML_LISTWISE_TOPIC_INTEREST', '0') == '1'
+LISTWISE_TRANSFORM_CONTEXT = os.environ.get('AML_LISTWISE_TRANSFORM_CONTEXT', '0') == '1'
+LISTWISE_ABBREVIATION_PARTS = os.environ.get('AML_LISTWISE_ABBREVIATION_PARTS', '0') == '1'
+LISTWISE_REVIEW_MAX_BATCHES = max(1, min(4, int(os.environ.get("AML_LISTWISE_REVIEW_MAX_BATCHES", "3"))))
+RERANK_CALIBRATION_ANCHORS = max(0, min(2, int(os.environ.get('AML_RERANK_CALIBRATION_ANCHORS', '2'))))
+SEARCH_FOLLOWUP_QUERIES = max(0, min(3, int(os.environ.get('AML_SEARCH_FOLLOWUP_QUERIES', '2'))))
+SEARCH_FOLLOWUP_SECONDS = max(1.0, float(os.environ.get('AML_SEARCH_FOLLOWUP_SECONDS', '8')))
+SEARCH_ITEM_MAX_BYTES = max(512, int(os.environ.get('AML_SEARCH_ITEM_MAX_BYTES', '6000')))
+SEARCH_LOCAL_CONCURRENCY = max(1, int(os.environ.get('AML_SEARCH_LOCAL_CONCURRENCY', '4')))
+VECTOR_CHUNK_SIZE = max(64, int(os.environ.get('AML_VECTOR_CHUNK_SIZE', '2048')))
+VECTOR_CACHE_BYTES = max(0, int(os.environ.get('AML_VECTOR_CACHE_BYTES', str(128 * 1024 * 1024))))
+# Approximate recall is opt-in until evaluated on the deployment's own corpus.
+VECTOR_APPROXIMATE = os.environ.get('AML_VECTOR_APPROXIMATE', '0') == '1'
+VECTOR_EXACT_LIMIT = max(64, int(os.environ.get('AML_VECTOR_EXACT_LIMIT', '20000')))
+VECTOR_CANDIDATE_LIMIT = max(64, int(os.environ.get('AML_VECTOR_CANDIDATE_LIMIT', '8192')))
+# EVIDENCE_MIN_RELEVANCE is only used by historical pointwise replay.
+# v7 preserves raw CE logits and uses explicit listwise irrelevant decisions.
+EVIDENCE_MIN_RELEVANCE = min(1.0, max(0.0, float(os.environ.get("AML_EVIDENCE_MIN_RELEVANCE", "0.15"))))
+EVIDENCE_FALLBACK_ITEMS = max(1, int(os.environ.get("AML_EVIDENCE_FALLBACK_ITEMS", "8")))
+
+
+def _budget_tiers(raw):
+    tiers = {}
+    for part in raw.split(','):
+        if not part.strip():
+            continue
+        intent, _, value = part.partition('=')
+        if not value.strip().isdigit():
+            raise ValueError('AML_EVIDENCE_BUDGET_BY_INTENT entries must be intent=bytes')
+        tiers[intent.strip()] = int(value)
+    return tiers
+
+
+# Model-facing evidence budget (UTF-8 bytes, a conservative token bound) used
+# when the request sets none. The leaderboard never sends a budget and its
+# answer window admits 117,760 input tokens, so recall-heavy intents get more
+# room than single-fact lookups; EVIDENCE_BUDGET_MAX also caps explicit requests.
+EVIDENCE_BUDGET_MAX = 110000
+EVIDENCE_BUDGET_DEFAULT = min(EVIDENCE_BUDGET_MAX, max(256, int(os.environ.get("AML_EVIDENCE_BUDGET_DEFAULT", "48000"))))
+EVIDENCE_BUDGET_BY_INTENT = {intent: min(EVIDENCE_BUDGET_MAX, max(256, value)) for intent, value in _budget_tiers(
+    os.environ.get("AML_EVIDENCE_BUDGET_BY_INTENT",
+                   "multi_hop=96000,narrative=96000,document=96000,procedural=96000,temporal=64000")).items()}
+
+# ---- ULM lifecycle knobs (llm-memory-survey/memory-system-design.md) ----
+# §3.2 semantic boundary segmentation (embedding drop between adjacent windows)
+SEGMENT_MIN_MESSAGES = max(1, int(os.environ.get("AML_SEGMENT_MIN_MESSAGES", "2")))
+SEGMENT_SIM_DROP = float(os.environ.get("AML_SEGMENT_SIM_DROP", "0.35"))
+# §2.1 keep the raw chunk of every segment as an `episode` memory (Memory-Doc)
+STORE_EPISODES = os.environ.get("AML_STORE_EPISODES", "1") == "1"
+# Pasted documents / instruction blocks (no source_kind arrives from the
+# platform): detected heuristically, always kept as a whole-segment episode and
+# packed verbatim up to DOCUMENT_ITEM_MAX_BYTES while ranking uses an excerpt.
+DOCUMENT_UNITS_ENABLED = os.environ.get("AML_DOCUMENT_UNITS_ENABLED", "1") == "1"
+DOCUMENT_MIN_CHARS = max(200, int(os.environ.get("AML_DOCUMENT_MIN_CHARS", "600")))
+DOCUMENT_LONG_CHARS = max(DOCUMENT_MIN_CHARS, int(os.environ.get("AML_DOCUMENT_LONG_CHARS", "2000")))
+DOCUMENT_ITEM_MAX_BYTES = max(2048, int(os.environ.get("AML_DOCUMENT_ITEM_MAX_BYTES", "16000")))
+# Experimental current-segment references; ordinary extraction stays the default.
+EXTRACT_SPAN_REFS = os.environ.get("AML_EXTRACT_SPAN_REFS", "0") == "1"
+EXTRACT_TRIPLE_ISOLATION = os.environ.get("AML_EXTRACT_TRIPLE_ISOLATION", "0") == "1"
+# Per Add: at most 4 uncovered exchanges, 8 provider calls, 64k tokens, 60 seconds.
+EXTRACT_COVERAGE_RETRY = os.environ.get("AML_EXTRACT_COVERAGE_RETRY", "0") == "1"
+# §3.4 novelty gate: near-identical facts skip the governance LLM call
+NOVELTY_DUP_THRESHOLD = float(os.environ.get("AML_NOVELTY_DUP_THRESHOLD", "0.97"))
+SURPRISE_MOMENTUM = 0.7
+# §2.2/§4.1 MemScene clustering (cosine + keyword Jaccard)
+SCENE_JOIN_THRESHOLD = float(os.environ.get("AML_SCENE_JOIN_THRESHOLD", "0.55"))
+SCENE_TOP_M = max(1, int(os.environ.get("AML_SCENE_TOP_M", "5")))
+SCENE_CELLS_PER_SCENE = max(1, int(os.environ.get("AML_SCENE_CELLS_PER_SCENE", "20")))
+SCENE_SUMMARY_LLM = os.environ.get("AML_SCENE_SUMMARY_LLM", "0") == "1"
+# §4.4 heat = a*visits + b*interactions + c*recency + d*surprise
+HEAT_WEIGHTS = (1.0, 0.5, 2.0, 1.0)
+HEAT_RECENCY_HALFLIFE_DAYS = 14.0
+HEAT_PROMOTE_THRESHOLD = float(os.environ.get("AML_HEAT_PROMOTE_THRESHOLD", "5"))
+MAX_HOT_SCENES = max(1, int(os.environ.get("AML_MAX_HOT_SCENES", "500")))
+# §4.5 Ebbinghaus retention R=exp(-t/S); 0 disables cold-tiering
+FORGET_THRESHOLD = float(os.environ.get("AML_FORGET_THRESHOLD", "0"))
+FORGET_STRENGTH_DAYS = 30.0
+FORGET_RECALL_BONUS_DAYS = 15.0
+# §4.2 profile: traits supported by >= N sessions count as stable
+PROFILE_STABLE_SESSIONS = max(1, int(os.environ.get("AML_PROFILE_STABLE_SESSIONS", "2")))
+PROFILE_TRANSIENT_TTL_DAYS = max(
+    1, int(os.environ.get("AML_PROFILE_TRANSIENT_TTL_DAYS", "90")))
+# Search allows one bounded grounded follow-up; the answer model judges sufficiency.
+# §9.4 hard per-search request budget: wall-clock deadline plus provider
+# call/token caps. Leave room for slow embeddings and downstream ranking.
+SEARCH_DEADLINE_SECONDS = max(1.0, float(os.environ.get("AML_SEARCH_DEADLINE_SECONDS", "300")))
+# Entire query-embedding stage, including provider pacing, batches and retries;
+# still bounded by the search's remaining wall-clock time.
+SEARCH_EMBED_TIMEOUT_SECONDS = max(1.0, float(os.environ.get("AML_SEARCH_EMBED_TIMEOUT_SECONDS", "120")))
+SEARCH_MAX_CALLS = max(1, int(os.environ.get("AML_SEARCH_MAX_CALLS", "12")))
+SEARCH_MAX_TOKENS = max(1024, int(os.environ.get("AML_SEARCH_MAX_TOKENS", "128000" if LISTWISE_STAGED else "64000")))
+# §3.1 the rolling session summary is extraction context only (ACE collapse);
+# the legacy summary recall route stays available for ablation.
+SUMMARY_ROUTE = os.environ.get("AML_SUMMARY_ROUTE", "0") == "1"
+
+# ---- Persona layer (IMPROVEMENT_PLAN P0-P3; MemoryBank/MIRIX/EverMemOS) ----
+# P0: interest consolidation after each Add promotes repeated "user asked
+# about X" signals into first-person `preference` AMUs.
+PROFILE_CONSOLIDATION_ENABLED = os.environ.get("AML_PROFILE_CONSOLIDATION", "1") == "1"
+PROFILE_REQUIRE_USER_SUPPORT = os.environ.get("AML_PROFILE_REQUIRE_USER_SUPPORT", "0") == "1"
+# Deterministic ingestion of a "[system] ... persona: {json}" opening message
+# into atomic profile/preference memories tagged source_role=persona.
+PERSONA_SOURCE_EXTRACTION = os.environ.get("AML_PERSONA_EXTRACTION", "1") == "1"
+# Protected rules admitted to one evidence packet (0 = unlimited); the rest of
+# the budget goes to ordinary evidence.
+PACKET_RULE_LIMIT = int(os.environ.get("AML_PACKET_RULE_LIMIT", "3"))
+# Top fused-retrieval candidates that keep a seat in the fine list even when
+# the cross-encoder scores them low.
+CASCADE_FUSED_RESERVE = int(os.environ.get("AML_CASCADE_FUSED_RESERVE", "3"))
+# Evidence-gain expansion from the selected control baseline.
+FINE_EVIDENCE_ADAPTIVE = os.environ.get("AML_FINE_EVIDENCE_ADAPTIVE", "1") == "1"
+# Optional retrieval topics can earn adaptive inspection, never core reservations.
+FINE_TOPIC_CONTEXT = os.environ.get("AML_FINE_TOPIC_CONTEXT", "0") == "1"
+FINE_EXTRA_LIMIT = max(0, min(16, int(os.environ.get("AML_FINE_EXTRA_LIMIT", "8"))))
+LISTWISE_UNREVIEWED_LIMIT = max(0, min(4, int(os.environ.get("AML_LISTWISE_UNREVIEWED_LIMIT", "0"))))
+# Support keys (Add request ids / supporting AMU ids) needed to confirm a
+# consolidated preference and to promote it transient -> static.
+PROFILE_MIN_SUPPORT = max(1, int(os.environ.get("AML_PROFILE_MIN_SUPPORT", "2")))
+# Core memories provide a compact query-planning digest only.
+CORE_PROFILE_MAX_ITEMS = max(1, int(os.environ.get("AML_CORE_PROFILE_MAX_ITEMS", "12")))
+CORE_PROFILE_MAX_CHARS = max(256, int(os.environ.get("AML_CORE_PROFILE_MAX_CHARS", "1600")))
+SEARCH_SOURCE_EXCERPT_CHARS = max(128, int(os.environ.get("AML_SEARCH_SOURCE_EXCERPT_CHARS", "800")))
+# P1: a user "forget X" request invalidates the matching memories
+# (Zep edge invalidation) instead of only logging the request.
+INVALIDATE_ENABLED = os.environ.get("AML_INVALIDATE_ENABLED", "1") == "1"
+INVALIDATE_MIN_SIM = float(os.environ.get("AML_INVALIDATE_MIN_SIM", "0.55"))
+INVALIDATE_MAX_TARGETS = max(1, int(os.environ.get("AML_INVALIDATE_MAX_TARGETS", "3")))
+# P1: histories without timestamps stay undated (ULM §2.1): no synthetic
+# timeline is fabricated, and relative times resolve to unknown instead of
+# being anchored to the service wall clock.
+# Search question anchor when the request carries no reference_time. The
+# leaderboard contract never sends a question date and only searches after
+# every Add has completed, so the user's newest source-message time is the
+# closest known "now"; "wall_clock" restores the service receive time.
+ANCHOR_FALLBACK = os.environ.get("AML_ANCHOR_FALLBACK", "latest_message")
+if ANCHOR_FALLBACK not in ("latest_message", "wall_clock"):
+    raise ValueError("AML_ANCHOR_FALLBACK must be latest_message or wall_clock")
+# P3: query understanding sees a compact profile digest so expansions bind
+# generic questions to known user traits.
+QUERY_PROFILE_DIGEST = os.environ.get("AML_QUERY_PROFILE_DIGEST", "1") == "1"
+
+# Local evaluation only: how single-choice questions are answered. "local"
+# (default, keeps historical runs comparable) runs the verified answer_choice
+# pipeline, which never reaches /search; "platform" mirrors the leaderboard with
+# a plain answer prompt over the returned packet.
+EVAL_CHOICE_POLICY = os.environ.get("AML_EVAL_CHOICE_POLICY", "local")
+if EVAL_CHOICE_POLICY not in ("platform", "local"):
+    raise ValueError("AML_EVAL_CHOICE_POLICY must be platform or local")
+
+# Full stored content for local debugging; empty path disables the JSONL log.
+MEMORY_DEBUG_LOG = os.environ.get(
+    "AML_MEMORY_DEBUG_LOG", "")
+
+SEARCH_DEBUG_LOG = os.environ.get(
+    "AML_SEARCH_DEBUG_LOG", "")
+
+# Source evidence returned to the answer model. Full evidence remains in SQLite
+# and the debug log; these limits prevent top_k=100 from producing megabytes.
+SEARCH_SOURCE_MESSAGES_PER_ITEM = max(
+    0, int(os.environ.get("AML_SEARCH_SOURCE_MESSAGES_PER_ITEM", "3")))
+SEARCH_SOURCE_REFS_PER_ITEM = max(
+    SEARCH_SOURCE_MESSAGES_PER_ITEM,
+    int(os.environ.get("AML_SEARCH_SOURCE_REFS_PER_ITEM", "20")))
+SEARCH_SOURCE_CONTEXT_CHARS = max(
+    0, int(os.environ.get("AML_SEARCH_SOURCE_CONTEXT_CHARS", "32000")))
+
+# Answer memory budget includes all memory types and their rendered evidence.
+# These are character limits, not estimates of a provider-specific token count.
+ANSWER_CONTEXT_MAX_CHARS = max(
+    256, int(os.environ.get("AML_ANSWER_CONTEXT_MAX_CHARS", "24000")))
+ANSWER_CONTEXT_ITEM_MAX_CHARS = max(
+    256, int(os.environ.get("AML_ANSWER_CONTEXT_ITEM_MAX_CHARS", "2400")))
+
+CHOICE_GROUPED_ENTAILMENT = os.environ.get('AML_CHOICE_GROUPED_ENTAILMENT', '0') == '1'
+
+CHOICE_REVIEW_REQUEST_TERMS = os.environ.get('AML_CHOICE_REVIEW_REQUEST_TERMS', '0') == '1'
+CHOICE_CONDITIONAL_LIST_SCOPE = os.environ.get('AML_CHOICE_CONDITIONAL_LIST_SCOPE', '1') == '1'
+CHOICE_TEMPLATE_PATH_SCOPE = os.environ.get('AML_CHOICE_TEMPLATE_PATH_SCOPE', '0') == '1'
+CHOICE_EXISTING_STATE_GUARD = os.environ.get('AML_CHOICE_EXISTING_STATE_GUARD', '0') == '1'
+CHOICE_REPAIR_VALID_CLAIMS = os.environ.get('AML_CHOICE_REPAIR_VALID_CLAIMS', '0') == '1'
+CHOICE_CITED_SCOPE = os.environ.get('AML_CHOICE_CITED_SCOPE', '0') == '1'
+
+# Experimental evidence-note comparison only when all eligible options are generic.
+CHOICE_SOURCE_NOTES_SELECTION = os.environ.get('AML_CHOICE_SOURCE_NOTES_SELECTION', '0') == '1'
+
+# Experimental full reader replacement; no semantic eligibility guarantees.
+CHOICE_DIRECT_CATALOG_READER = os.environ.get("AML_CHOICE_DIRECT_CATALOG_READER", "0") == "1"
+
+# Isolated complete-group experiment; production default remains unchanged.
+OPTION_MARGIN_SOURCE_ADMISSION = os.environ.get("AML_OPTION_MARGIN_SOURCE_ADMISSION", "0") == "1"
+FINE_SOURCE_RRF = os.environ.get("AML_FINE_SOURCE_RRF", "0") == "1"
+JOINT_SOURCE_RANK_ADMISSION = os.environ.get("AML_JOINT_SOURCE_RANK_ADMISSION", "0") == "1"

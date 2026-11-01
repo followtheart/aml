@@ -99,6 +99,10 @@ EMBED_BATCH_SIZE = max(1, int(os.environ.get(
 EMBED_TIMEOUT_SECONDS = max(1.0, float(os.environ.get("AML_EMBED_TIMEOUT_SECONDS", "120")))
 API_KEY = os.environ.get("AML_API_KEY", "")
 DB_PATH = os.environ.get("AML_DB_PATH", os.path.join(os.path.dirname(__file__), "..", "memory.db"))
+# Disable startup backfill only after auditing source_fts coverage and content.
+SOURCE_FTS_BACKFILL = os.environ.get("AML_SOURCE_FTS_BACKFILL", "1") == "1"
+# Session-summary backfill has the same audit requirement.
+SESSION_FTS_BACKFILL = os.environ.get("AML_SESSION_FTS_BACKFILL", "1") == "1"
 FAKE = os.environ.get("AML_FAKE", "") == "1"
 
 

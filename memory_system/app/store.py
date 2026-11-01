@@ -170,6 +170,9 @@ CREATE VIRTUAL TABLE IF NOT EXISTS sessions_fts USING fts5(
 CREATE VIRTUAL TABLE IF NOT EXISTS source_fts USING fts5(
  request_id UNINDEXED, message_index UNINDEXED, user_id UNINDEXED, content
 );
+"""
+
+SESSION_FTS_BACKFILL_SQL = """
 INSERT INTO sessions_fts(user_id,session_id,summary)
  SELECT s.user_id,s.session_id,s.summary FROM sessions s
  WHERE NOT EXISTS (SELECT 1 FROM sessions_fts f
@@ -224,6 +227,8 @@ class Store(ProvenanceStore):
                 if column not in columns:
                     self.conn.execute(f"ALTER TABLE amu ADD COLUMN {column} {decl}")
             self.conn.executescript(FTS_SCHEMA)
+            if config.SESSION_FTS_BACKFILL:
+                self.conn.executescript(SESSION_FTS_BACKFILL_SQL)
             self.conn.executescript(SOURCE_SCHEMA)
             self._init_provenance()
             self.conn.executescript('''
@@ -248,10 +253,11 @@ class Store(ProvenanceStore):
             self._cache_identity = self.conn.execute('SELECT value FROM search_database_identity WHERE id=1').fetchone()[0]
             # Source text is immutable. Backfill older databases without changing
             # their claims, privacy labels, vectors or recorded revisions.
-            self.conn.execute("""INSERT INTO source_fts(request_id,message_index,user_id,content)
-                SELECT s.request_id,s.message_index,s.user_id,s.content FROM source_messages s
-                WHERE NOT EXISTS (SELECT 1 FROM source_fts f
-                  WHERE f.request_id=s.request_id AND f.message_index=s.message_index)""")
+            if config.SOURCE_FTS_BACKFILL:
+                self.conn.execute("""INSERT INTO source_fts(request_id,message_index,user_id,content)
+                    SELECT s.request_id,s.message_index,s.user_id,s.content FROM source_messages s
+                    WHERE NOT EXISTS (SELECT 1 FROM source_fts f
+                      WHERE f.request_id=s.request_id AND f.message_index=s.message_index)""")
             triple_columns = {r["name"] for r in self.conn.execute("PRAGMA table_info(triples)")}
             for column in ("valid_from", "valid_to"):
                 if column not in triple_columns:

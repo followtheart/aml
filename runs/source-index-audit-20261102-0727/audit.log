@@ -1,0 +1,9 @@
+{"table": "source_messages", "scanned": 118144, "elapsed_s": 10.04}
+{"table": "source_messages", "scanned": 145664, "elapsed_s": 20.04}
+{"table": "source_messages", "scanned": 215424, "elapsed_s": 30.05}
+{"table": "source_messages", "scanned": 292608, "elapsed_s": 40.05}
+{"table": "source_messages", "scanned": 367360, "elapsed_s": 50.06}
+{"table": "source_messages", "complete": true, "rows": 440309, "elapsed_s": 60.06}
+{"table": "source_fts", "scanned": 232064, "elapsed_s": 10.01}
+{"table": "source_fts", "complete": true, "rows": 440309, "elapsed_s": 19.14}
+{"started_at": "2026-11-01T23:27:56.663075+00:00", "database": "/root/aml/memory_system/memory.db", "scope": "source_messages versus source_fts keys, ownership and content", "method": "single read-only snapshot; SHA-256 of JSON [user_id, content]; indexed joins in separate database", "limitations": ["Does not verify internal FTS5 posting-list integrity."], "snapshot_at": "2026-11-01T23:27:56.742937+00:00", "counts": {"source_messages": 440309, "source_fts": 440309}, "findings": {"missing_index_rows": 0, "extra_index_rows": 0, "duplicate_index_keys": 0, "duplicate_index_extra_rows": 0, "ownership_or_content_mismatches": 0, "null_index_keys": 0}, "complete_and_matching": true, "finished_at": "2026-11-01T23:29:18.949188+00:00", "elapsed_s": 82.29}

@@ -1,0 +1,9 @@
+{
+  "checked_at": "2026-11-02T07:33:17.282631+08:00",
+  "url": "https://www.dustman.com.cn/health",
+  "http_status": 200,
+  "response": {
+    "status": "ok"
+  },
+  "tls_verification": "default certificate and hostname verification enabled"
+}

@@ -1,0 +1,16 @@
+{
+  "started_at": "2026-11-02T07:32:55.930601+08:00",
+  "test": "Replay one recent successful query against existing user data",
+  "pid": "13403",
+  "source_fts_backfill": "0",
+  "session_fts_backfill": "0",
+  "http_status": 200,
+  "request_id": "5b495d0a33314b7691e53a975e85453d",
+  "search_id": "d2dfee8d44234cd8bca4bee81a925c0f",
+  "evidence_status": "retrieved",
+  "verification_status": "not_run",
+  "returned_items": 8,
+  "missing_evidence": [],
+  "elapsed_s": 89.41,
+  "finished_at": "2026-11-02T07:34:25.337202+08:00"
+}

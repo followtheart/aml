@@ -1,0 +1,3 @@
+# Temporary audit database; reports and audit source are tracked.
+digests.sqlite
+digests.sqlite-*

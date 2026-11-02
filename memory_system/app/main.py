@@ -6,13 +6,14 @@ from pathlib import Path
 from fastapi import Depends, FastAPI, Header, HTTPException
 from .errors import InvalidRequest
 from .access_log import AccessLogMiddleware
+from .provider_startup import lifespan
 
 from . import (add_pipeline, config, experience, memory_debug, schemas,
                search_debug, search_pipeline, store)
 
 logging.basicConfig(level=logging.INFO)
 
-app = FastAPI(title="AML Memory System", version="0.4.0")
+app = FastAPI(title="AML Memory System", version="0.4.0", lifespan=lifespan)
 app.add_middleware(AccessLogMiddleware, path=os.environ.get(
     "AML_ACCESS_LOG", str(Path(__file__).resolve().parents[1] / "logs" / "access.jsonl")))
 _store = store.Store()

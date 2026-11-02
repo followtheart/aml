@@ -1,0 +1,23 @@
+{
+  "readiness_wait_s": 5.227,
+  "started_at": "2026-11-02T07:43:44.637582+00:00",
+  "target": "127.0.0.1:18680 using production hostname for verified TLS",
+  "scope": "first HTTPS search after ASGI SDK initialization; existing isolated copy; real providers",
+  "baseline_live_elapsed_s": 300.25,
+  "baseline_live_http_status": 500,
+  "limitation": "Earlier live run and isolated run are not resource-matched performance trials.",
+  "http_status": 200,
+  "request_id": "f26231aefb134c20a7121938c3496244",
+  "evidence_status": "retrieved",
+  "returned_items": 12,
+  "missing_evidence_count": 2,
+  "provider_calls": 10,
+  "provider_tokens": 45332,
+  "elapsed_s": 157.859,
+  "finished_at": "2026-11-02T07:46:22.496729+00:00",
+  "query_understanding_fallback": false,
+  "planning_provider_seconds": [
+    4.398
+  ],
+  "sdk_ready_before_application_startup": true
+}

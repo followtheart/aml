@@ -1,0 +1,11 @@
+INFO:aml.startup:provider_sdk_ready duration_s=5.951
+15:43:43 - LiteLLM:INFO: utils.py:4336 -
+LiteLLM completion() model= gpt-4o-mini; provider = openai
+INFO:LiteLLM:
+LiteLLM completion() model= gpt-4o-mini; provider = openai
+INFO:aml.metrics:provider_call kind=llm stage=search.understand model=gpt-4o-mini status=ok attempt=1 retries=0 duration_s=3.936 prompt_tokens=1094 completion_tokens=201 total_tokens=1295
+{"started_at": "2026-11-02T07:43:37.519001+00:00", "stage_limit_s": 8.0, "scope": "fresh process; real first query-understanding call after SDK-only startup preparation", "sdk_startup_s": 5.952, "planning_s": 3.938, "planning_error": null, "intent": "fact", "sub_queries": 1, "provider_calls": 1, "provider_tokens": 1295, "passed": true}
+15:43:47 - LiteLLM:INFO: logging_worker.py:505 - [LoggingWorker] atexit: Flushing 1 remaining events...
+INFO:LiteLLM:[LoggingWorker] atexit: Flushing 1 remaining events...
+15:43:47 - LiteLLM:INFO: logging_worker.py:505 - [LoggingWorker] atexit: Successfully flushed 1 events!
+INFO:LiteLLM:[LoggingWorker] atexit: Successfully flushed 1 events!

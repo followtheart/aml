@@ -385,6 +385,8 @@ PROFILE_TRANSIENT_TTL_DAYS = max(
 # §9.4 hard per-search request budget: wall-clock deadline plus provider
 # call/token caps. Leave room for slow embeddings and downstream ranking.
 SEARCH_DEADLINE_SECONDS = max(1.0, float(os.environ.get("AML_SEARCH_DEADLINE_SECONDS", "300")))
+# Query planning includes provider queueing and parsing within this stage limit.
+QUERY_UNDERSTAND_TIMEOUT_SECONDS = max(0.1, float(os.environ.get("AML_QUERY_UNDERSTAND_TIMEOUT_SECONDS", "8")))
 # Entire query-embedding stage, including provider pacing, batches and retries;
 # still bounded by the search's remaining wall-clock time.
 SEARCH_EMBED_TIMEOUT_SECONDS = max(1.0, float(os.environ.get("AML_SEARCH_EMBED_TIMEOUT_SECONDS", "120")))

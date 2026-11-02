@@ -6,6 +6,7 @@ AML_FAKE=1 or the provider credentials are missing, a deterministic offline
 FakeLLM is used so plumbing/contract tests never need network access.
 """
 import json
+import importlib
 import re
 from typing import Dict, Optional
 
@@ -14,6 +15,16 @@ from . import config, metrics
 
 class LLMError(RuntimeError):
     pass
+
+
+def initialize_provider():
+    """Load SDK entry points before serving requests, without an inference call."""
+    if config.FAKE:
+        return
+    provider = importlib.import_module('litellm')
+    # Resolve lazy entry points while startup is still outside request budgets.
+    getattr(provider, 'acompletion')
+    getattr(provider, 'aembedding')
 
 
 def rerank_schema(count: int) -> dict:

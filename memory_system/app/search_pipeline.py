@@ -116,14 +116,22 @@ async def _understand(st: store.Store, req: schemas.SearchRequest,
         options="\n".join(req.options or []) or "(none)",
         current_time=req.reference_time or anchor or datetime.now(timezone.utc).isoformat(),
         user_profile=digest)
+    budget.check()
+    seconds = config.QUERY_UNDERSTAND_TIMEOUT_SECONDS
+    limits = budget.current.get()
+    if limits:
+        seconds = min(seconds, max(0.001, limits.deadline - time.monotonic()))
+    started = time.monotonic()
     try:
         return await asyncio.wait_for(llm.complete_json(
             prompt,
             json.dumps(llm.STRUCTURED_SCHEMAS['query']),
             schema=llm.STRUCTURED_SCHEMAS["query"],
-            stage="search.understand", attempts=1, timeout=8.0), 8.0)
+            stage="search.understand", attempts=1, timeout=seconds), seconds)
     except Exception as e:
-        log.warning("query understanding failed (%s); passthrough", e)
+        budget.check()
+        log.warning("query understanding failed error_type=%s elapsed_s=%.3f limit_s=%.3f; passthrough",
+                    type(e).__name__, time.monotonic() - started, seconds)
         return {"intent": "fact", "time_scope": None, '_planning_error': type(e).__name__,
                 "entities": [], "sub_queries": [req.query],
                 "expanded_queries": [req.query]}

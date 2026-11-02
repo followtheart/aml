@@ -1,0 +1,13 @@
+{
+  "tests_passed": 13,
+  "fresh_process_planning_successes": 2,
+  "stage_timeout_default_s": 8,
+  "planning_seconds": [
+    5.255,
+    3.938
+  ],
+  "startup_seconds": [
+    4.761,
+    5.952
+  ]
+}

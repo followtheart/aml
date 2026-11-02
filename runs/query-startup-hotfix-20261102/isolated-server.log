@@ -1,0 +1,45 @@
+INFO:     Started server process [235141]
+INFO:     Waiting for application startup.
+INFO:aml.startup:provider_sdk_ready duration_s=4.624
+INFO:     Application startup complete.
+INFO:     Uvicorn running on https://127.0.0.1:18680 (Press CTRL+C to quit)
+INFO:     127.0.0.1:41306 - "GET /health HTTP/1.1" 200 OK
+15:44:41 - LiteLLM:INFO: utils.py:4336 -
+LiteLLM completion() model= gpt-4o-mini; provider = openai
+INFO:LiteLLM:
+LiteLLM completion() model= gpt-4o-mini; provider = openai
+INFO:aml.metrics:provider_call kind=llm stage=search.understand model=gpt-4o-mini status=ok attempt=1 retries=0 duration_s=4.398 prompt_tokens=1097 completion_tokens=219 total_tokens=1316
+INFO:aml.metrics:provider_call kind=embedding stage=search.embed_queries model=openai/text-embedding-v4 status=ok attempt=1 retries=0 duration_s=1.280 prompt_tokens=191 completion_tokens=0 total_tokens=191 input_count=8
+INFO:aml.metrics:provider_call kind=rerank stage=search.cross_encoder.batch_2 model=qwen3-rerank status=ok attempt=1 retries=0 duration_s=1.275 prompt_tokens=7779 completion_tokens=0 total_tokens=7779 input_count=24
+INFO:aml.metrics:provider_call kind=rerank stage=search.cross_encoder.batch_1 model=qwen3-rerank status=ok attempt=1 retries=0 duration_s=1.730 prompt_tokens=7883 completion_tokens=0 total_tokens=7883 input_count=24
+INFO:aml.metrics:provider_call kind=rerank stage=search.cross_encoder.batch_3 model=qwen3-rerank status=ok attempt=1 retries=0 duration_s=1.267 prompt_tokens=3137 completion_tokens=0 total_tokens=3137 input_count=10
+15:46:09 - LiteLLM:INFO: utils.py:4336 -
+LiteLLM completion() model= gpt-4o-mini; provider = openai
+INFO:LiteLLM:
+LiteLLM completion() model= gpt-4o-mini; provider = openai
+INFO:aml.metrics:provider_call kind=llm stage=search.listwise model=gpt-4o-mini status=ok attempt=1 retries=0 duration_s=4.156 prompt_tokens=6077 completion_tokens=356 total_tokens=6433
+15:46:13 - LiteLLM:INFO: utils.py:4336 -
+LiteLLM completion() model= gpt-4o-mini; provider = openai
+INFO:LiteLLM:
+LiteLLM completion() model= gpt-4o-mini; provider = openai
+INFO:aml.metrics:provider_call kind=llm stage=search.listwise.repair model=gpt-4o-mini status=ok attempt=1 retries=0 duration_s=0.999 prompt_tokens=4994 completion_tokens=21 total_tokens=5015
+15:46:14 - LiteLLM:INFO: utils.py:4336 -
+LiteLLM completion() model= gpt-4o-mini; provider = openai
+INFO:LiteLLM:
+LiteLLM completion() model= gpt-4o-mini; provider = openai
+INFO:aml.metrics:provider_call kind=llm stage=search.listwise.repair model=gpt-4o-mini status=ok attempt=1 retries=0 duration_s=1.433 prompt_tokens=4994 completion_tokens=21 total_tokens=5015
+15:46:16 - LiteLLM:INFO: utils.py:4336 -
+LiteLLM completion() model= gpt-4o-mini; provider = openai
+INFO:LiteLLM:
+LiteLLM completion() model= gpt-4o-mini; provider = openai
+INFO:aml.metrics:provider_call kind=llm stage=search.listwise.recovery model=gpt-4o-mini status=ok attempt=1 retries=0 duration_s=2.618 prompt_tokens=3305 completion_tokens=234 total_tokens=3539
+15:46:18 - LiteLLM:INFO: utils.py:4336 -
+LiteLLM completion() model= gpt-4o-mini; provider = openai
+INFO:LiteLLM:
+LiteLLM completion() model= gpt-4o-mini; provider = openai
+INFO:aml.metrics:provider_call kind=llm stage=search.listwise.recovery model=gpt-4o-mini status=ok attempt=1 retries=0 duration_s=3.738 prompt_tokens=4826 completion_tokens=198 total_tokens=5024
+INFO:     127.0.0.1:41320 - "POST /search HTTP/1.1" 200 OK
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [235141]

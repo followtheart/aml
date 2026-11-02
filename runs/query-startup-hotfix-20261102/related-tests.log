@@ -1,0 +1,19 @@
+test_configured_limit_preserves_successful_plan (selftest_query_startup.PlanningDeadlineTests.test_configured_limit_preserves_successful_plan) ... ok
+test_exhausted_total_budget_is_not_swallowed_as_fallback (selftest_query_startup.PlanningDeadlineTests.test_exhausted_total_budget_is_not_swallowed_as_fallback) ... ok
+test_external_cancellation_propagates (selftest_query_startup.PlanningDeadlineTests.test_external_cancellation_propagates) ... ok
+test_remaining_search_budget_caps_provider_timeout (selftest_query_startup.PlanningDeadlineTests.test_remaining_search_budget_caps_provider_timeout) ... ok
+test_stage_timeout_cancels_call_and_falls_back (selftest_query_startup.PlanningDeadlineTests.test_stage_timeout_cancels_call_and_falls_back) ... query understanding failed error_type=TimeoutError elapsed_s=0.021 limit_s=0.020; passthrough
+ok
+test_fake_mode_never_loads_provider (selftest_query_startup.ProviderStartupTests.test_fake_mode_never_loads_provider) ... ok
+test_import_failure_prevents_readiness (selftest_query_startup.ProviderStartupTests.test_import_failure_prevents_readiness) ... ok
+test_readiness_waits_for_import_without_blocking_event_loop (selftest_query_startup.ProviderStartupTests.test_readiness_waits_for_import_without_blocking_event_loop) ... ok
+test_sdk_preparation_resolves_entry_points_without_calling_them (selftest_query_startup.ProviderStartupTests.test_sdk_preparation_resolves_entry_points_without_calling_them) ... ok
+test_existing_database_migration_preserves_source_results (selftest_source_join.SourceJoinTests.test_existing_database_migration_preserves_source_results) ... ok
+test_unlinked_memories_do_not_multiply_source_lookup_work (selftest_source_join.SourceJoinTests.test_unlinked_memories_do_not_multiply_source_lookup_work) ... ok
+test_query_understanding_uses_supplied_reference_time (selftest_search.SearchTests.test_query_understanding_uses_supplied_reference_time) ... ok
+test_search_deadline_is_configurable_and_bounded (selftest_search.SearchTests.test_search_deadline_is_configurable_and_bounded) ... ok
+
+----------------------------------------------------------------------
+Ran 13 tests in 0.400s
+
+OK

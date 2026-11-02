@@ -1,0 +1,13 @@
+{
+  "started_at": "2026-11-02T07:43:37.519001+00:00",
+  "stage_limit_s": 8.0,
+  "scope": "fresh process; real first query-understanding call after SDK-only startup preparation",
+  "sdk_startup_s": 5.952,
+  "planning_s": 3.938,
+  "planning_error": null,
+  "intent": "fact",
+  "sub_queries": 1,
+  "provider_calls": 1,
+  "provider_tokens": 1295,
+  "passed": true
+}

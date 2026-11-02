@@ -1,0 +1,19 @@
+{
+  "comparisons": 384,
+  "exact_matches": 384,
+  "compared": "entire returned dictionaries, including order, scores and content",
+  "dimensions": [
+    "user isolation",
+    "English MATCH",
+    "Chinese LIKE",
+    "k=1/2/5/50",
+    "source diversity",
+    "history",
+    "sensitive",
+    "cold",
+    "suppressed/stale/retracted records",
+    "shared sources",
+    "cross-user corrupt link"
+  ],
+  "passed": true
+}

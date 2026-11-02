@@ -1,0 +1,7 @@
+{
+  "source": "/root/aml/memory_system/memory.db",
+  "snapshot_at": "2026-11-02T07:19:21.339531+00:00",
+  "bytes": 4302774272,
+  "copy_elapsed_s": 81.81,
+  "method": "Pinned read-only SQLite online backup; no production writes"
+}

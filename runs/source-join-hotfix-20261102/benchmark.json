@@ -1,0 +1,360 @@
+{
+  "baseline_commit": "4e00cab",
+  "index_create_s": 14.575,
+  "timeout_per_query_s": 20,
+  "source_recall_diversity": true,
+  "scope": "source_search only; one full-corpus production snapshot; no provider calls",
+  "order": "all candidate queries first, then all baseline queries; no cache eviction",
+  "cases": [
+    {
+      "label": "failed-query-spec-0",
+      "query_sha256": "dfd068bf16ce2fea6603100faf9b41f513438c69aa369e4be8ab442e12a59c6b",
+      "candidate": {
+        "status": "timeout",
+        "timeout_s": 20,
+        "elapsed_s": 20.028806,
+        "approximate_sqlite_steps": 649000,
+        "query_plan": [
+          "SCAN source_fts VIRTUAL TABLE INDEX 0:M4",
+          "SEARCH s USING INDEX sqlite_autoindex_source_messages_1 (request_id=? AND message_index=?)",
+          "SEARCH l USING COVERING INDEX idx_amu_sources_source (request_id=? AND message_index=?)",
+          "SEARCH a USING INDEX sqlite_autoindex_amu_1 (id=?)",
+          "USE TEMP B-TREE FOR ORDER BY"
+        ]
+      },
+      "baseline": {
+        "status": "timeout",
+        "timeout_s": 20,
+        "elapsed_s": 20.000369,
+        "approximate_sqlite_steps": 12992000,
+        "query_plan": [
+          "SCAN source_fts VIRTUAL TABLE INDEX 0:M4",
+          "SEARCH s USING INDEX sqlite_autoindex_source_messages_1 (request_id=? AND message_index=?)",
+          "SEARCH a USING INDEX idx_amu_user_type (user_id=?)",
+          "SEARCH l USING COVERING INDEX sqlite_autoindex_amu_sources_1 (amu_id=? AND request_id=? AND message_index=?)",
+          "USE TEMP B-TREE FOR ORDER BY"
+        ]
+      }
+    },
+    {
+      "label": "failed-query-spec-1",
+      "query_sha256": "283b6ce92b4129e83771975b6a956a1d7ef8e4e2e006da493c3d332a322457f6",
+      "candidate": {
+        "status": "ok",
+        "returned": 60,
+        "digest": "d3247b72d8fdf7958817b9ef4fbe617aefa0fff0c5a3436e6d2efd0ccbfdf7b3",
+        "elapsed_s": 2.607152,
+        "approximate_sqlite_steps": 244000,
+        "query_plan": [
+          "SCAN source_fts VIRTUAL TABLE INDEX 0:M4",
+          "SEARCH s USING INDEX sqlite_autoindex_source_messages_1 (request_id=? AND message_index=?)",
+          "SEARCH l USING COVERING INDEX idx_amu_sources_source (request_id=? AND message_index=?)",
+          "SEARCH a USING INDEX sqlite_autoindex_amu_1 (id=?)",
+          "USE TEMP B-TREE FOR ORDER BY"
+        ]
+      },
+      "baseline": {
+        "status": "timeout",
+        "timeout_s": 20,
+        "elapsed_s": 20.000515,
+        "approximate_sqlite_steps": 31201000,
+        "query_plan": [
+          "SCAN source_fts VIRTUAL TABLE INDEX 0:M4",
+          "SEARCH s USING INDEX sqlite_autoindex_source_messages_1 (request_id=? AND message_index=?)",
+          "SEARCH a USING INDEX idx_amu_user_type (user_id=?)",
+          "SEARCH l USING COVERING INDEX sqlite_autoindex_amu_sources_1 (amu_id=? AND request_id=? AND message_index=?)",
+          "USE TEMP B-TREE FOR ORDER BY"
+        ]
+      }
+    },
+    {
+      "label": "failed-query-spec-2",
+      "query_sha256": "95d8f915f088f69097c62c1ee3b3c1c14be43a7ee08b878c475f8aa2c0ad3f53",
+      "candidate": {
+        "status": "ok",
+        "returned": 60,
+        "digest": "c909c00ae22b09d5746007c3aa1193363ef1d1588faedf094554477a2232fc17",
+        "elapsed_s": 0.121131,
+        "approximate_sqlite_steps": 225000,
+        "query_plan": [
+          "SCAN source_fts VIRTUAL TABLE INDEX 0:M4",
+          "SEARCH s USING INDEX sqlite_autoindex_source_messages_1 (request_id=? AND message_index=?)",
+          "SEARCH l USING COVERING INDEX idx_amu_sources_source (request_id=? AND message_index=?)",
+          "SEARCH a USING INDEX sqlite_autoindex_amu_1 (id=?)",
+          "USE TEMP B-TREE FOR ORDER BY"
+        ]
+      },
+      "baseline": {
+        "status": "timeout",
+        "timeout_s": 20,
+        "elapsed_s": 20.000545,
+        "approximate_sqlite_steps": 31611000,
+        "query_plan": [
+          "SCAN source_fts VIRTUAL TABLE INDEX 0:M4",
+          "SEARCH s USING INDEX sqlite_autoindex_source_messages_1 (request_id=? AND message_index=?)",
+          "SEARCH a USING INDEX idx_amu_user_type (user_id=?)",
+          "SEARCH l USING COVERING INDEX sqlite_autoindex_amu_sources_1 (amu_id=? AND request_id=? AND message_index=?)",
+          "USE TEMP B-TREE FOR ORDER BY"
+        ]
+      }
+    },
+    {
+      "label": "failed-query-spec-3",
+      "query_sha256": "46b14b71eb36197f60b13b136bbec676e09e79727249b8e367017f3bfeaaf977",
+      "candidate": {
+        "status": "ok",
+        "returned": 60,
+        "digest": "68caf423ddbc97ae7626042ddc09c8e3b04878e364a2174567f555469ad6568b",
+        "elapsed_s": 0.248234,
+        "approximate_sqlite_steps": 232000,
+        "query_plan": [
+          "SCAN source_fts VIRTUAL TABLE INDEX 0:M4",
+          "SEARCH s USING INDEX sqlite_autoindex_source_messages_1 (request_id=? AND message_index=?)",
+          "SEARCH l USING COVERING INDEX idx_amu_sources_source (request_id=? AND message_index=?)",
+          "SEARCH a USING INDEX sqlite_autoindex_amu_1 (id=?)",
+          "USE TEMP B-TREE FOR ORDER BY"
+        ]
+      },
+      "baseline": {
+        "status": "timeout",
+        "timeout_s": 20,
+        "elapsed_s": 20.00102,
+        "approximate_sqlite_steps": 31937000,
+        "query_plan": [
+          "SCAN source_fts VIRTUAL TABLE INDEX 0:M4",
+          "SEARCH s USING INDEX sqlite_autoindex_source_messages_1 (request_id=? AND message_index=?)",
+          "SEARCH a USING INDEX idx_amu_user_type (user_id=?)",
+          "SEARCH l USING COVERING INDEX sqlite_autoindex_amu_sources_1 (amu_id=? AND request_id=? AND message_index=?)",
+          "USE TEMP B-TREE FOR ORDER BY"
+        ]
+      }
+    },
+    {
+      "label": "failed-query-spec-4",
+      "query_sha256": "ac7ac741e2e96aa79db61323a98fbdaa8e641886b143f25afdf375c23d75dc48",
+      "candidate": {
+        "status": "ok",
+        "returned": 60,
+        "digest": "333c6bcbf23fdfb2435a19821f115c17eccf86ff0529448d152e477d756e322e",
+        "elapsed_s": 0.118377,
+        "approximate_sqlite_steps": 224000,
+        "query_plan": [
+          "SCAN source_fts VIRTUAL TABLE INDEX 0:M4",
+          "SEARCH s USING INDEX sqlite_autoindex_source_messages_1 (request_id=? AND message_index=?)",
+          "SEARCH l USING COVERING INDEX idx_amu_sources_source (request_id=? AND message_index=?)",
+          "SEARCH a USING INDEX sqlite_autoindex_amu_1 (id=?)",
+          "USE TEMP B-TREE FOR ORDER BY"
+        ]
+      },
+      "baseline": {
+        "status": "timeout",
+        "timeout_s": 20,
+        "elapsed_s": 20.000171,
+        "approximate_sqlite_steps": 32010000,
+        "query_plan": [
+          "SCAN source_fts VIRTUAL TABLE INDEX 0:M4",
+          "SEARCH s USING INDEX sqlite_autoindex_source_messages_1 (request_id=? AND message_index=?)",
+          "SEARCH a USING INDEX idx_amu_user_type (user_id=?)",
+          "SEARCH l USING COVERING INDEX sqlite_autoindex_amu_sources_1 (amu_id=? AND request_id=? AND message_index=?)",
+          "USE TEMP B-TREE FOR ORDER BY"
+        ]
+      }
+    },
+    {
+      "label": "failed-query-spec-5",
+      "query_sha256": "b30f9dd051a8b57c70d522060bf1c2cc05230db5cbd0d328b855093da85e61aa",
+      "candidate": {
+        "status": "ok",
+        "returned": 60,
+        "digest": "328b83a26e29c5ee4a3c603c774eb30b1c861462146198fb2ffbc90ba340d62f",
+        "elapsed_s": 0.109068,
+        "approximate_sqlite_steps": 225000,
+        "query_plan": [
+          "SCAN source_fts VIRTUAL TABLE INDEX 0:M4",
+          "SEARCH s USING INDEX sqlite_autoindex_source_messages_1 (request_id=? AND message_index=?)",
+          "SEARCH l USING COVERING INDEX idx_amu_sources_source (request_id=? AND message_index=?)",
+          "SEARCH a USING INDEX sqlite_autoindex_amu_1 (id=?)",
+          "USE TEMP B-TREE FOR ORDER BY"
+        ]
+      },
+      "baseline": {
+        "status": "timeout",
+        "timeout_s": 20,
+        "elapsed_s": 20.000465,
+        "approximate_sqlite_steps": 32146000,
+        "query_plan": [
+          "SCAN source_fts VIRTUAL TABLE INDEX 0:M4",
+          "SEARCH s USING INDEX sqlite_autoindex_source_messages_1 (request_id=? AND message_index=?)",
+          "SEARCH a USING INDEX idx_amu_user_type (user_id=?)",
+          "SEARCH l USING COVERING INDEX sqlite_autoindex_amu_sources_1 (amu_id=? AND request_id=? AND message_index=?)",
+          "USE TEMP B-TREE FOR ORDER BY"
+        ]
+      }
+    },
+    {
+      "label": "failed-query-spec-6",
+      "query_sha256": "5737dec029d857b0771a081ed88a0c1e12039b75acbd921c0aa49954f8d41b17",
+      "candidate": {
+        "status": "ok",
+        "returned": 60,
+        "digest": "582e1f9d3de886dc4fd27d46b59ed659de761281b804ce068d2efd2d25b28065",
+        "elapsed_s": 5.732954,
+        "approximate_sqlite_steps": 517000,
+        "query_plan": [
+          "SCAN source_fts VIRTUAL TABLE INDEX 0:M4",
+          "SEARCH s USING INDEX sqlite_autoindex_source_messages_1 (request_id=? AND message_index=?)",
+          "SEARCH l USING COVERING INDEX idx_amu_sources_source (request_id=? AND message_index=?)",
+          "SEARCH a USING INDEX sqlite_autoindex_amu_1 (id=?)",
+          "USE TEMP B-TREE FOR ORDER BY"
+        ]
+      },
+      "baseline": {
+        "status": "timeout",
+        "timeout_s": 20,
+        "elapsed_s": 20.00188,
+        "approximate_sqlite_steps": 30300000,
+        "query_plan": [
+          "SCAN source_fts VIRTUAL TABLE INDEX 0:M4",
+          "SEARCH s USING INDEX sqlite_autoindex_source_messages_1 (request_id=? AND message_index=?)",
+          "SEARCH a USING INDEX idx_amu_user_type (user_id=?)",
+          "SEARCH l USING COVERING INDEX sqlite_autoindex_amu_sources_1 (amu_id=? AND request_id=? AND message_index=?)",
+          "USE TEMP B-TREE FOR ORDER BY"
+        ]
+      }
+    },
+    {
+      "label": "failed-query-spec-7",
+      "query_sha256": "6253caab2621c687b0bce61124e6982d2ed6ed84543ca0b4088b449cb3ca4407",
+      "candidate": {
+        "status": "ok",
+        "returned": 60,
+        "digest": "ca37de7b9501537a6ef46ec0c064ea168a3463e18993586431323ed5060fc0ce",
+        "elapsed_s": 0.478709,
+        "approximate_sqlite_steps": 257000,
+        "query_plan": [
+          "SCAN source_fts VIRTUAL TABLE INDEX 0:M4",
+          "SEARCH s USING INDEX sqlite_autoindex_source_messages_1 (request_id=? AND message_index=?)",
+          "SEARCH l USING COVERING INDEX idx_amu_sources_source (request_id=? AND message_index=?)",
+          "SEARCH a USING INDEX sqlite_autoindex_amu_1 (id=?)",
+          "USE TEMP B-TREE FOR ORDER BY"
+        ]
+      },
+      "baseline": {
+        "status": "timeout",
+        "timeout_s": 20,
+        "elapsed_s": 20.000466,
+        "approximate_sqlite_steps": 31178000,
+        "query_plan": [
+          "SCAN source_fts VIRTUAL TABLE INDEX 0:M4",
+          "SEARCH s USING INDEX sqlite_autoindex_source_messages_1 (request_id=? AND message_index=?)",
+          "SEARCH a USING INDEX idx_amu_user_type (user_id=?)",
+          "SEARCH l USING COVERING INDEX sqlite_autoindex_amu_sources_1 (amu_id=? AND request_id=? AND message_index=?)",
+          "USE TEMP B-TREE FOR ORDER BY"
+        ]
+      }
+    },
+    {
+      "label": "narrow-source-term-0",
+      "query_sha256": "5e5a447cb59a47ca81bfc979bfc9811b9ed75c916c1b561ba940f3ce169122f6",
+      "candidate": {
+        "status": "ok",
+        "returned": 2,
+        "digest": "abf04eecf7432839d8e417f9a75a6feb244d91210c49e0a2047426f1d87956ab",
+        "elapsed_s": 0.012977,
+        "approximate_sqlite_steps": 2000,
+        "query_plan": [
+          "SCAN source_fts VIRTUAL TABLE INDEX 0:M4",
+          "SEARCH s USING INDEX sqlite_autoindex_source_messages_1 (request_id=? AND message_index=?)",
+          "SEARCH l USING COVERING INDEX idx_amu_sources_source (request_id=? AND message_index=?)",
+          "SEARCH a USING INDEX sqlite_autoindex_amu_1 (id=?)",
+          "USE TEMP B-TREE FOR ORDER BY"
+        ]
+      },
+      "baseline": {
+        "status": "ok",
+        "returned": 2,
+        "digest": "abf04eecf7432839d8e417f9a75a6feb244d91210c49e0a2047426f1d87956ab",
+        "elapsed_s": 0.124226,
+        "approximate_sqlite_steps": 164000,
+        "query_plan": [
+          "SCAN source_fts VIRTUAL TABLE INDEX 0:M4",
+          "SEARCH s USING INDEX sqlite_autoindex_source_messages_1 (request_id=? AND message_index=?)",
+          "SEARCH a USING INDEX idx_amu_user_type (user_id=?)",
+          "SEARCH l USING COVERING INDEX sqlite_autoindex_amu_sources_1 (amu_id=? AND request_id=? AND message_index=?)",
+          "USE TEMP B-TREE FOR ORDER BY"
+        ]
+      },
+      "exact_output_match": true
+    },
+    {
+      "label": "narrow-source-term-1",
+      "query_sha256": "210f5343a055e354a3ba4366cd1b6ca5c173ac5d7801d4cc1541e8a0a9dca486",
+      "candidate": {
+        "status": "ok",
+        "returned": 2,
+        "digest": "4b09be2bc927842617a2f3359ed3ad7666c75421f0b25a953df25f0cfb7cd234",
+        "elapsed_s": 0.005498,
+        "approximate_sqlite_steps": 0,
+        "query_plan": [
+          "SCAN source_fts VIRTUAL TABLE INDEX 0:M4",
+          "SEARCH s USING INDEX sqlite_autoindex_source_messages_1 (request_id=? AND message_index=?)",
+          "SEARCH l USING COVERING INDEX idx_amu_sources_source (request_id=? AND message_index=?)",
+          "SEARCH a USING INDEX sqlite_autoindex_amu_1 (id=?)",
+          "USE TEMP B-TREE FOR ORDER BY"
+        ]
+      },
+      "baseline": {
+        "status": "ok",
+        "returned": 2,
+        "digest": "4b09be2bc927842617a2f3359ed3ad7666c75421f0b25a953df25f0cfb7cd234",
+        "elapsed_s": 0.109372,
+        "approximate_sqlite_steps": 166000,
+        "query_plan": [
+          "SCAN source_fts VIRTUAL TABLE INDEX 0:M4",
+          "SEARCH s USING INDEX sqlite_autoindex_source_messages_1 (request_id=? AND message_index=?)",
+          "SEARCH a USING INDEX idx_amu_user_type (user_id=?)",
+          "SEARCH l USING COVERING INDEX sqlite_autoindex_amu_sources_1 (amu_id=? AND request_id=? AND message_index=?)",
+          "USE TEMP B-TREE FOR ORDER BY"
+        ]
+      },
+      "exact_output_match": true
+    },
+    {
+      "label": "narrow-source-term-2",
+      "query_sha256": "41d6f409e16df120072157a07914438b60dad481bf412fd9e6858f426e11d504",
+      "candidate": {
+        "status": "ok",
+        "returned": 2,
+        "digest": "4e99f8139b797bb7dd3d255e75d84d9c11f0bd0a19b3d5da0466f45a895adc52",
+        "elapsed_s": 0.009857,
+        "approximate_sqlite_steps": 0,
+        "query_plan": [
+          "SCAN source_fts VIRTUAL TABLE INDEX 0:M4",
+          "SEARCH s USING INDEX sqlite_autoindex_source_messages_1 (request_id=? AND message_index=?)",
+          "SEARCH l USING COVERING INDEX idx_amu_sources_source (request_id=? AND message_index=?)",
+          "SEARCH a USING INDEX sqlite_autoindex_amu_1 (id=?)",
+          "USE TEMP B-TREE FOR ORDER BY"
+        ]
+      },
+      "baseline": {
+        "status": "ok",
+        "returned": 2,
+        "digest": "4e99f8139b797bb7dd3d255e75d84d9c11f0bd0a19b3d5da0466f45a895adc52",
+        "elapsed_s": 0.14445,
+        "approximate_sqlite_steps": 164000,
+        "query_plan": [
+          "SCAN source_fts VIRTUAL TABLE INDEX 0:M4",
+          "SEARCH s USING INDEX sqlite_autoindex_source_messages_1 (request_id=? AND message_index=?)",
+          "SEARCH a USING INDEX idx_amu_user_type (user_id=?)",
+          "SEARCH l USING COVERING INDEX sqlite_autoindex_amu_sources_1 (amu_id=? AND request_id=? AND message_index=?)",
+          "USE TEMP B-TREE FOR ORDER BY"
+        ]
+      },
+      "exact_output_match": true
+    }
+  ],
+  "completed_pairs": 3,
+  "matched_pairs": 3,
+  "candidate_timeouts": 1,
+  "baseline_timeouts": 8
+}

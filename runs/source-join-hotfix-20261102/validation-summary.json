@@ -1,0 +1,8 @@
+{
+  "existing_tests": 78,
+  "existing_failure_entries": 14,
+  "identical_baseline_failures": true,
+  "new_failure_entries": 0,
+  "new_source_join_tests_passed": 2,
+  "equivalence_cases": 384
+}

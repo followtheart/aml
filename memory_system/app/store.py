@@ -158,6 +158,8 @@ CREATE TABLE IF NOT EXISTS amu_sources (
  PRIMARY KEY(amu_id, request_id, message_index)
 );
 CREATE INDEX IF NOT EXISTS idx_sources_amu ON amu_sources(amu_id);
+CREATE INDEX IF NOT EXISTS idx_amu_sources_source
+ ON amu_sources(request_id, message_index, amu_id);
 """
 
 FTS_SCHEMA = """
@@ -864,13 +866,17 @@ class Store(ProvenanceStore):
         diverse = config.SOURCE_RECALL_DIVERSITY
         seen_sources, deferred = set(), {}
         with self._lock:
+            # Follow each matched source's links before looking up AMUs by id.
+            # SQLite can otherwise scan every AMU owned by this user per source.
+            # CROSS JOIN pins that order; all eligibility filters still apply.
             cursor = self.conn.execute(f"""SELECT a.id, s.request_id, s.message_index,
                   s.source_event_id, {rank_sql} AS rank
                 FROM source_fts
                 JOIN source_messages s ON s.request_id=source_fts.request_id
                   AND s.message_index=source_fts.message_index
-                JOIN amu_sources l ON l.request_id=s.request_id AND l.message_index=s.message_index
-                JOIN amu a ON a.id=l.amu_id
+                JOIN amu_sources l INDEXED BY idx_amu_sources_source
+                  ON l.request_id=s.request_id AND l.message_index=s.message_index
+                CROSS JOIN amu a ON a.id=l.amu_id
                 WHERE {match_sql} AND source_fts.user_id=? AND a.user_id=?
                   AND s.user_id=? AND (? OR a.valid_to IS NULL)
                   AND (? OR (a.sensitivity!='sensitive' AND s.sensitivity!='sensitive'))

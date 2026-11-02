@@ -1,0 +1,21 @@
+{
+  "arm": "baseline",
+  "tests_run": 78,
+  "failures": [
+    "selftest_evidence_recovery.RecoveryTests.test_constraints_do_not_consume_evidence_slots_but_obey_byte_budget",
+    "selftest_evidence_recovery.RecoveryTests.test_coverage_reservation_and_ce_promote_candidate_beyond_coarse_head",
+    "selftest_evidence_recovery.RecoveryTests.test_invalid_listwise_permutations_fall_back_to_ce_order (ranking=[0, 0])",
+    "selftest_evidence_recovery.RecoveryTests.test_invalid_listwise_permutations_fall_back_to_ce_order (ranking=[0, 9])",
+    "selftest_evidence_recovery.RecoveryTests.test_invalid_listwise_permutations_fall_back_to_ce_order (ranking=[0, True])",
+    "selftest_evidence_recovery.RecoveryTests.test_invalid_listwise_permutations_fall_back_to_ce_order (ranking=[0])",
+    "selftest_evidence_recovery.RecoveryTests.test_source_only_match_reaches_reranker_and_answer",
+    "selftest_retrieval_quality.QualityTests.test_all_irrelevant_returns_no_evidence_but_keeps_forget_constraint",
+    "selftest_retrieval_quality.QualityTests.test_mixed_scores_keep_useful_bridge_and_drop_topic_only_noise",
+    "selftest_retrieval_quality.QualityTests.test_negative_ce_logits_are_not_treated_as_probability_thresholds",
+    "selftest_retrieval_quality.QualityTests.test_partial_batch_failure_is_visible_in_response_and_packet",
+    "selftest_retrieval_quality.QualityTests.test_rare_option_outside_graph_head_survives_each_bounded_rerank_stage",
+    "selftest_retrieval_quality.QualityTests.test_recovered_listwise_is_distinguished_from_degraded_search",
+    "selftest_retrieval_quality.QualityTests.test_unscored_tail_cannot_refill_packet_after_noise_filter"
+  ],
+  "errors": []
+}

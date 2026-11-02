@@ -1,0 +1,9 @@
+{"remaining_pages": 874354, "total_pages": 1050482, "elapsed_s": 10.02}
+{"remaining_pages": 760690, "total_pages": 1050482, "elapsed_s": 20.07}
+{"remaining_pages": 633714, "total_pages": 1050482, "elapsed_s": 30.11}
+{"remaining_pages": 509810, "total_pages": 1050482, "elapsed_s": 40.17}
+{"remaining_pages": 400242, "total_pages": 1050482, "elapsed_s": 50.21}
+{"remaining_pages": 269170, "total_pages": 1050482, "elapsed_s": 60.22}
+{"remaining_pages": 125810, "total_pages": 1050482, "elapsed_s": 70.3}
+{"remaining_pages": 0, "total_pages": 1050482, "elapsed_s": 81.81}
+{"source": "/root/aml/memory_system/memory.db", "snapshot_at": "2026-11-02T07:19:21.339531+00:00", "bytes": 4302774272, "copy_elapsed_s": 81.81, "method": "Pinned read-only SQLite online backup; no production writes"}

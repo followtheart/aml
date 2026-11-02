@@ -1,0 +1,310 @@
+test_assistant_only_advice_is_not_a_user_rule (selftest_evidence_recovery.RecoveryTests.test_assistant_only_advice_is_not_a_user_rule) ... ok
+test_coalesced_preferences_keep_all_source_provenance (selftest_evidence_recovery.RecoveryTests.test_coalesced_preferences_keep_all_source_provenance) ... ok
+test_constraints_do_not_consume_evidence_slots_but_obey_byte_budget (selftest_evidence_recovery.RecoveryTests.test_constraints_do_not_consume_evidence_slots_but_obey_byte_budget) ... FAIL
+test_coverage_reservation_and_ce_promote_candidate_beyond_coarse_head (selftest_evidence_recovery.RecoveryTests.test_coverage_reservation_and_ce_promote_candidate_beyond_coarse_head) ... FAIL
+test_document_episode_keeps_full_original_once (selftest_evidence_recovery.RecoveryTests.test_document_episode_keeps_full_original_once) ... ok
+test_excerpt_keeps_nearby_subject_and_negation (selftest_evidence_recovery.RecoveryTests.test_excerpt_keeps_nearby_subject_and_negation) ... ok
+test_fashion_draft_beats_editorial_messages (selftest_evidence_recovery.RecoveryTests.test_fashion_draft_beats_editorial_messages) ... ok
+test_graph_actual_seed_recovers_neighbor_without_literal_query_match (selftest_evidence_recovery.RecoveryTests.test_graph_actual_seed_recovers_neighbor_without_literal_query_match) ... ok
+test_invalid_listwise_permutations_fall_back_to_ce_order (selftest_evidence_recovery.RecoveryTests.test_invalid_listwise_permutations_fall_back_to_ce_order) ...
+  test_invalid_listwise_permutations_fall_back_to_ce_order (selftest_evidence_recovery.RecoveryTests.test_invalid_listwise_permutations_fall_back_to_ce_order) (ranking=[0]) ... FAIL
+  test_invalid_listwise_permutations_fall_back_to_ce_order (selftest_evidence_recovery.RecoveryTests.test_invalid_listwise_permutations_fall_back_to_ce_order) (ranking=[0, 0]) ... FAIL
+  test_invalid_listwise_permutations_fall_back_to_ce_order (selftest_evidence_recovery.RecoveryTests.test_invalid_listwise_permutations_fall_back_to_ce_order) (ranking=[0, True]) ... FAIL
+  test_invalid_listwise_permutations_fall_back_to_ce_order (selftest_evidence_recovery.RecoveryTests.test_invalid_listwise_permutations_fall_back_to_ce_order) (ranking=[0, 9]) ... FAIL
+test_legacy_source_index_backfill_is_idempotent (selftest_evidence_recovery.RecoveryTests.test_legacy_source_index_backfill_is_idempotent) ... ok
+test_rejected_claim_retains_original_not_meta_summary (selftest_evidence_recovery.RecoveryTests.test_rejected_claim_retains_original_not_meta_summary) ... extraction fact rejected segment_start=0 fact_index=0 source_indices=[0] reason=Ungrounded extraction result
+extraction fact rejected segment_start=0 fact_index=0 source_indices=[0] reason=Ungrounded extraction result
+extraction fact rejected segment_start=0 fact_index=0 source_indices=[0] reason=Ungrounded extraction result
+ok
+test_same_wording_with_different_known_times_is_not_coalesced (selftest_evidence_recovery.RecoveryTests.test_same_wording_with_different_known_times_is_not_coalesced) ... ok
+test_source_index_staged_rollback_snapshot_and_purge (selftest_evidence_recovery.RecoveryTests.test_source_index_staged_rollback_snapshot_and_purge) ... ok
+test_source_only_match_reaches_reranker_and_answer (selftest_evidence_recovery.RecoveryTests.test_source_only_match_reaches_reranker_and_answer) ... Executing <Task pending name='Task-64' coro=<RecoveryTests.test_source_only_match_reaches_reranker_and_answer() running at /root/aml/memory_system/scripts/selftest_evidence_recovery.py:45> wait_for=<Future pending cb=[Task.task_wakeup()] created at /usr/lib/python3.14/asyncio/base_events.py:459> cb=[_run_until_complete_cb() at /usr/lib/python3.14/asyncio/base_events.py:181] created at /usr/lib/python3.14/asyncio/runners.py:109> took 0.100 seconds
+FAIL
+test_source_search_cjk (selftest_evidence_recovery.RecoveryTests.test_source_search_cjk) ... ok
+test_source_search_privacy_user_cold_and_current_gates (selftest_evidence_recovery.RecoveryTests.test_source_search_privacy_user_cold_and_current_gates) ... ok
+test_context_retained_without_support_or_score_promotion (selftest_recall_context.ContextContract.test_context_retained_without_support_or_score_promotion) ... ok
+test_repeated_question_cannot_borrow_another_historys_snippet (selftest_recall_context.ReferenceIdentity.test_repeated_question_cannot_borrow_another_historys_snippet) ... ok
+test_diversity_before_per_query_cutoff (selftest_recall_context.SourceDiversity.test_diversity_before_per_query_cutoff) ... ok
+test_privacy_history_and_fill_are_preserved (selftest_recall_context.SourceDiversity.test_privacy_history_and_fill_are_preserved) ... ok
+test_activity_survives_embedded_identity (selftest_recall_context.TopicAnchors.test_activity_survives_embedded_identity) ... ok
+test_bounded_and_optional (selftest_recall_context.TopicAnchors.test_bounded_and_optional) ... ok
+test_later_detail_after_premise_is_searchable (selftest_recall_context.TopicAnchors.test_later_detail_after_premise_is_searchable) ... ok
+test_negation_and_conditions_are_not_rewritten_as_facts (selftest_recall_context.TopicAnchors.test_negation_and_conditions_are_not_rewritten_as_facts) ... ok
+test_disabled_approximation_keeps_large_pool_exact (selftest_search_storage.SearchStorageTests.test_disabled_approximation_keeps_large_pool_exact) ... ok
+test_external_embedding_changes_and_space_changes_are_visible (selftest_search_storage.SearchStorageTests.test_external_embedding_changes_and_space_changes_are_visible) ... ok
+test_file_snapshot_does_not_copy_user_tables (selftest_search_storage.SearchStorageTests.test_file_snapshot_does_not_copy_user_tables) ... ok
+test_index_built_from_old_snapshot_after_purge_is_not_republished (selftest_search_storage.SearchStorageTests.test_index_built_from_old_snapshot_after_purge_is_not_republished) ... ok
+test_large_index_rebuilds_after_external_vector_update_without_revision (selftest_search_storage.SearchStorageTests.test_large_index_rebuilds_after_external_vector_update_without_revision) ... ok
+test_large_index_refilters_new_sensitive_and_cold_metadata (selftest_search_storage.SearchStorageTests.test_large_index_refilters_new_sensitive_and_cold_metadata) ... ok
+test_large_index_uses_exact_small_eligible_pool_after_restriction (selftest_search_storage.SearchStorageTests.test_large_index_uses_exact_small_eligible_pool_after_restriction) ... ok
+test_new_snapshot_metadata_is_current_after_matrix_was_used (selftest_search_storage.SearchStorageTests.test_new_snapshot_metadata_is_current_after_matrix_was_used) ... ok
+test_new_snapshot_refilters_changed_eligibility_without_revision_bump (selftest_search_storage.SearchStorageTests.test_new_snapshot_refilters_changed_eligibility_without_revision_bump) ... ok
+test_new_snapshot_refilters_scene_assignment_without_revision_bump (selftest_search_storage.SearchStorageTests.test_new_snapshot_refilters_scene_assignment_without_revision_bump) ... ok
+test_small_vector_topk_matches_numpy_reference (selftest_search_storage.SearchStorageTests.test_small_vector_topk_matches_numpy_reference) ... ok
+test_snapshot_cannot_read_another_users_feedback_or_open_their_snapshot (selftest_search_storage.SearchStorageTests.test_snapshot_cannot_read_another_users_feedback_or_open_their_snapshot) ... ok
+test_snapshot_id_sources_scene_and_dependencies_are_user_scoped (selftest_search_storage.SearchStorageTests.test_snapshot_id_sources_scene_and_dependencies_are_user_scoped) ... ok
+test_snapshot_is_consistent_while_another_connection_commits (selftest_search_storage.SearchStorageTests.test_snapshot_is_consistent_while_another_connection_commits) ... ok
+test_snapshot_is_read_only (selftest_search_storage.SearchStorageTests.test_snapshot_is_read_only) ... ok
+test_snapshot_min_revision_and_future_time_are_enforced (selftest_search_storage.SearchStorageTests.test_snapshot_min_revision_and_future_time_are_enforced) ... ok
+test_snapshot_purge_guard_observes_live_epoch (selftest_search_storage.SearchStorageTests.test_snapshot_purge_guard_observes_live_epoch) ... ok
+test_vector_empty_zero_limit_and_dimension_errors (selftest_search_storage.SearchStorageTests.test_vector_empty_zero_limit_and_dimension_errors) ... ok
+test_vector_ties_are_deterministic_by_id (selftest_search_storage.SearchStorageTests.test_vector_ties_are_deterministic_by_id) ... ok
+test_cancelled_worker_finishes_before_snapshot_connection_closes (selftest_search_storage.SearchWorkerTests.test_cancelled_worker_finishes_before_snapshot_connection_closes) ... ok
+test_expired_budget_does_not_start_local_call (selftest_search_storage.SearchWorkerTests.test_expired_budget_does_not_start_local_call) ... ok
+test_explicit_budget_cancellation_does_not_start_local_call (selftest_search_storage.SearchWorkerTests.test_explicit_budget_cancellation_does_not_start_local_call) ... ok
+test_search_rechecks_live_epoch_after_snapshot_cleanup (selftest_search_storage.SearchWorkerTests.test_search_rechecks_live_epoch_after_snapshot_cleanup) ... ok
+test_worker_checks_deadline_after_blocking_phase (selftest_search_storage.SearchWorkerTests.test_worker_checks_deadline_after_blocking_phase) ... ok
+test_cascade_does_not_readmit_new_heads_into_old_coarse_quota (selftest_porter_recall.CoarsePreservationTests.test_cascade_does_not_readmit_new_heads_into_old_coarse_quota) ... ok
+test_disabled_path_does_no_database_or_index_work (selftest_porter_recall.CoarsePreservationTests.test_disabled_path_does_no_database_or_index_work) ... ok
+test_extension_preserves_old_rows_eligibility_and_bounded_new_work (selftest_porter_recall.CoarsePreservationTests.test_extension_preserves_old_rows_eligibility_and_bounded_new_work) ... ok
+test_failed_optional_index_leaves_original_candidates_and_relations_intact (selftest_porter_recall.CoarsePreservationTests.test_failed_optional_index_leaves_original_candidates_and_relations_intact) ... ok
+test_all_original_source_filters_and_user_boundary_apply (selftest_porter_recall.PorterViewTests.test_all_original_source_filters_and_user_boundary_apply) ... ok
+test_cancelled_budget_cannot_build_or_return_optional_recall (selftest_porter_recall.PorterViewTests.test_cancelled_budget_cannot_build_or_return_optional_recall) ... ok
+test_historical_projection_does_not_read_latest_claim_text (selftest_porter_recall.PorterViewTests.test_historical_projection_does_not_read_latest_claim_text) ... ok
+test_stemming_is_retrieval_only_and_parent_snapshot_remains_read_only (selftest_porter_recall.PorterViewTests.test_stemming_is_retrieval_only_and_parent_snapshot_remains_read_only) ... ok
+test_all_irrelevant_returns_no_evidence_but_keeps_forget_constraint (selftest_retrieval_quality.QualityTests.test_all_irrelevant_returns_no_evidence_but_keeps_forget_constraint) ... FAIL
+test_asserted_and_inferred_preferences_are_not_coalesced (selftest_retrieval_quality.QualityTests.test_asserted_and_inferred_preferences_are_not_coalesced) ... ok
+test_cjk_ranks_before_limit_and_preserves_mixed_language (selftest_retrieval_quality.QualityTests.test_cjk_ranks_before_limit_and_preserves_mixed_language) ... ok
+test_cjk_source_route_ranks_by_overlap_not_random_id (selftest_retrieval_quality.QualityTests.test_cjk_source_route_ranks_by_overlap_not_random_id) ... ok
+test_cold_scene_can_supply_evidence_in_same_pass (selftest_retrieval_quality.QualityTests.test_cold_scene_can_supply_evidence_in_same_pass) ... ok
+test_disputed_vector_hit_keeps_conflict_and_attribution_metadata (selftest_retrieval_quality.QualityTests.test_disputed_vector_hit_keeps_conflict_and_attribution_metadata) ... ok
+test_duplicate_ids_within_routes_do_not_amplify_graph_prior (selftest_retrieval_quality.QualityTests.test_duplicate_ids_within_routes_do_not_amplify_graph_prior) ... ok
+test_english_question_words_do_not_recall_unrelated_memories (selftest_retrieval_quality.QualityTests.test_english_question_words_do_not_recall_unrelated_memories) ... ok
+test_episode_with_additional_context_survives (selftest_retrieval_quality.QualityTests.test_episode_with_additional_context_survives) ... ok
+test_expansion_routes_do_not_outvote_two_direct_channels (selftest_retrieval_quality.QualityTests.test_expansion_routes_do_not_outvote_two_direct_channels) ... ok
+test_forget_constraints_survive_route_capacity (selftest_retrieval_quality.QualityTests.test_forget_constraints_survive_route_capacity) ... ok
+test_invalid_rerank_has_bounded_coherent_fallback (selftest_retrieval_quality.QualityTests.test_invalid_rerank_has_bounded_coherent_fallback) ... ok
+test_many_source_links_do_not_starve_distinct_memories (selftest_retrieval_quality.QualityTests.test_many_source_links_do_not_starve_distinct_memories) ... ok
+test_mixed_scores_keep_useful_bridge_and_drop_topic_only_noise (selftest_retrieval_quality.QualityTests.test_mixed_scores_keep_useful_bridge_and_drop_topic_only_noise) ... FAIL
+test_negative_ce_logits_are_not_treated_as_probability_thresholds (selftest_retrieval_quality.QualityTests.test_negative_ce_logits_are_not_treated_as_probability_thresholds) ... FAIL
+test_partial_batch_failure_is_visible_in_response_and_packet (selftest_retrieval_quality.QualityTests.test_partial_batch_failure_is_visible_in_response_and_packet) ... FAIL
+test_query_variants_use_ranks_not_incomparable_bm25_scores (selftest_retrieval_quality.QualityTests.test_query_variants_use_ranks_not_incomparable_bm25_scores) ... ok
+test_rare_option_outside_graph_head_survives_each_bounded_rerank_stage (selftest_retrieval_quality.QualityTests.test_rare_option_outside_graph_head_survives_each_bounded_rerank_stage) ... FAIL
+test_recovered_listwise_is_distinguished_from_degraded_search (selftest_retrieval_quality.QualityTests.test_recovered_listwise_is_distinguished_from_degraded_search) ... FAIL
+test_redundant_episode_does_not_consume_an_evidence_slot (selftest_retrieval_quality.QualityTests.test_redundant_episode_does_not_consume_an_evidence_slot) ... ok
+test_unrelated_profile_has_no_lexical_route_boost (selftest_retrieval_quality.QualityTests.test_unrelated_profile_has_no_lexical_route_boost) ... ok
+test_unscored_tail_cannot_refill_packet_after_noise_filter (selftest_retrieval_quality.QualityTests.test_unscored_tail_cannot_refill_packet_after_noise_filter) ... FAIL
+
+======================================================================
+FAIL: test_constraints_do_not_consume_evidence_slots_but_obey_byte_budget (selftest_evidence_recovery.RecoveryTests.test_constraints_do_not_consume_evidence_slots_but_obey_byte_budget)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/root/aml/memory_system/scripts/selftest_evidence_recovery.py", line 240, in test_constraints_do_not_consume_evidence_slots_but_obey_byte_budget
+    self.assertEqual((len(packet), manifest['evidence_count'], manifest['constraint_count']), (56, 50, 6))
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: Tuples differ: (50, 44, 6) != (56, 50, 6)
+
+First differing element 0:
+50
+56
+
+- (50, 44, 6)
++ (56, 50, 6)
+
+======================================================================
+FAIL: test_coverage_reservation_and_ce_promote_candidate_beyond_coarse_head (selftest_evidence_recovery.RecoveryTests.test_coverage_reservation_and_ce_promote_candidate_beyond_coarse_head)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/usr/lib/python3.14/asyncio/runners.py", line 127, in run
+    return self._loop.run_until_complete(task)
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^
+  File "/usr/lib/python3.14/asyncio/base_events.py", line 719, in run_until_complete
+    return future.result()
+           ~~~~~~~~~~~~~^^
+  File "/root/aml/memory_system/scripts/selftest_evidence_recovery.py", line 165, in test_coverage_reservation_and_ce_promote_candidate_beyond_coarse_head
+    self.assertEqual(len(set(submitted)), 50)
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: 58 != 50
+
+======================================================================
+FAIL: test_invalid_listwise_permutations_fall_back_to_ce_order (selftest_evidence_recovery.RecoveryTests.test_invalid_listwise_permutations_fall_back_to_ce_order) (ranking=[0])
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/root/aml/memory_system/scripts/selftest_evidence_recovery.py", line 183, in test_invalid_listwise_permutations_fall_back_to_ce_order
+    self.assertEqual(call.call_count, 2)
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^
+AssertionError: 3 != 2
+
+======================================================================
+FAIL: test_invalid_listwise_permutations_fall_back_to_ce_order (selftest_evidence_recovery.RecoveryTests.test_invalid_listwise_permutations_fall_back_to_ce_order) (ranking=[0, 0])
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/root/aml/memory_system/scripts/selftest_evidence_recovery.py", line 183, in test_invalid_listwise_permutations_fall_back_to_ce_order
+    self.assertEqual(call.call_count, 2)
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^
+AssertionError: 3 != 2
+
+======================================================================
+FAIL: test_invalid_listwise_permutations_fall_back_to_ce_order (selftest_evidence_recovery.RecoveryTests.test_invalid_listwise_permutations_fall_back_to_ce_order) (ranking=[0, True])
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/root/aml/memory_system/scripts/selftest_evidence_recovery.py", line 183, in test_invalid_listwise_permutations_fall_back_to_ce_order
+    self.assertEqual(call.call_count, 2)
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^
+AssertionError: 3 != 2
+
+======================================================================
+FAIL: test_invalid_listwise_permutations_fall_back_to_ce_order (selftest_evidence_recovery.RecoveryTests.test_invalid_listwise_permutations_fall_back_to_ce_order) (ranking=[0, 9])
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/root/aml/memory_system/scripts/selftest_evidence_recovery.py", line 183, in test_invalid_listwise_permutations_fall_back_to_ce_order
+    self.assertEqual(call.call_count, 2)
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^
+AssertionError: 3 != 2
+
+======================================================================
+FAIL: test_source_only_match_reaches_reranker_and_answer (selftest_evidence_recovery.RecoveryTests.test_source_only_match_reaches_reranker_and_answer)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/usr/lib/python3.14/asyncio/runners.py", line 127, in run
+    return self._loop.run_until_complete(task)
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^
+  File "/usr/lib/python3.14/asyncio/base_events.py", line 719, in run_until_complete
+    return future.result()
+           ~~~~~~~~~~~~~^^
+  File "/root/aml/memory_system/scripts/selftest_evidence_recovery.py", line 46, in test_source_only_match_reaches_reranker_and_answer
+    self.assertEqual(call.call_count, 1)
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^
+AssertionError: 3 != 1
+
+======================================================================
+FAIL: test_all_irrelevant_returns_no_evidence_but_keeps_forget_constraint (selftest_retrieval_quality.QualityTests.test_all_irrelevant_returns_no_evidence_but_keeps_forget_constraint)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/usr/lib/python3.14/asyncio/runners.py", line 127, in run
+    return self._loop.run_until_complete(task)
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^
+  File "/usr/lib/python3.14/asyncio/base_events.py", line 719, in run_until_complete
+    return future.result()
+           ~~~~~~~~~~~~~^^
+  File "/root/aml/memory_system/scripts/selftest_retrieval_quality.py", line 215, in test_all_irrelevant_returns_no_evidence_but_keeps_forget_constraint
+    self.assertEqual([x.id for x in result.data], [rule])
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: Lists differ: ['amu_4d8c4c23a2b14968', 'amu_ffaf04816ac641e9'] != ['amu_4d8c4c23a2b14968']
+
+First list contains 1 additional elements.
+First extra element 1:
+'amu_ffaf04816ac641e9'
+
+- ['amu_4d8c4c23a2b14968', 'amu_ffaf04816ac641e9']
++ ['amu_4d8c4c23a2b14968']
+
+======================================================================
+FAIL: test_mixed_scores_keep_useful_bridge_and_drop_topic_only_noise (selftest_retrieval_quality.QualityTests.test_mixed_scores_keep_useful_bridge_and_drop_topic_only_noise)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/usr/lib/python3.14/asyncio/runners.py", line 127, in run
+    return self._loop.run_until_complete(task)
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^
+  File "/usr/lib/python3.14/asyncio/base_events.py", line 719, in run_until_complete
+    return future.result()
+           ~~~~~~~~~~~~~^^
+  File "/root/aml/memory_system/scripts/selftest_retrieval_quality.py", line 198, in test_mixed_scores_keep_useful_bridge_and_drop_topic_only_noise
+    self.assertEqual({x.id for x in result.data}, {gold, bridge})
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: Items in the first set but not the second:
+'amu_e76b117403744e0d'
+'amu_0f87d9ff74fb429e'
+'amu_9f964cb9e6804f80'
+'amu_bf4031acbc39437c'
+'amu_068bb0252e1e43cd'
+'amu_054e316353674ad5'
+'amu_33c16d2b627e41af'
+'amu_403d32f80cc44717'
+'amu_678bf0c1a4b243ff'
+'amu_6276b705b45d464f'
+'amu_6fd6b337ad004688'
+'amu_df3c1963c8a64c7c'
+
+======================================================================
+FAIL: test_negative_ce_logits_are_not_treated_as_probability_thresholds (selftest_retrieval_quality.QualityTests.test_negative_ce_logits_are_not_treated_as_probability_thresholds)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/usr/lib/python3.14/asyncio/runners.py", line 127, in run
+    return self._loop.run_until_complete(task)
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^
+  File "/usr/lib/python3.14/asyncio/base_events.py", line 719, in run_until_complete
+    return future.result()
+           ~~~~~~~~~~~~~^^
+  File "/root/aml/memory_system/scripts/selftest_retrieval_quality.py", line 209, in test_negative_ce_logits_are_not_treated_as_probability_thresholds
+    self.assertEqual(result.coverage_manifest['cascade']['listwise']['status'], 'ok')
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: 'fallback' != 'ok'
+- fallback
++ ok
+
+
+======================================================================
+FAIL: test_partial_batch_failure_is_visible_in_response_and_packet (selftest_retrieval_quality.QualityTests.test_partial_batch_failure_is_visible_in_response_and_packet)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/usr/lib/python3.14/asyncio/runners.py", line 127, in run
+    return self._loop.run_until_complete(task)
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^
+  File "/usr/lib/python3.14/asyncio/base_events.py", line 719, in run_until_complete
+    return future.result()
+           ~~~~~~~~~~~~~^^
+  File "/root/aml/memory_system/scripts/selftest_retrieval_quality.py", line 239, in test_partial_batch_failure_is_visible_in_response_and_packet
+    self.assertTrue(all(c.score_kind == 'listwise' for c in result.data if c.score is None))
+    ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: False is not true
+
+======================================================================
+FAIL: test_rare_option_outside_graph_head_survives_each_bounded_rerank_stage (selftest_retrieval_quality.QualityTests.test_rare_option_outside_graph_head_survives_each_bounded_rerank_stage)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/usr/lib/python3.14/asyncio/runners.py", line 127, in run
+    return self._loop.run_until_complete(task)
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^
+  File "/usr/lib/python3.14/asyncio/base_events.py", line 719, in run_until_complete
+    return future.result()
+           ~~~~~~~~~~~~~^^
+  File "/root/aml/memory_system/scripts/selftest_retrieval_quality.py", line 141, in test_rare_option_outside_graph_head_survives_each_bounded_rerank_stage
+    self.assertEqual(call.call_count, 1)
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^
+AssertionError: 2 != 1
+
+======================================================================
+FAIL: test_recovered_listwise_is_distinguished_from_degraded_search (selftest_retrieval_quality.QualityTests.test_recovered_listwise_is_distinguished_from_degraded_search)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/usr/lib/python3.14/asyncio/runners.py", line 127, in run
+    return self._loop.run_until_complete(task)
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^
+  File "/usr/lib/python3.14/asyncio/base_events.py", line 719, in run_until_complete
+    return future.result()
+           ~~~~~~~~~~~~~^^
+  File "/root/aml/memory_system/scripts/selftest_retrieval_quality.py", line 258, in test_recovered_listwise_is_distinguished_from_degraded_search
+    self.assertEqual(result.coverage_manifest['rerank_status'], 'recovered')
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: 'partial' != 'recovered'
+- partial
++ recovered
+
+
+======================================================================
+FAIL: test_unscored_tail_cannot_refill_packet_after_noise_filter (selftest_retrieval_quality.QualityTests.test_unscored_tail_cannot_refill_packet_after_noise_filter)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/usr/lib/python3.14/asyncio/runners.py", line 127, in run
+    return self._loop.run_until_complete(task)
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^
+  File "/usr/lib/python3.14/asyncio/base_events.py", line 719, in run_until_complete
+    return future.result()
+           ~~~~~~~~~~~~~^^
+  File "/root/aml/memory_system/scripts/selftest_retrieval_quality.py", line 269, in test_unscored_tail_cannot_refill_packet_after_noise_filter
+    self.assertEqual(result.data, [])
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^
+AssertionError: Lists differ: [SearchItem(id='amu_9c02119975c44670', con[1994 chars]n=4)] != []
+
+First list contains 5 additional elements.
+First extra element 0:
+SearchItem(id='amu_9c02119975c44670', content='Alice clue 39', score=-3.0, score_kind='cross_encoder', coverage_ids=['question'], created_at='2026-11-02T07:23:52.847728+00:00', memory_type='fact', is_constraint=False, equivalent_ids=[], personal_evidence=False, sources=[], source_count=0, temporal=None, packet_hash='e99def014f1c2bfe1d27b5221715a85a0cbae00e8a61944cd4e5f53b30ea4b94', packet_hash_version=4)
+
+Diff is 2061 characters long. Set self.maxDiff to None to see it.
+
+----------------------------------------------------------------------
+Ran 78 tests in 3.696s
+
+FAILED (failures=14)
+{"arm": "baseline", "tests_run": 78, "failures": ["selftest_evidence_recovery.RecoveryTests.test_constraints_do_not_consume_evidence_slots_but_obey_byte_budget", "selftest_evidence_recovery.RecoveryTests.test_coverage_reservation_and_ce_promote_candidate_beyond_coarse_head", "selftest_evidence_recovery.RecoveryTests.test_invalid_listwise_permutations_fall_back_to_ce_order (ranking=[0, 0])", "selftest_evidence_recovery.RecoveryTests.test_invalid_listwise_permutations_fall_back_to_ce_order (ranking=[0, 9])", "selftest_evidence_recovery.RecoveryTests.test_invalid_listwise_permutations_fall_back_to_ce_order (ranking=[0, True])", "selftest_evidence_recovery.RecoveryTests.test_invalid_listwise_permutations_fall_back_to_ce_order (ranking=[0])", "selftest_evidence_recovery.RecoveryTests.test_source_only_match_reaches_reranker_and_answer", "selftest_retrieval_quality.QualityTests.test_all_irrelevant_returns_no_evidence_but_keeps_forget_constraint", "selftest_retrieval_quality.QualityTests.test_mixed_scores_keep_useful_bridge_and_drop_topic_only_noise", "selftest_retrieval_quality.QualityTests.test_negative_ce_logits_are_not_treated_as_probability_thresholds", "selftest_retrieval_quality.QualityTests.test_partial_batch_failure_is_visible_in_response_and_packet", "selftest_retrieval_quality.QualityTests.test_rare_option_outside_graph_head_survives_each_bounded_rerank_stage", "selftest_retrieval_quality.QualityTests.test_recovered_listwise_is_distinguished_from_degraded_search", "selftest_retrieval_quality.QualityTests.test_unscored_tail_cannot_refill_packet_after_noise_filter"], "errors": []}

@@ -153,6 +153,7 @@ CREATE TABLE IF NOT EXISTS source_messages (
  role TEXT NOT NULL, content TEXT NOT NULL, timestamp INTEGER,
  PRIMARY KEY(request_id, message_index)
 );
+CREATE INDEX IF NOT EXISTS idx_source_messages_user ON source_messages(user_id);
 CREATE TABLE IF NOT EXISTS amu_sources (
  amu_id TEXT NOT NULL, request_id TEXT NOT NULL, message_index INTEGER NOT NULL,
  PRIMARY KEY(amu_id, request_id, message_index)
@@ -850,12 +851,26 @@ class Store(ProvenanceStore):
         if not tokens:
             return []
         rank_args = []
+        source_scope_sql, source_scope_args = '', ()
         if re.search(r'[\u3400-\u9fff]{2}', query):
-            match_sql = '(' + ' OR '.join('source_fts.content LIKE ?' for _ in tokens) + ')'
+            # Neither LIKE nor the UNINDEXED user_id can constrain FTS5's
+            # inverted index. Search the same immutable source text through the user
+            # index instead, before following links. Keep every source in scope:
+            # no date window, pre-limit, or change to the matching/score rules.
+            source_from_sql = '''source_messages s INDEXED BY idx_source_messages_user
+                CROSS JOIN amu_sources l INDEXED BY idx_amu_sources_source
+                  ON l.request_id=s.request_id AND l.message_index=s.message_index'''
+            match_sql = '(' + ' OR '.join('s.content LIKE ?' for _ in tokens) + ')'
             match_args = [f'%{t}%' for t in tokens]
-            rank_sql = '-(' + ' + '.join('(source_fts.content LIKE ?)' for _ in tokens) + ')'
+            rank_sql = '-(' + ' + '.join('(s.content LIKE ?)' for _ in tokens) + ')'
             rank_args = match_args
         else:
+            source_from_sql = '''source_fts
+                JOIN source_messages s ON s.request_id=source_fts.request_id
+                  AND s.message_index=source_fts.message_index
+                JOIN amu_sources l INDEXED BY idx_amu_sources_source
+                  ON l.request_id=s.request_id AND l.message_index=s.message_index'''
+            source_scope_sql, source_scope_args = ' AND source_fts.user_id=?', (user_id,)
             match_sql = 'source_fts MATCH ?'
             match_args = [' OR '.join('"' + t.replace('"', '""') + '"' for t in tokens[:40])]
             rank_sql = 'bm25(source_fts)'
@@ -871,20 +886,16 @@ class Store(ProvenanceStore):
             # CROSS JOIN pins that order; all eligibility filters still apply.
             cursor = self.conn.execute(f"""SELECT a.id, s.request_id, s.message_index,
                   s.source_event_id, {rank_sql} AS rank
-                FROM source_fts
-                JOIN source_messages s ON s.request_id=source_fts.request_id
-                  AND s.message_index=source_fts.message_index
-                JOIN amu_sources l INDEXED BY idx_amu_sources_source
-                  ON l.request_id=s.request_id AND l.message_index=s.message_index
+                FROM {source_from_sql}
                 CROSS JOIN amu a ON a.id=l.amu_id
-                WHERE {match_sql} AND source_fts.user_id=? AND a.user_id=?
-                  AND s.user_id=? AND (? OR a.valid_to IS NULL)
+                WHERE {match_sql} AND a.user_id=? AND s.user_id=?{source_scope_sql}
+                  AND (? OR a.valid_to IS NULL)
                   AND (? OR (a.sensitivity!='sensitive' AND s.sensitivity!='sensitive'))
                   AND a.sensitivity!='suppressed' AND s.sensitivity!='suppressed'
                   AND a.view_status='ready' AND a.resolution_status!='retracted'
                   AND (? OR a.tier!='cold')
                 ORDER BY rank, a.id""",
-                (*rank_args, *match_args, user_id, user_id, user_id, include_history, include_sensitive,
+                (*rank_args, *match_args, user_id, user_id, *source_scope_args, include_history, include_sensitive,
                  include_cold))
             # Keep the original eligibility joins for every source and claim.
             # A source already represented by a selected AMU consumes no extra
